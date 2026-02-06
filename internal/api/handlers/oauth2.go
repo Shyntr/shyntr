@@ -10,9 +10,11 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -26,16 +28,48 @@ func NewOAuth2Handler(p *auth.Provider, db *gorm.DB, km *auth.KeyManager) *OAuth
 	return &OAuth2Handler{Provider: p, DB: db, KeyMgr: km}
 }
 
-// Authorize handles the OAuth2 authorize endpoint.
+// Helper to get issuer for the current tenant
+func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		// Fallback or error? For now, fallback to base
+		return strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
+	}
+	base := strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
+	return fmt.Sprintf("%s/t/%s", base, tenantID)
+}
+
 func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	ctx := c.Request.Context()
+
+	// Fosite Authorize Request handling
 	ar, err := h.Provider.Fosite.NewAuthorizeRequest(ctx, c.Request)
 	if err != nil {
 		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, err)
 		return
 	}
 
-	// 1. Session Check
+	// VALIDATE TENANT: The client MUST belong to the tenant in the URL
+	tenantID := c.Param("tenant_id")
+	clientID := ar.GetClient().GetID()
+
+	var client models.OAuth2Client
+	if err := h.DB.First(&client, "id = ? AND tenant_id = ?", clientID, tenantID).Error; err != nil {
+		// Client does not exist in this tenant context
+		logger.Log.Warn("Client/Tenant mismatch or not found",
+			zap.String("client_id", clientID),
+			zap.String("tenant_id", tenantID))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
+		return
+	}
+
+	// BROKER FLOW:
+	// Instead of checking cookie, we redirect to External Login UI with a challenge.
+	// For MVP simplicity (as requested), we are keeping internal DB check but
+	// structurally preparing for the split.
+	//
+	// TODO: Replace this cookie check with "Login Challenge" generation and redirect to ExternalLoginURL.
+
 	userID := ""
 	cookie, err := c.Cookie(consts.SessionCookieName)
 	if err == nil && cookie != "" {
@@ -43,33 +77,29 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	if userID == "" {
-		loginURL := "/login?return_to=" + c.Request.URL.String()
+		// Redirect to our "External" Login UI (which might be internal routes for now)
+		// We pass the tenant_id so the UI knows where to post back or which look & feel to load
+		loginURL := fmt.Sprintf("/auth/login?return_to=%s&tenant_id=%s", c.Request.URL.String(), tenantID)
 		c.Redirect(http.StatusFound, loginURL)
 		return
 	}
 
-	// 2. Client Consent Check
-	clientID := ar.GetClient().GetID()
-	var client models.OAuth2Client
-	if err := h.DB.First(&client, "id = ?", clientID).Error; err == nil {
-		// If client is NOT trusted (SkipConsent=false) AND user hasn't explicitly consented recently
-		// For MVP: We just check SkipConsent. If false, redirect to consent page.
-		// NOTE: In a full implementation, we would check a "Consent" table here.
-		if !client.SkipConsent {
-			// Check if we came back from consent page with a flag (simplified)
-			if c.Query("consent_verifier") != "approved" {
-				consentURL := fmt.Sprintf("/consent?client_id=%s&scopes=%s&return_to=%s",
-					clientID, strings.Join(ar.GetRequestedScopes(), " "), c.Request.URL.String())
-				c.Redirect(http.StatusFound, consentURL)
-				return
-			}
+	// Consent Check logic...
+	if !client.SkipConsent {
+		if c.Query("consent_verifier") != "approved" {
+			consentURL := fmt.Sprintf("/auth/consent?client_id=%s&scopes=%s&return_to=%s&tenant_id=%s",
+				clientID, strings.Join(ar.GetRequestedScopes(), " "), c.Request.URL.String(), tenantID)
+			c.Redirect(http.StatusFound, consentURL)
+			return
 		}
 	}
 
-	// 3. Create OIDC Session
+	// Construct Session with Dynamic Issuer
+	issuer := h.getIssuer(c)
+
 	session := &openid.DefaultSession{
 		Claims: &jwt.IDTokenClaims{
-			Issuer:      h.Provider.Config.IDTokenIssuer,
+			Issuer:      issuer, // Dynamic Issuer
 			Subject:     userID,
 			Audience:    ar.GetRequestedAudience(),
 			ExpiresAt:   time.Now().Add(h.Provider.Config.IDTokenLifespan),
@@ -85,11 +115,13 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		Subject: userID,
 	}
 
+	// Enrich claims
 	var user models.User
 	if err := h.DB.First(&user, "id = ?", userID).Error; err == nil {
 		session.Claims.Add("name", user.FirstName+" "+user.LastName)
 		session.Claims.Add("email", user.Email)
 		session.Claims.Add("email_verified", true)
+		session.Claims.Add("tenant_id", tenantID) // Include tenant in token
 	}
 
 	for _, scope := range ar.GetRequestedScopes() {
@@ -108,7 +140,6 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	h.Provider.Fosite.WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
-// Token handles the OAuth2 token endpoint.
 func (h *OAuth2Handler) Token(c *gin.Context) {
 	ctx := c.Request.Context()
 	session := &openid.DefaultSession{}
@@ -117,6 +148,8 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
+
+	// Note: You might want to validate Tenant match here too if strict isolation is needed at Token level.
 
 	response, err := h.Provider.Fosite.NewAccessResponse(ctx, ar)
 	if err != nil {
@@ -175,13 +208,10 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		"sub":            user.ID,
 		"email":          user.Email,
 		"name":           user.FirstName + " " + user.LastName,
-		"given_name":     user.FirstName,
-		"family_name":    user.LastName,
 		"email_verified": true,
 	})
 }
 
-// Jwks returns keys from KeyManager
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
 	privKey := h.KeyMgr.GetActivePrivateKey()
 	jwks := auth.GeneratePublicJWKS(privKey)
@@ -189,8 +219,8 @@ func (h *OAuth2Handler) Jwks(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) Discover(c *gin.Context) {
-	issuer := h.Provider.Config.IDTokenIssuer
-	issuer = strings.TrimRight(issuer, "/")
+	issuer := h.getIssuer(c)
+
 	c.JSON(200, gin.H{
 		"issuer":                                issuer,
 		"authorization_endpoint":                issuer + "/oauth2/auth",
@@ -204,6 +234,6 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 		"scopes_supported":                      []string{"openid", "offline", "profile", "email"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
-		"claims_supported":                      []string{"sub", "iss", "name", "email", "email_verified"},
+		"claims_supported":                      []string{"sub", "iss", "name", "email", "email_verified", "tenant_id"},
 	})
 }

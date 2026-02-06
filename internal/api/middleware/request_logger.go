@@ -8,16 +8,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
 )
 
 // W3C Trace Context Constants
 const (
-	TraceParentHeader = "traceparent"
-	TraceStateHeader  = "tracestate"
-	Version           = "00"
-	FlagsSampled      = "01"
+	Version      = "00"
+	FlagsSampled = "01"
 )
 
 // TraceContext holds the parsed trace information
@@ -29,17 +28,24 @@ type TraceContext struct {
 
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tc := extractOrGenerateTraceContext(c.GetHeader(TraceParentHeader))
+		// Use constants from pkg/consts
+		tc := extractOrGenerateTraceContext(c.GetHeader(consts.HeaderTraceParent))
 
 		newTraceParent := fmt.Sprintf("%s-%s-%s-%s", Version, tc.TraceID, tc.SpanID, FlagsSampled)
 
-		c.Set("TraceID", tc.TraceID)
-		c.Set("SpanID", tc.SpanID)
+		// Set Context values using constants
+		c.Set(consts.ContextKeyTraceID, tc.TraceID)
+		c.Set(consts.ContextKeySpanID, tc.SpanID)
 
-		c.Header(TraceParentHeader, newTraceParent)
-		if state := c.GetHeader(TraceStateHeader); state != "" {
-			c.Header(TraceStateHeader, state)
+		// Set Response Headers using constants
+		c.Header(consts.HeaderTraceParent, newTraceParent)
+		if state := c.GetHeader(consts.HeaderTraceState); state != "" {
+			c.Header(consts.HeaderTraceState, state)
 		}
+
+		// Also set X-Request-ID for backward compatibility/logging convenience
+		c.Set(consts.ContextKeyRequestID, tc.TraceID)
+		c.Header("X-Request-ID", tc.TraceID)
 
 		start := time.Now()
 		path := c.Request.URL.Path

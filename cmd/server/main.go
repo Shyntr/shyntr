@@ -12,6 +12,7 @@ import (
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/router"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/core/worker"
 	"github.com/nevzatcirak/shyntr/internal/data"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
@@ -48,11 +49,11 @@ func main() {
 	}
 
 	var createClientCmd = &cobra.Command{
-		Use:   "create-client [id] [secret]",
+		Use:   "create-client [tenant_id] [client_id] [secret]",
 		Short: "Create a new OAuth2 Client",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
-			createClient(args[0], args[1])
+			createClient(args[0], args[1], args[2])
 		},
 	}
 
@@ -87,9 +88,10 @@ func main() {
 
 func runServer() {
 	cfg := config.LoadConfig()
-	logger.Log.Info("Starting Shyntr",
+	logger.Log.Info("Starting Shyntr Broker",
 		zap.String("port", cfg.Port),
-		zap.String("issuer_url", cfg.IssuerURL),
+		zap.String("base_issuer", cfg.BaseIssuerURL),
+		zap.String("external_login", cfg.ExternalLoginURL),
 	)
 
 	db, err := data.ConnectDB(cfg.DSN)
@@ -97,14 +99,13 @@ func runServer() {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
 
-	// Initialize Key Manager
 	keyMgr := auth.NewKeyManager(db, cfg)
-
-	// Initialize Auth Provider with Key Manager
 	var authProvider *auth.Provider
-	authProvider = auth.NewProvider(db, []byte(cfg.AppSecret), cfg.IssuerURL, keyMgr)
+	authProvider = auth.NewProvider(db, []byte(cfg.AppSecret), cfg.BaseIssuerURL, keyMgr)
 
-	// Start Background Worker
+	// Placeholder SAML
+	_ = saml.NewService(db)
+
 	worker.StartCleanupJob(db)
 
 	r := router.SetupRoutes(db, authProvider, cfg, keyMgr)
@@ -146,7 +147,7 @@ func runMigrations() {
 	logger.Log.Info("Migrations applied successfully.")
 }
 
-func createClient(id, secret string) {
+func createClient(tenantID, id, secret string) {
 	db := getDBConnection()
 	hashedSecret, err := crypto.HashPassword(secret)
 	if err != nil {
@@ -155,9 +156,10 @@ func createClient(id, secret string) {
 
 	client := models.OAuth2Client{
 		ID:            id,
+		TenantID:      tenantID,
 		Secret:        hashedSecret,
 		RedirectURIs:  pq.StringArray{"http://localhost:8080/callback"},
-		GrantTypes:    pq.StringArray{"authorization_code", "refresh_token"},
+		GrantTypes:    pq.StringArray{"authorization_code", "refresh_token", "client_credentials"},
 		ResponseTypes: pq.StringArray{"code", "token", "id_token"},
 		Scopes:        pq.StringArray{"openid", "offline", "profile", "email"},
 		Public:        false,
@@ -169,7 +171,7 @@ func createClient(id, secret string) {
 	if err := db.Save(&client).Error; err != nil {
 		logger.Log.Fatal("Failed to create client", zap.Error(err))
 	}
-	logger.Log.Info("Client created", zap.String("client_id", id))
+	logger.Log.Info("Client created", zap.String("client_id", id), zap.String("tenant_id", tenantID))
 }
 
 func rotateClientSecret(id, newSecret string) {

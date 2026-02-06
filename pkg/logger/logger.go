@@ -40,6 +40,6 @@ func InitLogger() {
 // Sync flushes any buffered log entries.
 func Sync() {
 	if Log != nil {
-		Log.Sync()
+		_ = Log.Sync() // Ignore error on sync (common in stdout logging)
 	}
 }

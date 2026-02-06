@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +14,7 @@ func NewConsentHandler() *ConsentHandler {
 	return &ConsentHandler{}
 }
 
-// ShowConsent displays the consent UI (JSON for MVP).
+// ShowConsent displays the consent UI.
 func (h *ConsentHandler) ShowConsent(c *gin.Context) {
 	clientID := c.Query("client_id")
 	scopes := c.Query("scopes")
@@ -45,23 +46,10 @@ func (h *ConsentHandler) SubmitConsent(c *gin.Context) {
 	}
 
 	if req.Action == "allow" {
-		// In production, we would sign this return URL or store consent in DB.
-		// For MVP, we simply redirect back with a flag.
-		// Appending consent_verifier=approved to the original URL.
 		separator := "?"
-		if len(req.ReturnTo) > 0 && (req.ReturnTo[len(req.ReturnTo)-1] != '?') {
-			if http.ParseTime != nil { // Dummy check, logic below
-			}
-			// Simple logic to append query param
-			if fmt.Sprintf("%v", req.ReturnTo) != "" {
-				// Basic check if ? exists
-				for _, char := range req.ReturnTo {
-					if char == '?' {
-						separator = "&"
-						break
-					}
-				}
-			}
+		// Simple logic to check if URL already has parameters
+		if strings.Contains(req.ReturnTo, "?") {
+			separator = "&"
 		}
 
 		redirectURL := fmt.Sprintf("%s%sconsent_verifier=approved", req.ReturnTo, separator)
