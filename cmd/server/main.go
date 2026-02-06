@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/router"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/worker"
 	"github.com/nevzatcirak/shyntr/internal/data"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
@@ -23,7 +23,6 @@ import (
 )
 
 func main() {
-	// Initialize Structured Logger
 	logger.InitLogger()
 	defer logger.Sync()
 
@@ -40,6 +39,14 @@ func main() {
 		},
 	}
 
+	var migrateCmd = &cobra.Command{
+		Use:   "migrate",
+		Short: "Run database migrations",
+		Run: func(cmd *cobra.Command, args []string) {
+			runMigrations()
+		},
+	}
+
 	var createClientCmd = &cobra.Command{
 		Use:   "create-client [id] [secret]",
 		Short: "Create a new OAuth2 Client",
@@ -49,20 +56,12 @@ func main() {
 		},
 	}
 
-	var listClientsCmd = &cobra.Command{
-		Use:   "list-clients",
-		Short: "List all registered OAuth2 Clients",
+	var rotateSecretCmd = &cobra.Command{
+		Use:   "rotate-secret [client_id] [new_secret]",
+		Short: "Rotate Client Secret (Overwrites old one)",
+		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			listClients()
-		},
-	}
-
-	var deleteClientCmd = &cobra.Command{
-		Use:   "delete-client [id]",
-		Short: "Delete an OAuth2 Client by ID",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			deleteClient(args[0])
+			rotateClientSecret(args[0], args[1])
 		},
 	}
 
@@ -76,9 +75,9 @@ func main() {
 	}
 
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(createClientCmd)
-	rootCmd.AddCommand(listClientsCmd)
-	rootCmd.AddCommand(deleteClientCmd)
+	rootCmd.AddCommand(rotateSecretCmd)
 	rootCmd.AddCommand(createUserCmd)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -95,15 +94,20 @@ func runServer() {
 
 	db, err := data.ConnectDB(cfg.DSN)
 	if err != nil {
-		logger.Log.Error("Database connection failed", zap.Error(err))
+		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
 
+	// Initialize Key Manager
+	keyMgr := auth.NewKeyManager(db, cfg)
+
+	// Initialize Auth Provider with Key Manager
 	var authProvider *auth.Provider
-	if db != nil {
-		authProvider = auth.NewProvider(db, []byte(cfg.AppSecret), cfg.IssuerURL)
-	}
+	authProvider = auth.NewProvider(db, []byte(cfg.AppSecret), cfg.IssuerURL, keyMgr)
 
-	r := router.SetupRoutes(db, authProvider, cfg)
+	// Start Background Worker
+	worker.StartCleanupJob(db)
+
+	r := router.SetupRoutes(db, authProvider, cfg, keyMgr)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -130,7 +134,17 @@ func runServer() {
 	logger.Log.Info("Server exiting")
 }
 
-// --- CLI Handlers ---
+func runMigrations() {
+	cfg := config.LoadConfig()
+	db, err := data.ConnectDB(cfg.DSN)
+	if err != nil {
+		logger.Log.Fatal("Database connection failed", zap.Error(err))
+	}
+	if err := data.MigrateDB(db); err != nil {
+		logger.Log.Fatal("Migration failed", zap.Error(err))
+	}
+	logger.Log.Info("Migrations applied successfully.")
+}
 
 func createClient(id, secret string) {
 	db := getDBConnection()
@@ -142,11 +156,12 @@ func createClient(id, secret string) {
 	client := models.OAuth2Client{
 		ID:            id,
 		Secret:        hashedSecret,
-		RedirectURIs:  pq.StringArray{"http://localhost:8080/callback", "https://oauth.tools/callback/code"},
-		GrantTypes:    pq.StringArray{"authorization_code", "refresh_token", "client_credentials"},
+		RedirectURIs:  pq.StringArray{"http://localhost:8080/callback"},
+		GrantTypes:    pq.StringArray{"authorization_code", "refresh_token"},
 		ResponseTypes: pq.StringArray{"code", "token", "id_token"},
 		Scopes:        pq.StringArray{"openid", "offline", "profile", "email"},
 		Public:        false,
+		SkipConsent:   false,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
@@ -157,30 +172,21 @@ func createClient(id, secret string) {
 	logger.Log.Info("Client created", zap.String("client_id", id))
 }
 
-func listClients() {
+func rotateClientSecret(id, newSecret string) {
 	db := getDBConnection()
-	var clients []models.OAuth2Client
-	if err := db.Find(&clients).Error; err != nil {
-		logger.Log.Fatal("Failed to list clients", zap.Error(err))
+	hashedSecret, err := crypto.HashPassword(newSecret)
+	if err != nil {
+		logger.Log.Fatal("Failed to hash secret", zap.Error(err))
 	}
 
-	fmt.Printf("%-20s | %-10s | %s\n", "CLIENT ID", "PUBLIC", "REDIRECT URIS")
-	fmt.Println("---------------------------------------------------------------")
-	for _, c := range clients {
-		fmt.Printf("%-20s | %-10v | %v\n", c.ID, c.Public, c.RedirectURIs)
-	}
-}
-
-func deleteClient(id string) {
-	db := getDBConnection()
-	result := db.Delete(&models.OAuth2Client{}, "id = ?", id)
+	result := db.Model(&models.OAuth2Client{}).Where("id = ?", id).Update("secret", hashedSecret)
 	if result.Error != nil {
-		logger.Log.Fatal("Failed to delete client", zap.Error(result.Error))
+		logger.Log.Fatal("Failed to rotate secret", zap.Error(result.Error))
 	}
 	if result.RowsAffected == 0 {
 		logger.Log.Warn("Client not found", zap.String("client_id", id))
 	} else {
-		logger.Log.Info("Client deleted", zap.String("client_id", id))
+		logger.Log.Info("Client secret rotated", zap.String("client_id", id))
 	}
 }
 
@@ -209,7 +215,6 @@ func createUser(email, password, firstName, lastName string) {
 }
 
 func getDBConnection() *gorm.DB {
-	// Re-init logger for CLI if needed separately, but main calls it
 	cfg := config.LoadConfig()
 	db, err := data.ConnectDB(cfg.DSN)
 	if err != nil {

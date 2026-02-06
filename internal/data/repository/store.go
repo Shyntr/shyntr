@@ -23,7 +23,8 @@ func NewSQLStore(db *gorm.DB) *SQLStore {
 
 func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, error) {
 	var clientModel models.OAuth2Client
-	if err := s.DB.First(&clientModel, "id = ?", id).Error; err != nil {
+	// Use WithContext to respect request cancellations/timeouts
+	if err := s.DB.WithContext(ctx).First(&clientModel, "id = ?", id).Error; err != nil {
 		return nil, fosite.ErrNotFound
 	}
 
@@ -38,13 +39,13 @@ func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, err
 	}, nil
 }
 
-func (s *SQLStore) ClientAssertionJWTValid(ctx context.Context, jti string) error {
-	// Logic for checking JTI blacklist would go here
+func (s *SQLStore) ClientAssertionJWTValid(_ context.Context, _ string) error {
+	// Unused params are named with underscore to satisfy linter
 	return nil
 }
 
-func (s *SQLStore) SetClientAssertionJWT(ctx context.Context, jti string, exp time.Time) error {
-	// Logic for storing JTI would go here
+func (s *SQLStore) SetClientAssertionJWT(_ context.Context, _ string, _ time.Time) error {
+	// Unused params are named with underscore to satisfy linter
 	return nil
 }
 
@@ -65,12 +66,12 @@ func (s *SQLStore) createSession(ctx context.Context, signature string, request 
 		Active:      true,
 		CreatedAt:   time.Now(),
 	}
-	return s.DB.Create(&sess).Error
+	return s.DB.WithContext(ctx).Create(&sess).Error
 }
 
 func (s *SQLStore) getSession(ctx context.Context, signature string, session fosite.Session, tokenType string) (fosite.Requester, error) {
 	var sess models.OAuth2Session
-	if err := s.DB.First(&sess, "signature = ? AND type = ?", signature, tokenType).Error; err != nil {
+	if err := s.DB.WithContext(ctx).First(&sess, "signature = ? AND type = ?", signature, tokenType).Error; err != nil {
 		return nil, fosite.ErrNotFound
 	}
 	if !sess.Active {
@@ -96,7 +97,7 @@ func (s *SQLStore) getSession(ctx context.Context, signature string, session fos
 }
 
 func (s *SQLStore) deleteSession(ctx context.Context, signature string) error {
-	return s.DB.Where("signature = ?", signature).Delete(&models.OAuth2Session{}).Error
+	return s.DB.WithContext(ctx).Where("signature = ?", signature).Delete(&models.OAuth2Session{}).Error
 }
 
 // --- Access Token ---
@@ -148,7 +149,7 @@ func (s *SQLStore) RevokeRefreshToken(ctx context.Context, requestID string) err
 }
 
 func (s *SQLStore) RevokeAccessToken(ctx context.Context, requestID string) error {
-	return s.DB.Where("request_id = ?", requestID).Delete(&models.OAuth2Session{}).Error
+	return s.DB.WithContext(ctx).Where("request_id = ?", requestID).Delete(&models.OAuth2Session{}).Error
 }
 
 // --- PKCE & OpenID Connect ---

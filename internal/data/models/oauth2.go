@@ -14,6 +14,7 @@ type OAuth2Client struct {
 	ResponseTypes pq.StringArray `gorm:"type:text[]"`
 	Scopes        pq.StringArray `gorm:"type:text[]"`
 	Public        bool
+	SkipConsent   bool `gorm:"default:false"` // If true, skips consent screen for this client
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

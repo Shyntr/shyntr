@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -8,17 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/ory/fosite"
+	"github.com/ory/fosite/handler/openid"
+	"github.com/ory/fosite/token/jwt"
 	"gorm.io/gorm"
 )
 
 type OAuth2Handler struct {
 	Provider *auth.Provider
 	DB       *gorm.DB
+	KeyMgr   *auth.KeyManager
 }
 
-func NewOAuth2Handler(p *auth.Provider, db *gorm.DB) *OAuth2Handler {
-	return &OAuth2Handler{Provider: p, DB: db}
+func NewOAuth2Handler(p *auth.Provider, db *gorm.DB, km *auth.KeyManager) *OAuth2Handler {
+	return &OAuth2Handler{Provider: p, DB: db, KeyMgr: km}
 }
 
 // Authorize handles the OAuth2 authorize endpoint.
@@ -30,38 +35,56 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	// Check for existing session cookie
+	// 1. Session Check
 	userID := ""
-	cookie, err := c.Cookie("shyntr_session")
+	cookie, err := c.Cookie(consts.SessionCookieName)
 	if err == nil && cookie != "" {
 		userID = cookie
 	}
 
-	// Redirect to Login if no valid session is found
 	if userID == "" {
 		loginURL := "/login?return_to=" + c.Request.URL.String()
 		c.Redirect(http.StatusFound, loginURL)
 		return
 	}
 
-	// Create Session with OIDC Claims
-	session := &fosite.DefaultSession{
-		Subject: userID,
-		Claims: &fosite.JWTClaims{
-			Issuer:    h.Provider.Config.IDTokenIssuer,
-			Subject:   userID,
-			Audience:  ar.GetRequestedAudience(),
-			ExpiresAt: h.Provider.Config.IDTokenLifespan,
-			IssuedAt:  time.Now(),
-		},
-		Headers: &fosite.Headers{
-			Extra: map[string]interface{}{
-				"kid": "shyntr-key-1",
-			},
-		},
+	// 2. Client Consent Check
+	clientID := ar.GetClient().GetID()
+	var client models.OAuth2Client
+	if err := h.DB.First(&client, "id = ?", clientID).Error; err == nil {
+		// If client is NOT trusted (SkipConsent=false) AND user hasn't explicitly consented recently
+		// For MVP: We just check SkipConsent. If false, redirect to consent page.
+		// NOTE: In a full implementation, we would check a "Consent" table here.
+		if !client.SkipConsent {
+			// Check if we came back from consent page with a flag (simplified)
+			if c.Query("consent_verifier") != "approved" {
+				consentURL := fmt.Sprintf("/consent?client_id=%s&scopes=%s&return_to=%s",
+					clientID, strings.Join(ar.GetRequestedScopes(), " "), c.Request.URL.String())
+				c.Redirect(http.StatusFound, consentURL)
+				return
+			}
+		}
 	}
 
-	// Fetch User Data to populate ID Token claims
+	// 3. Create OIDC Session
+	session := &openid.DefaultSession{
+		Claims: &jwt.IDTokenClaims{
+			Issuer:      h.Provider.Config.IDTokenIssuer,
+			Subject:     userID,
+			Audience:    ar.GetRequestedAudience(),
+			ExpiresAt:   time.Now().Add(h.Provider.Config.IDTokenLifespan),
+			IssuedAt:    time.Now(),
+			RequestedAt: time.Now(),
+			AuthTime:    time.Now(),
+		},
+		Headers: &jwt.Headers{
+			Extra: map[string]interface{}{
+				"kid": consts.SigningKeyID,
+			},
+		},
+		Subject: userID,
+	}
+
 	var user models.User
 	if err := h.DB.First(&user, "id = ?", userID).Error; err == nil {
 		session.Claims.Add("name", user.FirstName+" "+user.LastName)
@@ -69,7 +92,6 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		session.Claims.Add("email_verified", true)
 	}
 
-	// Grant requested scopes and audiences
 	for _, scope := range ar.GetRequestedScopes() {
 		ar.GrantScope(scope)
 	}
@@ -89,7 +111,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 // Token handles the OAuth2 token endpoint.
 func (h *OAuth2Handler) Token(c *gin.Context) {
 	ctx := c.Request.Context()
-	session := &fosite.DefaultSession{}
+	session := &openid.DefaultSession{}
 	ar, err := h.Provider.Fosite.NewAccessRequest(ctx, c.Request, session)
 	if err != nil {
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
@@ -105,20 +127,17 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	h.Provider.Fosite.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
-// Introspect handles token introspection.
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
 	ctx := c.Request.Context()
-	session := &fosite.DefaultSession{}
+	session := &openid.DefaultSession{}
 	ar, err := h.Provider.Fosite.NewIntrospectionRequest(ctx, c.Request, session)
 	if err != nil {
 		h.Provider.Fosite.WriteIntrospectionError(ctx, c.Writer, err)
 		return
 	}
-
 	h.Provider.Fosite.WriteIntrospectionResponse(ctx, c.Writer, ar)
 }
 
-// Revoke handles token revocation.
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	ctx := c.Request.Context()
 	err := h.Provider.Fosite.NewRevocationRequest(ctx, c.Request)
@@ -129,7 +148,6 @@ func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	h.Provider.Fosite.WriteRevocationResponse(ctx, c.Writer, nil)
 }
 
-// UserInfo returns OIDC user details.
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
@@ -138,13 +156,13 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	ar, err := h.Provider.Fosite.IntrospectToken(ctx, token, fosite.AccessToken, &fosite.DefaultSession{})
+	_, ar, err := h.Provider.Fosite.IntrospectToken(ctx, token, fosite.AccessToken, &openid.DefaultSession{})
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
 	}
 
-	session := ar.GetSession().(*fosite.DefaultSession)
+	session := ar.GetSession().(*openid.DefaultSession)
 	userID := session.GetSubject()
 
 	var user models.User
@@ -163,18 +181,16 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	})
 }
 
-// Jwks returns the JSON Web Key Set for OIDC discovery.
+// Jwks returns keys from KeyManager
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
-	privKey := auth.GetOrGenerateRSAPrivateKey("shyntr-signing-key.pem")
+	privKey := h.KeyMgr.GetActivePrivateKey()
 	jwks := auth.GeneratePublicJWKS(privKey)
 	c.JSON(200, jwks)
 }
 
-// Discover returns the OpenID Connect configuration.
 func (h *OAuth2Handler) Discover(c *gin.Context) {
 	issuer := h.Provider.Config.IDTokenIssuer
 	issuer = strings.TrimRight(issuer, "/")
-
 	c.JSON(200, gin.H{
 		"issuer":                                issuer,
 		"authorization_endpoint":                issuer + "/oauth2/auth",

@@ -15,22 +15,19 @@ type Provider struct {
 	Config *fosite.Config
 }
 
-func NewProvider(db *gorm.DB, secret []byte, issuerURL string) *Provider {
+func NewProvider(db *gorm.DB, secret []byte, issuerURL string, km *KeyManager) *Provider {
 	store := repository.NewSQLStore(db)
 
-	// Load or Generate RSA Key for OIDC Signing
-	// This ensures we can issue valid ID Tokens.
-	privateKey := GetOrGenerateRSAPrivateKey("shyntr-signing-key.pem")
+	// Retrieve key from DB/Env via KeyManager
+	privateKey := km.GetActivePrivateKey()
 
 	config := &fosite.Config{
 		AccessTokenLifespan: time.Hour,
 		GlobalSecret:        secret,
-		// OIDC Specific Config
-		IDTokenIssuer:   issuerURL,
-		IDTokenLifespan: time.Hour,
+		IDTokenIssuer:       issuerURL,
+		IDTokenLifespan:     time.Hour,
 	}
 
-	// Compose the strategy with all features enabled (OIDC, PKCE, OAuth2)
 	oauth2Provider := compose.ComposeAllEnabled(
 		config,
 		store,
