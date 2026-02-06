@@ -1,0 +1,52 @@
+services:
+  shyntr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shyntr_app
+    ports:
+      - "8080:8080"
+    environment:
+      - DSN=postgres://shyntr:secretpassword@postgres:5432/shyntr?sslmode=disable
+      - APP_SECRET=12345678901234567890123456789012
+
+      # URLs
+      - PORT=8080
+      - ISSUER_URL=http://localhost:8080
+      - EXTERNAL_LOGIN_URL=http://localhost:8080/auth/login
+      - EXTERNAL_CONSENT_URL=http://localhost:8080/auth/consent
+      - COOKIE_SECURE=false
+      - CORS_ALLOWED_ORIGINS=*
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shyntr-net
+    command: >
+      sh -c "./shyntr migrate && ./shyntr serve"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: shyntr_db
+    environment:
+      - POSTGRES_USER=shyntr
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_DB=shyntr
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shyntr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shyntr-net
+
+volumes:
+  postgres_data:
+
+networks:
+  shyntr-net:
+    driver: bridge
