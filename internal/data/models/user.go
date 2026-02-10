@@ -3,13 +3,18 @@ package models
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// User represents the identity of a person in Shyntr.
+// User represents the identity of a person within a specific Tenant.
 type User struct {
-	ID           string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	Email        string `gorm:"uniqueIndex;not null"`
+	ID string `gorm:"primaryKey"`
+
+	TenantID string `gorm:"index;uniqueIndex:idx_email_tenant;not null"`
+
+	Email string `gorm:"uniqueIndex:idx_email_tenant;not null"`
+
 	PasswordHash string `gorm:"not null"`
 
 	FirstName   string
@@ -24,4 +29,11 @@ type User struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
+
+func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
+	if u.ID == "" {
+		u.ID = uuid.New().String()
+	}
+	return
 }

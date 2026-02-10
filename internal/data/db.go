@@ -39,6 +39,7 @@ func ConnectDB(dsn string) (*gorm.DB, error) {
 // Separated for 'shyntr migrate' command.
 func MigrateDB(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&models.Tenant{},
 		&models.User{},
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},

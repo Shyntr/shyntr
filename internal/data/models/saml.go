@@ -2,11 +2,14 @@ package models
 
 import (
 	"time"
+
+	"github.com/google/uuid" // Eklendi
+	"gorm.io/gorm"
 )
 
 // SAMLConnection stores configuration for external SAML Identity Providers.
 type SAMLConnection struct {
-	ID             string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	ID             string `gorm:"primaryKey"`
 	Tenant         string `gorm:"index;not null"`
 	IdpSSOURL      string `gorm:"not null"`
 	IdpEntityID    string `gorm:"not null"`
@@ -15,4 +18,11 @@ type SAMLConnection struct {
 	Active         bool `gorm:"default:true"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+func (s *SAMLConnection) BeforeCreate(tx *gorm.DB) (err error) {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
+	return
 }

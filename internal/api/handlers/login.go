@@ -29,6 +29,7 @@ type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 	ReturnTo string `json:"return_to"`
+	TenantID string `json:"tenant_id"`
 }
 
 func (h *LoginHandler) ShowLogin(c *gin.Context) {
@@ -46,16 +47,18 @@ func (h *LoginHandler) ShowLogin(c *gin.Context) {
 
 func (h *LoginHandler) SubmitLogin(c *gin.Context) {
 	var req LoginRequest
-
-	// BindJSON handles validation automatically due to struct tags
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Log.Warn("Invalid login attempt", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 		return
 	}
 
+	if req.TenantID == "" {
+		req.TenantID = h.Config.DefaultTenantID
+	}
+
 	var user models.User
-	if err := h.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+	if err := h.DB.Where("email = ? AND tenant_id = ?", req.Email, req.TenantID).First(&user).Error; err != nil {
 		// Use generic error message to prevent user enumeration
 		logger.Log.Warn("Login failed: User not found", zap.String("email", req.Email))
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})

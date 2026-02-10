@@ -39,6 +39,18 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 
 	r.GET("/health", healthHandler.Check)
+	r.GET("/.well-known/openid-configuration", oauthHandler.Discover)
+	r.GET("/.well-known/jwks.json", oauthHandler.Jwks)
+	r.GET("/userinfo", oauthHandler.UserInfo)
+
+	rootOAuth := r.Group("/oauth2")
+	{
+		rootOAuth.GET("/auth", oauthHandler.Authorize)
+		rootOAuth.POST("/token", oauthHandler.Token)
+		rootOAuth.POST("/revoke", oauthHandler.Revoke)
+		rootOAuth.POST("/introspect", oauthHandler.Introspect)
+		rootOAuth.GET("/logout", oauthHandler.Logout)
+	}
 
 	uiGroup := r.Group("/auth")
 	{

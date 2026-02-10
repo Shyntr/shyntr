@@ -61,12 +61,21 @@ func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) t
 	return fallback
 }
 
-func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
+func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		return strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
+		return h.Config.DefaultTenantID
 	}
+	return tenantID
+}
+
+func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
+	tenantID := h.resolveTenantID(c)
 	base := strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
+
+	if c.Param("tenant_id") == "" {
+		return base
+	}
 	return fmt.Sprintf("%s/t/%s", base, tenantID)
 }
 
@@ -80,10 +89,9 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	// Validate Tenant and Client ownership
-	tenantID := c.Param("tenant_id")
-	clientID := ar.GetClient().GetID()
+	tenantID := h.resolveTenantID(c)
 
+	clientID := ar.GetClient().GetID()
 	var client models.OAuth2Client
 	if err := h.DB.First(&client, "id = ? AND tenant_id = ?", clientID, tenantID).Error; err != nil {
 		logger.Log.Warn("Client/Tenant mismatch or not found",
@@ -93,7 +101,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	// Strict Scope Validation: Client cannot request scopes it doesn't have
+	// Strict Scope Validation
 	requestedScopes := ar.GetRequestedScopes()
 	allowedScopes := make(map[string]bool)
 	for _, s := range client.Scopes {
@@ -102,18 +110,18 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	for _, reqScope := range requestedScopes {
 		if !allowedScopes[reqScope] {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"error":             "invalid_scope",
-				"error_description": fmt.Sprintf("The requested scope '%s' is not authorized for this client.", reqScope),
-			})
+			// Fosite will redirect with error=invalid_scope if we return error here,
+			// but manually writing JSON is cleaner for API clients.
+			// However, for strict OIDC compliance, we should let Fosite handle it or redirect ourselves.
+			// Fosite validates scopes internally if we don't grant them.
+			// Here we explicit check to fail fast.
+			h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidScope.WithHintf("The requested scope '%s' is not authorized for this client.", reqScope))
 			return
 		}
 	}
 
 	// OIDC Compliance Checks (prompt, max_age, session)
 	prompt := ar.GetRequestForm().Get("prompt")
-	// maxAge parameter can be used to validate auth_time age in future implementations
-	// maxAge := ar.GetRequestForm().Get("max_age")
 
 	sessionCookie, err := c.Cookie(consts.SessionCookieName)
 	hasSession := err == nil && sessionCookie != ""
@@ -148,7 +156,6 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		if err := h.DB.Order("updated_at desc").
 			Where("subject = ? AND authenticated = ?", userID, true).
 			First(&lastLogin).Error; err == nil {
-
 			authTime = lastLogin.UpdatedAt
 		} else {
 			forceLogin = true
@@ -156,7 +163,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 		if !forceLogin {
 			var userCheck models.User
-			if err := h.DB.Select("id").First(&userCheck, "id = ? AND is_active = ?", userID, true).Error; err != nil {
+			if err := h.DB.Select("id").First(&userCheck, "id = ? AND tenant_id = ? AND is_active = ?", userID, tenantID, true).Error; err != nil {
 				forceLogin = true
 			}
 		}
@@ -189,7 +196,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			return
 		}
 
-		redirectURL := fmt.Sprintf("%s?login_challenge=%s", h.Config.ExternalLoginURL, challengeID)
+		redirectURL := fmt.Sprintf("%s?login_challenge=%s&tenant_id=%s", h.Config.ExternalLoginURL, challengeID, tenantID)
 		c.Redirect(http.StatusFound, redirectURL)
 		return
 	}
@@ -315,7 +322,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		return
 	}
 
-	urlTenantID := c.Param("tenant_id")
+	urlTenantID := h.resolveTenantID(c)
 	client := ar.GetClient()
 
 	var dbClient models.OAuth2Client
@@ -453,17 +460,29 @@ func (h *OAuth2Handler) Jwks(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) Discover(c *gin.Context) {
+	tenantID := h.resolveTenantID(c)
+
+	var tenant models.Tenant
+	if err := h.DB.Select("id").First(&tenant, "id = ?", tenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant_not_found"})
+		return
+	}
+
 	issuer := h.getIssuer(c)
+
+	makeURL := func(path string) string {
+		return issuer + path
+	}
 
 	c.JSON(200, gin.H{
 		"issuer":                 issuer,
-		"authorization_endpoint": issuer + "/oauth2/auth",
-		"token_endpoint":         issuer + "/oauth2/token",
-		"jwks_uri":               issuer + "/.well-known/jwks.json",
-		"userinfo_endpoint":      issuer + "/userinfo",
-		"revocation_endpoint":    issuer + "/oauth2/revoke",
-		"introspection_endpoint": issuer + "/oauth2/introspect",
-		"end_session_endpoint":   issuer + "/oauth2/logout",
+		"authorization_endpoint": makeURL("/oauth2/auth"),
+		"token_endpoint":         makeURL("/oauth2/token"),
+		"jwks_uri":               makeURL("/.well-known/jwks.json"),
+		"userinfo_endpoint":      makeURL("/userinfo"),
+		"revocation_endpoint":    makeURL("/oauth2/revoke"),
+		"introspection_endpoint": makeURL("/oauth2/introspect"),
+		"end_session_endpoint":   makeURL("/oauth2/logout"),
 
 		"response_types_supported":              []string{"code", "token", "id_token", "code id_token"},
 		"subject_types_supported":               []string{"public"},
