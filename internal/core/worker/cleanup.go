@@ -9,22 +9,36 @@ import (
 	"gorm.io/gorm"
 )
 
-// StartCleanupJob starts a background ticker to remove expired sessions.
+// StartCleanupJob starts a background ticker to remove expired data.
 func StartCleanupJob(db *gorm.DB) {
-	ticker := time.NewTicker(1 * time.Hour) // Run every hour
+	ticker := time.NewTicker(1 * time.Hour)
 	go func() {
 		for range ticker.C {
-			cleanupExpiredSessions(db)
+			cleanupExpiredData(db)
 		}
 	}()
 	logger.Log.Info("Background cleanup job started")
 }
 
-func cleanupExpiredSessions(db *gorm.DB) {
-	result := db.Where("expires_at < ?", time.Now()).Delete(&models.OAuth2Session{})
-	if result.Error != nil {
-		logger.Log.Error("Failed to cleanup expired sessions", zap.Error(result.Error))
-	} else if result.RowsAffected > 0 {
-		logger.Log.Info("Cleaned up expired sessions", zap.Int64("count", result.RowsAffected))
+func cleanupExpiredData(db *gorm.DB) {
+	now := time.Now()
+	expirationHorizon := now.Add(-2 * time.Hour)
+
+	if err := db.Where("expires_at < ?", now).Delete(&models.OAuth2Session{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: OAuth2Session", zap.Error(err))
 	}
+
+	if err := db.Where("expires_at < ?", now).Delete(&models.BlacklistedJTI{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: BlacklistedJTI", zap.Error(err))
+	}
+
+	if err := db.Where("created_at < ?", expirationHorizon).Delete(&models.LoginRequest{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: LoginRequest", zap.Error(err))
+	}
+
+	if err := db.Where("created_at < ?", expirationHorizon).Delete(&models.ConsentRequest{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: ConsentRequest", zap.Error(err))
+	}
+
+	logger.Log.Debug("Cleanup cycle completed")
 }

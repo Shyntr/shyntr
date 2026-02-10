@@ -21,6 +21,10 @@ type Config struct {
 	// External UI URLs (The App that handles login/consent)
 	ExternalLoginURL   string `mapstructure:"EXTERNAL_LOGIN_URL"`
 	ExternalConsentURL string `mapstructure:"EXTERNAL_CONSENT_URL"`
+
+	AccessTokenLifespan  string `mapstructure:"ACCESS_TOKEN_LIFESPAN"`
+	RefreshTokenLifespan string `mapstructure:"REFRESH_TOKEN_LIFESPAN"`
+	IDTokenLifespan      string `mapstructure:"ID_TOKEN_LIFESPAN"`
 }
 
 func LoadConfig() *Config {
@@ -35,6 +39,10 @@ func LoadConfig() *Config {
 	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:8080/auth/login")
 	viper.SetDefault("EXTERNAL_CONSENT_URL", "http://localhost:8080/auth/consent")
 
+	viper.SetDefault("ACCESS_TOKEN_LIFESPAN", "1h")
+	viper.SetDefault("REFRESH_TOKEN_LIFESPAN", "720h") // 30 Days
+	viper.SetDefault("ID_TOKEN_LIFESPAN", "1h")
+
 	mustBind(consts.EnvDatabaseDSN)
 	mustBind("DATABASE_URL")
 	mustBind("PORT")
@@ -45,6 +53,9 @@ func LoadConfig() *Config {
 	mustBind(consts.EnvRSAPrivateKey)
 	mustBind("EXTERNAL_LOGIN_URL")
 	mustBind("EXTERNAL_CONSENT_URL")
+	mustBind("ACCESS_TOKEN_LIFESPAN")
+	mustBind("REFRESH_TOKEN_LIFESPAN")
+	mustBind("ID_TOKEN_LIFESPAN")
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {

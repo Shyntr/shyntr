@@ -43,6 +43,9 @@ func MigrateDB(db *gorm.DB) error {
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
 		&models.OAuth2Session{},
-		&models.SigningKey{}, // Added
+		&models.SigningKey{},
+		&models.LoginRequest{},
+		&models.ConsentRequest{},
+		&models.BlacklistedJTI{},
 	)
 }

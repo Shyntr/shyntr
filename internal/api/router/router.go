@@ -33,16 +33,13 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(db)
-	oauthHandler := handlers.NewOAuth2Handler(authProvider, db, km)
+	oauthHandler := handlers.NewOAuth2Handler(authProvider, db, km, cfg)
 	loginHandler := handlers.NewLoginHandler(db)
 	consentHandler := handlers.NewConsentHandler()
+	adminHandler := handlers.NewAdminHandler(db, cfg)
 
-	// 1. SYSTEM ROUTES
 	r.GET("/health", healthHandler.Check)
 
-	// 2. INTERNAL UI ROUTES (Simulating the External App)
-	// These endpoints represent the separate "Identity UI" application.
-	// In a real Broker setup, these would be hosted separately.
 	uiGroup := r.Group("/auth")
 	{
 		uiGroup.GET("/login", loginHandler.ShowLogin)
@@ -51,11 +48,8 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 		uiGroup.POST("/consent", consentHandler.SubmitConsent)
 	}
 
-	// 3. TENANT PROTOCOL ROUTES
-	// All OIDC/OAuth2 interaction happens under a specific tenant context.
 	tenantGroup := r.Group("/t/:tenant_id")
 	{
-		// OIDC Discovery (Dynamic based on tenant)
 		tenantGroup.GET("/.well-known/openid-configuration", oauthHandler.Discover)
 		tenantGroup.GET("/.well-known/jwks.json", oauthHandler.Jwks)
 		tenantGroup.GET("/userinfo", oauthHandler.UserInfo)
@@ -67,14 +61,19 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 			oauthGroup.POST("/token", oauthHandler.Token)
 			oauthGroup.POST("/revoke", oauthHandler.Revoke)
 			oauthGroup.POST("/introspect", oauthHandler.Introspect)
+			oauthGroup.GET("/logout", oauthHandler.Logout)
 		}
 	}
 
-	// 4. ADMIN API (For the External UI to talk to Shyntr)
-	// Placeholder for future endpoints like /admin/login/accept
-	_ = r.Group("/admin")
+	adminGroup := r.Group("/admin")
 	{
-		// e.g., PUT /login/accept, PUT /consent/accept
+		adminGroup.GET("/login", adminHandler.GetLoginRequest)
+		adminGroup.PUT("/login/accept", adminHandler.AcceptLoginRequest)
+		adminGroup.PUT("/login/reject", adminHandler.RejectLoginRequest)
+
+		adminGroup.GET("/consent", adminHandler.GetConsentRequest)
+		adminGroup.PUT("/consent/accept", adminHandler.AcceptConsentRequest)
+		adminGroup.PUT("/consent/reject", adminHandler.RejectConsentRequest)
 	}
 
 	return r

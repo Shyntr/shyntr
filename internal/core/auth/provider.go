@@ -17,15 +17,19 @@ type Provider struct {
 
 func NewProvider(db *gorm.DB, secret []byte, issuerURL string, km *KeyManager) *Provider {
 	store := repository.NewSQLStore(db)
-
-	// Retrieve key from DB/Env via KeyManager
 	privateKey := km.GetActivePrivateKey()
 
 	config := &fosite.Config{
-		AccessTokenLifespan: time.Hour,
-		GlobalSecret:        secret,
-		IDTokenIssuer:       issuerURL,
-		IDTokenLifespan:     time.Hour,
+		AccessTokenLifespan:   1 * time.Hour,
+		AuthorizeCodeLifespan: 10 * time.Minute,
+		IDTokenLifespan:       1 * time.Hour,
+
+		RefreshTokenLifespan: 30 * 24 * time.Hour, // 30 Gün
+
+		GlobalSecret:  secret,
+		IDTokenIssuer: issuerURL,
+
+		SendDebugMessagesToClients: true,
 	}
 
 	oauth2Provider := compose.ComposeAllEnabled(

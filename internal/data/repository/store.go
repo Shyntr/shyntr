@@ -28,19 +28,37 @@ func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, err
 		return nil, fosite.ErrNotFound
 	}
 
-	return &fosite.DefaultClient{
-		ID:            clientModel.ID,
-		Secret:        []byte(clientModel.Secret),
-		RedirectURIs:  clientModel.RedirectURIs,
-		GrantTypes:    clientModel.GrantTypes,
-		ResponseTypes: clientModel.ResponseTypes,
-		Scopes:        clientModel.Scopes,
-		Public:        clientModel.Public,
+	return &models.ExtendedClient{
+		DefaultClient: &fosite.DefaultClient{
+			ID:            clientModel.ID,
+			Secret:        []byte(clientModel.Secret),
+			RedirectURIs:  clientModel.RedirectURIs,
+			GrantTypes:    clientModel.GrantTypes,
+			ResponseTypes: clientModel.ResponseTypes,
+			Scopes:        clientModel.Scopes,
+			Public:        clientModel.Public,
+			Audience:      []string{},
+		},
+		JSONWebKeys:            clientModel.JSONWebKeys,
+		PostLogoutRedirectURIs: clientModel.PostLogoutRedirectURIs,
 	}, nil
 }
 
-func (s *SQLStore) ClientAssertionJWTValid(_ context.Context, _ string) error            { return nil }
-func (s *SQLStore) SetClientAssertionJWT(_ context.Context, _ string, _ time.Time) error { return nil }
+func (s *SQLStore) ClientAssertionJWTValid(ctx context.Context, jti string) error {
+	isUsed, err := s.IsJWTUsed(ctx, jti)
+	if err != nil {
+		return err
+	}
+	if isUsed {
+		return fosite.ErrJTIKnown
+	}
+	return nil
+}
+
+// SetClientAssertionJWT marks a JTI as used until it expires.
+func (s *SQLStore) SetClientAssertionJWT(ctx context.Context, jti string, exp time.Time) error {
+	return s.MarkJWTUsedForTime(ctx, jti, exp)
+}
 
 // --- Resource Owner Password Credentials Grant Storage (ROPC) ---
 
@@ -60,23 +78,60 @@ func (s *SQLStore) Authenticate(ctx context.Context, name string, secret string)
 // --- RFC7523 Key Storage (JWT Bearer Grant) ---
 
 func (s *SQLStore) GetPublicKey(ctx context.Context, issuer string, subject string, keyId string) (*jose.JSONWebKey, error) {
-	return nil, fosite.ErrNotFound
+	clientID := issuer
+
+	var client models.OAuth2Client
+	if err := s.DB.WithContext(ctx).First(&client, "id = ?", clientID).Error; err != nil {
+		return nil, fosite.ErrNotFound
+	}
+
+	if client.JSONWebKeys == nil {
+		return nil, fosite.ErrNotFound
+	}
+
+	keys := client.JSONWebKeys.Key(keyId)
+	if len(keys) == 0 {
+		return nil, fosite.ErrNotFound
+	}
+
+	return &keys[0], nil
 }
 
 func (s *SQLStore) GetPublicKeys(ctx context.Context, issuer string, subject string) (*jose.JSONWebKeySet, error) {
-	return &jose.JSONWebKeySet{}, fosite.ErrNotFound
+	clientID := issuer
+	var client models.OAuth2Client
+	if err := s.DB.WithContext(ctx).First(&client, "id = ?", clientID).Error; err != nil {
+		return nil, fosite.ErrNotFound
+	}
+
+	if client.JSONWebKeys == nil {
+		return &jose.JSONWebKeySet{}, nil
+	}
+
+	return client.JSONWebKeys, nil
 }
 
+// GetPublicKeyScopes returns the scopes that a specific key is allowed to request.
+// In Shyntr, we enforce scopes at the Client level, not at the individual Key level.
+// Therefore, returning an empty slice means "no specific key restrictions, fall back to client scopes".
 func (s *SQLStore) GetPublicKeyScopes(ctx context.Context, issuer string, subject string, keyId string) ([]string, error) {
 	return []string{}, nil
 }
 
 func (s *SQLStore) IsJWTUsed(ctx context.Context, jti string) (bool, error) {
-	return false, nil
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.BlacklistedJTI{}).Where("jti = ?", jti).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (s *SQLStore) MarkJWTUsedForTime(ctx context.Context, jti string, exp time.Time) error {
-	return nil
+	blacklisted := models.BlacklistedJTI{
+		JTI:       jti,
+		ExpiresAt: exp,
+	}
+	return s.DB.WithContext(ctx).Create(&blacklisted).Error
 }
 
 // --- Storage Implementation (Common) ---
@@ -179,19 +234,23 @@ func (s *SQLStore) RevokeRefreshToken(ctx context.Context, requestID string) err
 }
 
 func (s *SQLStore) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, signature string) error {
-	return s.RevokeRefreshToken(ctx, requestID)
+	graceDuration := 15 * time.Second
+	newExpiry := time.Now().Add(graceDuration)
+	return s.DB.WithContext(ctx).
+		Model(&models.OAuth2Session{}).
+		Where("request_id = ? AND signature = ?", requestID, signature).
+		Update("expires_at", newExpiry).Error
 }
 
 func (s *SQLStore) RevokeAccessToken(ctx context.Context, requestID string) error {
 	return s.DB.WithContext(ctx).Where("request_id = ?", requestID).Delete(&models.OAuth2Session{}).Error
 }
 
-func (s *SQLStore) RevokeAccessTokenMaybeGracePeriod(ctx context.Context, requestID string, signature string) error {
+func (s *SQLStore) RevokeAccessTokenMaybeGracePeriod(ctx context.Context, requestID string, _ string) error {
 	return s.RevokeAccessToken(ctx, requestID)
 }
 
-// --- PKCE (UPDATED METHOD NAMES) ---
-// Fosite expects CreatePKCERequestSession, GetPKCERequestSession, DeletePKCERequestSession
+// --- PKCE ---
 
 func (s *SQLStore) CreatePKCERequestSession(ctx context.Context, signature string, request fosite.Requester) error {
 	return s.createSession(ctx, signature, request, "pkce")
