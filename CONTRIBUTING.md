@@ -1,6 +1,7 @@
 # Contributing to Shyntr
 
-Shyntr is a high-performance, open-source Identity and Access Management (IAM) platform written in **Go**. It is designed to be protocol-agnostic, supporting OAuth2, OIDC, and SAML natively.
+Shyntr is a high-performance, open-source Identity and Access Management (IAM) platform written in **Go**.
+It is designed to be protocol-agnostic, supporting OAuth2, OIDC, and SAML natively.
 
 ## 🚀 Getting Started
 
@@ -22,7 +23,16 @@ Shyntr is a high-performance, open-source Identity and Access Management (IAM) p
     go mod tidy
     ```
 
-3.  Run the server:
+3.  **Setup Database:**
+    Make sure PostgreSQL is running. The default DSN is `postgres://postgres:postgres@localhost:5432/shyntr?sslmode=disable`.
+    You can change this in `config/config.go` or via the `DSN` environment variable.
+
+    Run the migrations to create the necessary tables:
+    ```bash
+    go run cmd/server/main.go migrate
+    ```
+
+4.  Run the server:
     ```bash
     go run cmd/server/main.go serve
     ```

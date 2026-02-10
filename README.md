@@ -66,6 +66,29 @@ of different customers with distinct configurations, keys, and protocol requirem
 
 ---
 
+## 🛡️ Security & Compliance
+
+Shyntr is built with a security-first mindset, adhering to strict OAuth2/OIDC standards:
+
+* **OpenID Connect Core 1.0:** Full support for `prompt`, `max_age`, `auth_time`, and strict scope validation.
+* **RP-Initiated Logout:** Secure session termination with `id_token_hint` and `post_logout_redirect_uri` validation.
+* **Advanced Security:**
+    * **RFC 7523:** Private Key JWT authentication for clients.
+    * **Replay Protection:** JTI (JWT ID) tracking to prevent token reuse.
+    * **Tenant Isolation:** Strict validation to prevent cross-tenant token usage.
+    * **Grace Period:** Refresh Token Rotation with network-failure tolerance.
+
+## 🔌 The Headless Flow (How it works)
+
+Shyntr decouples the **Logic** from the **UI**. Here is the authentication flow:
+
+1.  **Challenge:** When a user needs to login, Shyntr generates a `login_challenge` and redirects the user to your **External Login UI**.
+2.  **Verification:** Your UI validates the user (username/password, MFA, etc.).
+3.  **Accept:** Your UI calls Shyntr's Admin API (`PUT /admin/login/accept`) with the authenticated User ID.
+4.  **Resume:** Shyntr verifies the handshake and issues the tokens (Access, Refresh, ID Token).
+
+---
+
 ## Status
 
 🚧 **Project is currently in active development.**
