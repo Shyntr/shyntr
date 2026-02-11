@@ -21,6 +21,8 @@ type LoginRequest struct {
 	SessionID         string
 	ClientIP          string
 
+	SAMLRequestID string `gorm:"index"`
+
 	Remember    bool `gorm:"default:false"`
 	RememberFor int  `gorm:"default:0"`
 

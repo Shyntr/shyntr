@@ -9,8 +9,10 @@ import (
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/router"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/worker"
 	"github.com/nevzatcirak/shyntr/internal/data"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -68,9 +70,14 @@ func main() {
 				log.Fatalf("Database connection failed: %v", err)
 			}
 
+			hashedSecret, err := crypto.HashPassword(args[2])
+			if err != nil {
+				log.Fatalf("Failed to hash secret: %v", err)
+			}
+
 			client := models.OAuth2Client{
 				ID:            args[1],
-				Secret:        args[2], // In production, hash this!
+				Secret:        hashedSecret,
 				TenantID:      args[0],
 				RedirectURIs:  []string{"http://localhost:8080/callback"},
 				GrantTypes:    []string{"authorization_code", "refresh_token", "client_credentials"},
@@ -149,6 +156,8 @@ func runServer() {
 	if err != nil {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
+
+	worker.StartCleanupJob(db)
 
 	keyMgr := auth.NewKeyManager(db, cfg)
 	_ = keyMgr.GetActivePrivateKey()

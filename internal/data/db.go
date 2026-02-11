@@ -40,6 +40,8 @@ func MigrateDB(db *gorm.DB) error {
 		&models.Tenant{},
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
+		&models.SAMLClient{},
+		&models.OIDCConnection{},
 		&models.OAuth2Session{},
 		&models.SigningKey{},
 		&models.LoginRequest{},

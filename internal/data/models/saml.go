@@ -20,6 +20,10 @@ type SAMLConnection struct {
 	SPCertificate string `gorm:"type:text"`
 	SPPrivateKey  string `gorm:"type:text"`
 
+	AllowUnencrypted bool `gorm:"default:false"` // False ise, şifresiz assertion'ları reddeder (Prod için False olmalı)
+	ForceAuthn       bool `gorm:"default:false"` // True ise, kullanıcı IDP'de oturum açmış olsa bile tekrar şifre sorulur.
+
+	// Attribute Mapping: {"sub": "uid", "email": "mail"}
 	AttributeMapping []byte `gorm:"type:jsonb"`
 
 	Active    bool `gorm:"default:true"`

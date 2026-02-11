@@ -30,7 +30,7 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 		tenantID = h.Service.Config.DefaultTenantID
 	}
 
-	sp, err := h.Service.GetServiceProvider(c.Request.Context(), tenantID)
+	sp, err := h.Service.BuildServiceProvider(c.Request.Context(), tenantID, nil)
 	if err != nil {
 		logger.Log.Error("Failed to initialize SP", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "saml_initialization_failed"})
@@ -65,11 +65,22 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		return
 	}
 
-	redirectURL, err := h.Service.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge)
+	var loginReq models.LoginRequest
+	if err := h.DB.First(&loginReq, "id = ?", loginChallenge).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "login_request_not_found"})
+		return
+	}
+
+	redirectURL, requestID, err := h.Service.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge)
 	if err != nil {
 		logger.Log.Error("Failed to initiate SAML SSO", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "sso_init_failed", "details": err.Error()})
 		return
+	}
+
+	if requestID != "" {
+		loginReq.SAMLRequestID = requestID
+		h.DB.Save(&loginReq)
 	}
 
 	c.Redirect(http.StatusFound, redirectURL)
@@ -81,58 +92,83 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		tenantID = h.Service.Config.DefaultTenantID
 	}
 
-	assertion, relayState, err := h.Service.HandleACS(c.Request.Context(), tenantID, c.Request)
+	relayState := c.PostForm("RelayState")
+	if relayState == "" {
+		logger.Log.Warn("Missing RelayState in SAML Response")
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_relay_state"})
+		return
+	}
+
+	var loginReq models.LoginRequest
+	if err := h.DB.First(&loginReq, "id = ?", relayState).Error; err != nil {
+		logger.Log.Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", relayState))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session"})
+		return
+	}
+
+	assertion, _, err := h.Service.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
 	if err != nil {
 		logger.Log.Warn("SAML ACS Validation Failed", zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_saml_response", "details": err.Error()})
 		return
 	}
 
-	loginChallenge := relayState
-	if loginChallenge == "" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_relay_state"})
-		return
-	}
-
-	subject := assertion.Subject.NameID.Value
-	attributes := make(map[string]interface{})
-
+	rawAttributes := make(map[string]interface{})
 	for _, statement := range assertion.AttributeStatements {
 		for _, attr := range statement.Attributes {
-			// Attribute değerlerini al
 			if len(attr.Values) > 1 {
 				vals := make([]string, len(attr.Values))
 				for i, v := range attr.Values {
 					vals[i] = v.Value
 				}
-				attributes[attr.Name] = vals
+				rawAttributes[attr.Name] = vals
 			} else if len(attr.Values) == 1 {
-				attributes[attr.Name] = attr.Values[0].Value
+				rawAttributes[attr.Name] = attr.Values[0].Value
 			}
 		}
 	}
 
-	attributes["email"] = subject
-	attributes["source"] = "saml"
-
-	var req models.LoginRequest
-	if err := h.DB.First(&req, "id = ?", loginChallenge).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "login_request_expired"})
-		return
+	issuer := assertion.Issuer.Value
+	var conn models.SAMLConnection
+	if err := h.DB.Select("attribute_mapping").Where("tenant_id = ? AND idp_entity_id = ?", tenantID, issuer).First(&conn).Error; err != nil {
+		logger.Log.Warn("Connection not found for mapping, using raw attributes", zap.String("issuer", issuer))
 	}
 
-	contextBytes, _ := json.Marshal(attributes)
-	req.Authenticated = true
-	req.Subject = subject
-	req.Context = contextBytes
-	req.UpdatedAt = time.Now()
+	finalAttributes := make(map[string]interface{})
+	mapping := make(map[string]string)
 
-	if err := h.DB.Save(&req).Error; err != nil {
+	if len(conn.AttributeMapping) > 0 {
+		_ = json.Unmarshal(conn.AttributeMapping, &mapping)
+	}
+
+	for oidcKey, samlKey := range mapping {
+		if val, ok := rawAttributes[samlKey]; ok {
+			finalAttributes[oidcKey] = val
+		}
+	}
+
+	if len(finalAttributes) == 0 {
+		finalAttributes = rawAttributes
+	}
+
+	subject := assertion.Subject.NameID.Value
+	finalAttributes["email"] = subject
+	finalAttributes["sub"] = subject
+	finalAttributes["source"] = "saml"
+	finalAttributes["issuer"] = issuer
+
+	contextBytes, _ := json.Marshal(finalAttributes)
+	loginReq.Authenticated = true
+	loginReq.Subject = subject
+	loginReq.Context = contextBytes
+	loginReq.UpdatedAt = time.Now()
+
+	if err := h.DB.Save(&loginReq).Error; err != nil {
 		logger.Log.Error("Failed to update login request", zap.Error(err))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	redirectURL := fmt.Sprintf("%s&login_verifier=%s", req.RequestURL, req.ID)
+	redirectURL := fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID)
 	c.Redirect(http.StatusFound, redirectURL)
 }

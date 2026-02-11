@@ -9,6 +9,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/api/middleware"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
@@ -23,7 +24,11 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	r.Use(middleware.SecurityHeaders())
 
 	samlRepo := repository.NewSAMLRepository(db)
+	oidcRepo := repository.NewOIDCRepository(db)
+
+	// Services
 	samlService := saml.NewService(samlRepo, km, cfg)
+	oidcService := oidc.NewClientService(oidcRepo, cfg)
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -43,6 +48,7 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 	samlHandler := handlers.NewSAMLHandler(samlService, db)
+	oidcHandler := handlers.NewOIDCHandler(oidcService, db)
 
 	r.GET("/health", healthHandler.Check)
 
@@ -101,6 +107,12 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 			samlGroup.POST("/sp/acs", samlHandler.ACS)
 			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
+		}
+
+		oidcGroup := tenantGroup.Group("/oidc")
+		{
+			oidcGroup.GET("/login/:connection_id", oidcHandler.Login)
+			oidcGroup.GET("/callback", oidcHandler.Callback)
 		}
 	}
 
