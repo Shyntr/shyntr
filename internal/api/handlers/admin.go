@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -32,21 +33,30 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 		return
 	}
 
+	var contextMap map[string]interface{}
+	if len(req.Context) > 0 {
+		_ = json.Unmarshal(req.Context, &contextMap)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"challenge":   req.ID,
 		"client_id":   req.ClientID,
 		"request_url": req.RequestURL,
 		"skip":        req.Skip,
 		"scopes":      req.RequestedScope,
+		"subject":     req.Subject,
+		"context":     contextMap,
 	})
 }
 
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
+
 	var body struct {
-		Subject     string `json:"subject" binding:"required"`
-		Remember    bool   `json:"remember"`
-		RememberFor int    `json:"remember_for"`
+		Subject     string                 `json:"subject" binding:"required"`
+		Remember    bool                   `json:"remember"`
+		RememberFor int                    `json:"remember_for"`
+		Context     map[string]interface{} `json:"context"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -62,8 +72,13 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 
 	req.Subject = body.Subject
 	req.Authenticated = true
-
 	req.Remember = body.Remember
+	req.RememberFor = body.RememberFor
+
+	if body.Context != nil {
+		contextBytes, _ := json.Marshal(body.Context)
+		req.Context = contextBytes
+	}
 
 	if err := h.DB.Save(&req).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update login request"})
@@ -136,6 +151,8 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	req.GrantedAudience = body.GrantAudience
 	req.Authenticated = true
 	req.Active = true
+	req.Remember = body.Remember
+	req.RememberFor = body.RememberFor
 
 	if err := h.DB.Save(&req).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update consent request"})

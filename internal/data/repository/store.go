@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-jose/go-jose/v3"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/ory/fosite"
 	"gorm.io/gorm"
 )
@@ -63,16 +62,7 @@ func (s *SQLStore) SetClientAssertionJWT(ctx context.Context, jti string, exp ti
 // --- Resource Owner Password Credentials Grant Storage (ROPC) ---
 
 func (s *SQLStore) Authenticate(ctx context.Context, name string, secret string) error {
-	var user models.User
-	if err := s.DB.WithContext(ctx).Where("email = ?", name).First(&user).Error; err != nil {
-		return fosite.ErrRequestUnauthorized
-	}
-
-	if !crypto.CheckPasswordHash(secret, user.PasswordHash) {
-		return fosite.ErrRequestUnauthorized
-	}
-
-	return nil
+	return fosite.ErrRequestUnauthorized
 }
 
 // --- RFC7523 Key Storage (JWT Bearer Grant) ---
@@ -112,8 +102,6 @@ func (s *SQLStore) GetPublicKeys(ctx context.Context, issuer string, subject str
 }
 
 // GetPublicKeyScopes returns the scopes that a specific key is allowed to request.
-// In Shyntr, we enforce scopes at the Client level, not at the individual Key level.
-// Therefore, returning an empty slice means "no specific key restrictions, fall back to client scopes".
 func (s *SQLStore) GetPublicKeyScopes(ctx context.Context, issuer string, subject string, keyId string) ([]string, error) {
 	return []string{}, nil
 }

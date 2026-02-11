@@ -5,13 +5,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/data/models"
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
+// LoginHandler is now just a Mock/Test Harness UI.
+// In production, the "External Login URL" will point to your real frontend application.
 type LoginHandler struct {
 	DB     *gorm.DB
 	Config *config.Config
@@ -24,12 +22,11 @@ func NewLoginHandler(db *gorm.DB) *LoginHandler {
 	}
 }
 
-// LoginRequest defines the expected payload with validation tags
+// LoginRequest defines the payload our Mock UI sends (to itself).
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 	ReturnTo string `json:"return_to"`
-	TenantID string `json:"tenant_id"`
 }
 
 func (h *LoginHandler) ShowLogin(c *gin.Context) {
@@ -37,55 +34,37 @@ func (h *LoginHandler) ShowLogin(c *gin.Context) {
 	csrfToken, _ := c.Get("csrf_token")
 
 	c.JSON(200, gin.H{
-		"message":    "Shyntr Login",
-		"action":     "POST /login",
+		"message":    "Shyntr Broker Login (Test UI)",
+		"action":     "POST /auth/login",
 		"return_to":  returnTo,
 		"csrf_token": csrfToken,
-		"fields":     []string{"email", "password"},
+		"note":       "Enter any email/password. This is a mock UI.",
 	})
 }
 
 func (h *LoginHandler) SubmitLogin(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Log.Warn("Invalid login attempt", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
 
-	if req.TenantID == "" {
-		req.TenantID = h.Config.DefaultTenantID
-	}
+	// MOCK: We accept any user for testing.
+	// In a real scenario, this UI would verify creds against LDAP/Google/DB.
 
-	var user models.User
-	if err := h.DB.Where("email = ? AND tenant_id = ?", req.Email, req.TenantID).First(&user).Error; err != nil {
-		// Use generic error message to prevent user enumeration
-		logger.Log.Warn("Login failed: User not found", zap.String("email", req.Email))
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		return
-	}
+	// We simulate a successful login by calling Shyntr Admin API internally?
+	// OR we just tell the user to make the PUT request via Postman/Curl.
 
-	if !crypto.CheckPasswordHash(req.Password, user.PasswordHash) {
-		logger.Log.Warn("Login failed: Invalid password", zap.String("email", req.Email))
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		return
-	}
-
-	c.SetCookie(
-		"shyntr_session",
-		user.ID,
-		3600,
-		"/",
-		"",
-		h.Config.CookieSecure,
-		true,
-	)
-
-	logger.Log.Info("User logged in successfully", zap.String("user_id", user.ID))
-
-	if req.ReturnTo != "" {
-		c.JSON(200, gin.H{"status": "success", "redirect_to": req.ReturnTo})
-	} else {
-		c.JSON(200, gin.H{"status": "success", "message": "Logged in"})
-	}
+	// For simplicity in this demo:
+	c.JSON(200, gin.H{
+		"status":  "simulated_success",
+		"message": "User credentials valid (Mock). Now perform PUT /admin/login/accept with this subject.",
+		"subject": req.Email,
+		"context": gin.H{
+			"email": req.Email,
+			"name":  "Mock User",
+			"role":  "admin",
+		},
+		"next_step": "PUT /admin/login/accept?login_challenge=... with body JSON",
+	})
 }

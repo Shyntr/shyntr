@@ -25,6 +25,22 @@ services:
     command: >
       sh -c "./shyntr migrate && ./shyntr serve"
 
+  shyntr-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shyntr_app_client_create
+    environment:
+      - DSN=postgres://shyntr:secretpassword@postgres:5432/shyntr?sslmode=disable
+      - APP_SECRET=12345678901234567890123456789012
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shyntr-net
+    command: >
+      sh -c "./shyntr create-client default test-client secret"
+
   postgres:
     image: postgres:16-alpine
     container_name: shyntr_db

@@ -1,46 +1,37 @@
 package auth
 
-import (
-	"github.com/nevzatcirak/shyntr/internal/data/models"
-)
+// Standard OIDC Claim Mappings
+var scopeToClaims = map[string][]string{
+	"profile": {"name", "family_name", "given_name", "middle_name", "nickname", "preferred_username", "profile", "picture", "website", "gender", "birthdate", "zoneinfo", "locale", "updated_at"},
+	"email":   {"email", "email_verified"},
+	"address": {"address"},
+	"phone":   {"phone_number", "phone_number_verified"},
+}
 
-func MapUserClaims(user *models.User, scopes []string) map[string]interface{} {
-	claims := make(map[string]interface{})
+// MapClaims filters the raw context map based on requested scopes and tenant context.
+func MapClaims(subject string, contextMap map[string]interface{}, scopes []string) map[string]interface{} {
+	finalClaims := make(map[string]interface{})
 
-	claims["sub"] = user.ID
-	claims["updated_at"] = user.UpdatedAt.Unix()
+	finalClaims["sub"] = subject
+	allowedKeys := make(map[string]bool)
+
+	allowedKeys["tenant_id"] = true
 
 	for _, scope := range scopes {
-		switch scope {
-		case "profile":
-			claims["name"] = user.FirstName + " " + user.LastName
-			claims["given_name"] = user.FirstName
-			claims["family_name"] = user.LastName
-			claims["nickname"] = user.FirstName
-			// claims["birthdate"] = user.BirthDate.Format("2006-01-02")
-
-		case "email":
-			claims["email"] = user.Email
-			claims["email_verified"] = true
-		case "phone":
-			if user.PhoneNumber != "" {
-				claims["phone_number"] = user.PhoneNumber
-				claims["phone_number_verified"] = false
+		if keys, ok := scopeToClaims[scope]; ok {
+			for _, key := range keys {
+				allowedKeys[key] = true
 			}
-
-		case "address":
-			if user.Address != "" {
-				claims["address"] = map[string]string{
-					"formatted": user.Address,
-				}
-			}
-
-		case "shyntr.admin":
-			if user.Role == "admin" {
-				claims["is_admin"] = true
-			}
+		} else {
+			allowedKeys[scope] = true
 		}
 	}
 
-	return claims
+	for key, value := range contextMap {
+		if allowedKeys[key] {
+			finalClaims[key] = value
+		}
+	}
+
+	return finalClaims
 }

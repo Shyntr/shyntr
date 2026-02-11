@@ -9,8 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// ConnectDB establishes a connection to PostgreSQL using the DSN.
-// NOTE: This does NOT auto-migrate anymore. Use MigrateDB for that.
+// ConnectDB establishes a connection to PostgreSQL.
 func ConnectDB(dsn string) (*gorm.DB, error) {
 	if dsn == "" {
 		log.Fatal("DSN (Database Source Name) is empty.")
@@ -36,11 +35,9 @@ func ConnectDB(dsn string) (*gorm.DB, error) {
 }
 
 // MigrateDB runs the schema migration.
-// Separated for 'shyntr migrate' command.
 func MigrateDB(db *gorm.DB) error {
 	return db.AutoMigrate(
-		&models.Tenant{},
-		&models.User{},
+		&models.Tenant{}, // NEW
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
 		&models.OAuth2Session{},

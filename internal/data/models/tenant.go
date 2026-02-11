@@ -8,11 +8,11 @@ import (
 )
 
 // Tenant represents an isolated environment within Shyntr.
-// Each tenant has its own Users, Clients, and Configuration.
+// Each tenant has its own Configuration and Clients.
 type Tenant struct {
 	ID        string `gorm:"primaryKey"` // e.g., "default", "customer-a"
 	Name      string `gorm:"not null"`
-	IssuerURL string
+	IssuerURL string // Optional: Custom domain support
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

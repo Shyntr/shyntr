@@ -57,6 +57,15 @@ func main() {
 		},
 	}
 
+	var createTenantCmd = &cobra.Command{
+		Use:   "create-tenant [id] [name]",
+		Short: "Create a new Tenant",
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			createTenant(args[0], args[1])
+		},
+	}
+
 	var rotateSecretCmd = &cobra.Command{
 		Use:   "rotate-secret [client_id] [new_secret]",
 		Short: "Rotate Client Secret (Overwrites old one)",
@@ -66,20 +75,11 @@ func main() {
 		},
 	}
 
-	var createUserCmd = &cobra.Command{
-		Use:   "create-user [email] [password] [first_name] [last_name]",
-		Short: "Create a new User",
-		Args:  cobra.ExactArgs(4),
-		Run: func(cmd *cobra.Command, args []string) {
-			createUser(args[0], args[1], args[2], args[3])
-		},
-	}
-
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(createClientCmd)
+	rootCmd.AddCommand(createTenantCmd)
 	rootCmd.AddCommand(rotateSecretCmd)
-	rootCmd.AddCommand(createUserCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.Log.Fatal("CLI execution failed", zap.Error(err))
@@ -92,6 +92,7 @@ func runServer() {
 		zap.String("port", cfg.Port),
 		zap.String("base_issuer", cfg.BaseIssuerURL),
 		zap.String("external_login", cfg.ExternalLoginURL),
+		zap.String("default_tenant", cfg.DefaultTenantID),
 	)
 
 	db, err := data.ConnectDB(cfg.DSN)
@@ -103,7 +104,6 @@ func runServer() {
 	var authProvider *auth.Provider
 	authProvider = auth.NewProvider(db, []byte(cfg.AppSecret), cfg.BaseIssuerURL, keyMgr)
 
-	// Placeholder SAML
 	_ = saml.NewService(db)
 
 	worker.StartCleanupJob(db)
@@ -174,6 +174,20 @@ func createClient(tenantID, id, secret string) {
 	logger.Log.Info("Client created", zap.String("client_id", id), zap.String("tenant_id", tenantID))
 }
 
+func createTenant(id, name string) {
+	db := getDBConnection()
+	tenant := models.Tenant{
+		ID:        id,
+		Name:      name,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := db.Create(&tenant).Error; err != nil {
+		logger.Log.Fatal("Failed to create tenant", zap.Error(err))
+	}
+	logger.Log.Info("Tenant created", zap.String("id", id))
+}
+
 func rotateClientSecret(id, newSecret string) {
 	db := getDBConnection()
 	hashedSecret, err := crypto.HashPassword(newSecret)
@@ -190,30 +204,6 @@ func rotateClientSecret(id, newSecret string) {
 	} else {
 		logger.Log.Info("Client secret rotated", zap.String("client_id", id))
 	}
-}
-
-func createUser(email, password, firstName, lastName string) {
-	db := getDBConnection()
-	hashedPassword, err := crypto.HashPassword(password)
-	if err != nil {
-		logger.Log.Fatal("Failed to hash password", zap.Error(err))
-	}
-
-	user := models.User{
-		Email:        email,
-		PasswordHash: hashedPassword,
-		FirstName:    firstName,
-		LastName:     lastName,
-		IsActive:     true,
-		Role:         "user",
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	if err := db.Create(&user).Error; err != nil {
-		logger.Log.Fatal("Failed to create user", zap.Error(err))
-	}
-	logger.Log.Info("User created", zap.String("email", email))
 }
 
 func getDBConnection() *gorm.DB {

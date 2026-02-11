@@ -32,7 +32,6 @@ func setupFullStack() (*gin.Engine, *gorm.DB, *auth.KeyManager) {
 		panic(err)
 	}
 	db.AutoMigrate(
-		&models.User{},
 		&models.OAuth2Client{},
 		&models.OAuth2Session{},
 		&models.LoginRequest{},
@@ -100,6 +99,7 @@ func TestScenario_OIDC_Prompts(t *testing.T) {
 		TenantID:     "default",
 		RedirectURIs: pq.StringArray{"http://localhost/cb"},
 		Scopes:       pq.StringArray{"openid"},
+		SkipConsent:  false,
 	}
 	db.Create(&client)
 
@@ -114,20 +114,28 @@ func TestScenario_OIDC_Prompts(t *testing.T) {
 	})
 
 	t.Run("Prompt None With Session Succeeds", func(t *testing.T) {
-		user := models.User{ID: "user-123", Email: "test@test.com", IsActive: true}
-		db.Create(&user)
+		simulatedUserID := "user-123"
+
+		db.Create(&models.LoginRequest{
+			ID:            "prev-login-1",
+			Subject:       simulatedUserID,
+			Authenticated: true,
+			Active:        true,
+			UpdatedAt:     time.Now(),
+		})
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/t/default/oauth2/auth?client_id=prompt-client&response_type=code&scope=openid&prompt=none&state=12345678", nil)
 
-		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: "user-123"})
+		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: simulatedUserID})
 
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusFound, w.Code)
 		location := w.Header().Get("Location")
+
 		assert.NotContains(t, location, "error=login_required")
-		assert.Contains(t, location, "login_challenge=")
+		assert.Contains(t, location, "consent_challenge=")
 	})
 }
 

@@ -5,11 +5,14 @@ go 1.25.7
 require (
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
+	github.com/glebarez/sqlite v1.11.0
 	github.com/go-jose/go-jose/v3 v3.0.4
+	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.11.1
 	github.com/ory/fosite v0.47.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.47.0
 	gorm.io/driver/postgres v1.6.0
@@ -32,7 +35,6 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
-	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -44,7 +46,6 @@ require (
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -81,7 +82,6 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect

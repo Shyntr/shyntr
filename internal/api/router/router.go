@@ -29,7 +29,7 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 		MaxAge:           12 * time.Hour,
 	}))
 
-	r.Use(middleware.CSRFMiddleware())
+	//r.Use(middleware.CSRFMiddleware())
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(db)
@@ -39,19 +39,8 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 
 	r.GET("/health", healthHandler.Check)
-	r.GET("/.well-known/openid-configuration", oauthHandler.Discover)
-	r.GET("/.well-known/jwks.json", oauthHandler.Jwks)
-	r.GET("/userinfo", oauthHandler.UserInfo)
 
-	rootOAuth := r.Group("/oauth2")
-	{
-		rootOAuth.GET("/auth", oauthHandler.Authorize)
-		rootOAuth.POST("/token", oauthHandler.Token)
-		rootOAuth.POST("/revoke", oauthHandler.Revoke)
-		rootOAuth.POST("/introspect", oauthHandler.Introspect)
-		rootOAuth.GET("/logout", oauthHandler.Logout)
-	}
-
+	// External UI Routes (Test only)
 	uiGroup := r.Group("/auth")
 	{
 		uiGroup.GET("/login", loginHandler.ShowLogin)
@@ -60,23 +49,38 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 		uiGroup.POST("/consent", consentHandler.SubmitConsent)
 	}
 
+	// 1. Root / Default Tenant Routes
+	r.GET("/.well-known/openid-configuration", oauthHandler.Discover)
+	r.GET("/.well-known/jwks.json", oauthHandler.Jwks)
+	r.GET("/userinfo", oauthHandler.UserInfo)
+
+	oauthGroup := r.Group("/oauth2")
+	{
+		oauthGroup.GET("/auth", oauthHandler.Authorize)
+		oauthGroup.POST("/token", oauthHandler.Token)
+		oauthGroup.POST("/revoke", oauthHandler.Revoke)
+		oauthGroup.POST("/introspect", oauthHandler.Introspect)
+		oauthGroup.GET("/logout", oauthHandler.Logout)
+	}
+
+	// 2. Explicit Tenant Routes
 	tenantGroup := r.Group("/t/:tenant_id")
 	{
 		tenantGroup.GET("/.well-known/openid-configuration", oauthHandler.Discover)
 		tenantGroup.GET("/.well-known/jwks.json", oauthHandler.Jwks)
 		tenantGroup.GET("/userinfo", oauthHandler.UserInfo)
 
-		// OAuth2 Endpoints
-		oauthGroup := tenantGroup.Group("/oauth2")
+		tOAuthGroup := tenantGroup.Group("/oauth2")
 		{
-			oauthGroup.GET("/auth", oauthHandler.Authorize)
-			oauthGroup.POST("/token", oauthHandler.Token)
-			oauthGroup.POST("/revoke", oauthHandler.Revoke)
-			oauthGroup.POST("/introspect", oauthHandler.Introspect)
-			oauthGroup.GET("/logout", oauthHandler.Logout)
+			tOAuthGroup.GET("/auth", oauthHandler.Authorize)
+			tOAuthGroup.POST("/token", oauthHandler.Token)
+			tOAuthGroup.POST("/revoke", oauthHandler.Revoke)
+			tOAuthGroup.POST("/introspect", oauthHandler.Introspect)
+			tOAuthGroup.GET("/logout", oauthHandler.Logout)
 		}
 	}
 
+	// Admin APIs (Internal use by External UI)
 	adminGroup := r.Group("/admin")
 	{
 		adminGroup.GET("/login", adminHandler.GetLoginRequest)

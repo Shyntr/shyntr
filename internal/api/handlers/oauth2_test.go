@@ -28,7 +28,6 @@ func setupTestDB() *gorm.DB {
 
 	db.AutoMigrate(
 		&models.OAuth2Client{},
-		&models.User{},
 		&models.OAuth2Session{},
 		&models.LoginRequest{},
 		&models.ConsentRequest{},
@@ -37,7 +36,6 @@ func setupTestDB() *gorm.DB {
 	return db
 }
 
-// TestOAuth2Handler_Logout, RP-Initiated Logout akışını test eder.
 func TestOAuth2Handler_Logout(t *testing.T) {
 	db := setupTestDB()
 	cfg := &config.Config{CookieSecure: false}
@@ -64,7 +62,6 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 		}
 		rawToken, _ := jwt.Signed(signer).Claims(claims).CompactSerialize()
 
-		// Request URL: /logout?post_logout_redirect_uri=...&id_token_hint=...
 		req, _ := http.NewRequest("GET", "/oauth2/logout?post_logout_redirect_uri="+logoutURI+"&id_token_hint="+rawToken, nil)
 		c.Request = req
 

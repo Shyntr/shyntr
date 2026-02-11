@@ -1,8 +1,7 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
 	fositejwt "github.com/ory/fosite/token/jwt"
@@ -31,20 +31,7 @@ type OAuth2Handler struct {
 }
 
 func NewOAuth2Handler(p *auth.Provider, db *gorm.DB, km *auth.KeyManager, cfg *config.Config) *OAuth2Handler {
-	return &OAuth2Handler{
-		Provider: p,
-		DB:       db,
-		KeyMgr:   km,
-		Config:   cfg,
-	}
-}
-
-func generateRandomString(n int) (string, error) {
-	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
+	return &OAuth2Handler{Provider: p, DB: db, KeyMgr: km, Config: cfg}
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -72,7 +59,6 @@ func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
 func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	tenantID := h.resolveTenantID(c)
 	base := strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
-
 	if c.Param("tenant_id") == "" {
 		return base
 	}
@@ -81,8 +67,6 @@ func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 
 func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	// Parse the authorization request
 	ar, err := h.Provider.Fosite.NewAuthorizeRequest(ctx, c.Request)
 	if err != nil {
 		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, err)
@@ -90,18 +74,15 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	tenantID := h.resolveTenantID(c)
-
 	clientID := ar.GetClient().GetID()
+
 	var client models.OAuth2Client
 	if err := h.DB.First(&client, "id = ? AND tenant_id = ?", clientID, tenantID).Error; err != nil {
-		logger.Log.Warn("Client/Tenant mismatch or not found",
-			zap.String("client_id", clientID),
-			zap.String("tenant_id", tenantID))
+		logger.Log.Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String("tenant_id", tenantID))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
 		return
 	}
 
-	// Strict Scope Validation
 	requestedScopes := ar.GetRequestedScopes()
 	allowedScopes := make(map[string]bool)
 	for _, s := range client.Scopes {
@@ -110,21 +91,14 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	for _, reqScope := range requestedScopes {
 		if !allowedScopes[reqScope] {
-			// Fosite will redirect with error=invalid_scope if we return error here,
-			// but manually writing JSON is cleaner for API clients.
-			// However, for strict OIDC compliance, we should let Fosite handle it or redirect ourselves.
-			// Fosite validates scopes internally if we don't grant them.
-			// Here we explicit check to fail fast.
 			h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidScope.WithHintf("The requested scope '%s' is not authorized for this client.", reqScope))
 			return
 		}
 	}
 
-	// OIDC Compliance Checks (prompt, max_age, session)
 	prompt := ar.GetRequestForm().Get("prompt")
-
-	sessionCookie, err := c.Cookie(consts.SessionCookieName)
-	hasSession := err == nil && sessionCookie != ""
+	sessionCookie, _ := c.Cookie(consts.SessionCookieName)
+	hasSession := sessionCookie != ""
 
 	if prompt == "none" && !hasSession {
 		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
@@ -132,45 +106,50 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	forceLogin := prompt == "login"
-
 	verifier := c.Query("login_verifier")
+
 	var userID string
-	isRemembered := false
 	var authTime time.Time = time.Now()
+	var userContext map[string]interface{}
+	isRemembered := false
+	rememberForDuration := 0
 
 	if verifier != "" {
 		var loginReq models.LoginRequest
-		if err := h.DB.First(&loginReq, "id = ? AND authenticated = ?", verifier, true).Error; err != nil {
+		if err := h.DB.First(&loginReq, "id = ? AND authenticated = ?", verifier, true).Error; err == nil {
+			userID = loginReq.Subject
+			authTime = loginReq.UpdatedAt
+			isRemembered = loginReq.Remember
+			rememberForDuration = loginReq.RememberFor
+
+			if len(loginReq.Context) > 0 {
+				if err := json.Unmarshal(loginReq.Context, &userContext); err != nil {
+					logger.Log.Error("Failed to unmarshal user context", zap.Error(err))
+				}
+			}
+		} else {
 			logger.Log.Warn("Invalid or expired login verifier", zap.String("verifier", verifier))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_login_verifier"})
 			return
 		}
-		userID = loginReq.Subject
-		isRemembered = loginReq.Remember
-		authTime = loginReq.UpdatedAt
 
 	} else if hasSession && !forceLogin {
 		userID = sessionCookie
-
 		var lastLogin models.LoginRequest
-		if err := h.DB.Order("updated_at desc").
-			Where("subject = ? AND authenticated = ?", userID, true).
-			First(&lastLogin).Error; err == nil {
+		if err := h.DB.Order("updated_at desc").Where("subject = ? AND authenticated = ?", userID, true).First(&lastLogin).Error; err == nil {
 			authTime = lastLogin.UpdatedAt
-		} else {
-			forceLogin = true
-		}
-
-		if !forceLogin {
-			var userCheck models.User
-			if err := h.DB.Select("id").First(&userCheck, "id = ? AND tenant_id = ? AND is_active = ?", userID, tenantID, true).Error; err != nil {
-				forceLogin = true
+			isRemembered = lastLogin.Remember
+			rememberForDuration = lastLogin.RememberFor
+			if len(lastLogin.Context) > 0 {
+				if err := json.Unmarshal(lastLogin.Context, &userContext); err != nil {
+					logger.Log.Error("Failed to unmarshal SSO user context", zap.Error(err))
+				}
 			}
 		}
 	}
 
 	if userID == "" || forceLogin {
-		challengeID, err := generateRandomString(32)
+		challengeID, err := utils.GenerateRandomHex(16)
 		if err != nil {
 			logger.Log.Error("Failed to generate challenge", zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal_server_error"})
@@ -203,12 +182,10 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	var grantedScopes []string
 	var grantedAudience []string
-
 	forceConsent := prompt == "consent"
 
 	if !client.SkipConsent || forceConsent {
 		consentVerifier := c.Query("consent_verifier")
-
 		if consentVerifier != "" {
 			var consentReq models.ConsentRequest
 			if err := h.DB.First(&consentReq, "id = ? AND authenticated = ?", consentVerifier, true).Error; err != nil {
@@ -218,7 +195,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			grantedScopes = consentReq.GrantedScope
 			grantedAudience = consentReq.GrantedAudience
 		} else {
-			challengeID, _ := generateRandomString(32)
+			challengeID, _ := utils.GenerateRandomHex(16)
 			consentReq := models.ConsentRequest{
 				ID:                challengeID,
 				ClientID:          clientID,
@@ -245,18 +222,14 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	accessTokenLife := getEffectiveLifespan(client.AccessTokenLifespan, h.Config.AccessTokenLifespan, 1*time.Hour)
-	refreshTokenLife := getEffectiveLifespan(client.RefreshTokenLifespan, h.Config.RefreshTokenLifespan, 720*time.Hour) // 30 gün
 	idTokenLife := getEffectiveLifespan(client.IDTokenLifespan, h.Config.IDTokenLifespan, 1*time.Hour)
+	refreshTokenLife := getEffectiveLifespan(client.RefreshTokenLifespan, h.Config.RefreshTokenLifespan, 720*time.Hour)
 
 	if isRemembered {
-		refreshTokenLife = refreshTokenLife * 3
-	}
-
-	hasOfflineAccess := false
-	for _, s := range grantedScopes {
-		if s == "offline_access" {
-			hasOfflineAccess = true
-			break
+		if rememberForDuration > 0 {
+			refreshTokenLife = time.Duration(rememberForDuration) * time.Second
+		} else {
+			refreshTokenLife = refreshTokenLife * 3
 		}
 	}
 
@@ -280,28 +253,34 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	session.ExpiresAt[fosite.AccessToken] = now.Add(accessTokenLife)
+
+	hasOfflineAccess := false
+	for _, s := range grantedScopes {
+		if s == "offline_access" {
+			hasOfflineAccess = true
+			break
+		}
+	}
+
 	if hasOfflineAccess {
 		session.ExpiresAt[fosite.RefreshToken] = now.Add(refreshTokenLife)
 	} else {
 		session.ExpiresAt[fosite.RefreshToken] = now.Add(accessTokenLife)
 	}
 
-	var user models.User
-	if err := h.DB.First(&user, "id = ?", userID).Error; err == nil {
-		session.Claims.Add("tenant_id", tenantID)
-		mappedClaims := auth.MapUserClaims(&user, grantedScopes)
+	session.Claims.Add("tenant_id", tenantID)
+	if userContext != nil {
+		mappedClaims := auth.MapClaims(userID, userContext, grantedScopes)
 		for k, v := range mappedClaims {
 			session.Claims.Add(k, v)
 		}
-	} else {
-		logger.Log.Error("User not found for token claims", zap.String("user_id", userID))
 	}
 
 	for _, scope := range grantedScopes {
 		ar.GrantScope(scope)
 	}
-	for _, audience := range grantedAudience {
-		ar.GrantAudience(audience)
+	for _, aud := range grantedAudience {
+		ar.GrantAudience(aud)
 	}
 
 	response, err := h.Provider.Fosite.NewAuthorizeResponse(ctx, ar, session)
@@ -323,19 +302,14 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	}
 
 	urlTenantID := h.resolveTenantID(c)
-	client := ar.GetClient()
-
 	var dbClient models.OAuth2Client
-	if err := h.DB.Select("tenant_id").First(&dbClient, "id = ?", client.GetID()).Error; err != nil {
-		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrServerError)
+	if err := h.DB.Select("tenant_id").First(&dbClient, "id = ?", ar.GetClient().GetID()).Error; err != nil {
+		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
 	if dbClient.TenantID != urlTenantID {
-		logger.Log.Warn("Tenant mismatch attack attempt",
-			zap.String("client_id", client.GetID()),
-			zap.String("attempted_tenant", urlTenantID),
-			zap.String("actual_tenant", dbClient.TenantID))
+		logger.Log.Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
@@ -362,22 +336,17 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	}
 
 	isValidRedirect := false
-
 	if idTokenHint != "" {
 		token, err := jwt.ParseSigned(idTokenHint)
 		if err == nil {
 			claims := &jwt.Claims{}
-			if err := token.UnsafeClaimsWithoutVerification(claims); err == nil {
-				if len(claims.Audience) > 0 {
-					clientID := claims.Audience[0]
-
-					var client models.OAuth2Client
-					if err := h.DB.First(&client, "id = ?", clientID).Error; err == nil {
-						for _, allowedURI := range client.PostLogoutRedirectURIs {
-							if allowedURI == postLogoutRedirectURI {
-								isValidRedirect = true
-								break
-							}
+			if err := token.UnsafeClaimsWithoutVerification(claims); err == nil && len(claims.Audience) > 0 {
+				var client models.OAuth2Client
+				if err := h.DB.First(&client, "id = ?", claims.Audience[0]).Error; err == nil {
+					for _, uri := range client.PostLogoutRedirectURIs {
+						if uri == postLogoutRedirectURI {
+							isValidRedirect = true
+							break
 						}
 					}
 				}
@@ -395,86 +364,64 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 		}
 		c.Redirect(http.StatusFound, postLogoutRedirectURI)
 	} else {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Logged out. (Redirect blocked due to missing or invalid validation)",
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "Logged out (Redirect blocked due to validation failure)"})
 	}
-}
-
-func (h *OAuth2Handler) Introspect(c *gin.Context) {
-	ctx := c.Request.Context()
-	session := &openid.DefaultSession{}
-	ar, err := h.Provider.Fosite.NewIntrospectionRequest(ctx, c.Request, session)
-	if err != nil {
-		h.Provider.Fosite.WriteIntrospectionError(ctx, c.Writer, err)
-		return
-	}
-	h.Provider.Fosite.WriteIntrospectionResponse(ctx, c.Writer, ar)
-}
-
-func (h *OAuth2Handler) Revoke(c *gin.Context) {
-	ctx := c.Request.Context()
-	err := h.Provider.Fosite.NewRevocationRequest(ctx, c.Request)
-	if err != nil {
-		h.Provider.Fosite.WriteRevocationResponse(ctx, c.Writer, err)
-		return
-	}
-	h.Provider.Fosite.WriteRevocationResponse(ctx, c.Writer, nil)
 }
 
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
 		return
 	}
 
 	ctx := c.Request.Context()
 	_, ar, err := h.Provider.Fosite.IntrospectToken(ctx, token, fosite.AccessToken, &openid.DefaultSession{})
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
 	}
 
 	session := ar.GetSession().(*openid.DefaultSession)
-	userID := session.GetSubject()
+	c.JSON(http.StatusOK, session.Claims.ToMap())
+}
 
-	var user models.User
-	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user_not_found"})
+func (h *OAuth2Handler) Introspect(c *gin.Context) {
+	session := &openid.DefaultSession{}
+	ar, err := h.Provider.Fosite.NewIntrospectionRequest(c.Request.Context(), c.Request, session)
+	if err != nil {
+		h.Provider.Fosite.WriteIntrospectionError(c.Request.Context(), c.Writer, err)
 		return
 	}
+	h.Provider.Fosite.WriteIntrospectionResponse(c.Request.Context(), c.Writer, ar)
+}
 
-	grantedScopes := ar.GetGrantedScopes()
-	userInfo := auth.MapUserClaims(&user, grantedScopes)
-	userInfo["sub"] = user.ID
-	userInfo["email_verified"] = true
-
-	c.JSON(200, userInfo)
+func (h *OAuth2Handler) Revoke(c *gin.Context) {
+	err := h.Provider.Fosite.NewRevocationRequest(c.Request.Context(), c.Request)
+	h.Provider.Fosite.WriteRevocationResponse(c.Request.Context(), c.Writer, err)
 }
 
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
 	privKey := h.KeyMgr.GetActivePrivateKey()
 	jwks := auth.GeneratePublicJWKS(privKey)
-	c.JSON(200, jwks)
+	c.JSON(http.StatusOK, jwks)
 }
 
+// Discover endpoints handles .well-known/openid-configuration
+// Ensures ALL OIDC discovery fields are present.
 func (h *OAuth2Handler) Discover(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
 	var tenant models.Tenant
 	if err := h.DB.Select("id").First(&tenant, "id = ?", tenantID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "tenant_not_found"})
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "tenant_not_found"})
 		return
 	}
 
 	issuer := h.getIssuer(c)
+	makeURL := func(path string) string { return issuer + path }
 
-	makeURL := func(path string) string {
-		return issuer + path
-	}
-
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"issuer":                 issuer,
 		"authorization_endpoint": makeURL("/oauth2/auth"),
 		"token_endpoint":         makeURL("/oauth2/token"),
@@ -487,10 +434,14 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 		"response_types_supported":              []string{"code", "token", "id_token", "code id_token"},
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"RS256"},
-		"scopes_supported":                      []string{"openid", "offline_access", "profile", "email", "phone", "address"},
+
+		"scopes_supported": []string{"openid", "offline_access", "profile", "email", "address", "phone"},
+
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
-		"claims_supported":                      []string{"sub", "iss", "name", "email", "email_verified", "tenant_id", "phone_number", "address", "auth_time"},
-		"display_values_supported":              []string{"page", "popup"},
-		"ui_locales_supported":                  []string{"en-US", "tr-TR"},
+
+		"claims_supported": []string{"sub", "iss", "tenant_id", "name", "email", "email_verified", "phone_number", "address", "auth_time"},
+
+		"display_values_supported": []string{"page", "popup"},
+		"ui_locales_supported":     []string{"en-US", "tr-TR"},
 	})
 }
