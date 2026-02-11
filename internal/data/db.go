@@ -37,7 +37,7 @@ func ConnectDB(dsn string) (*gorm.DB, error) {
 // MigrateDB runs the schema migration.
 func MigrateDB(db *gorm.DB) error {
 	return db.AutoMigrate(
-		&models.Tenant{}, // NEW
+		&models.Tenant{},
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
 		&models.OAuth2Session{},

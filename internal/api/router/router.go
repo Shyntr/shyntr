@@ -9,6 +9,8 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/api/middleware"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/saml"
+	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"gorm.io/gorm"
 )
@@ -20,6 +22,9 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	r.Use(middleware.RequestLogger())
 	r.Use(middleware.SecurityHeaders())
 
+	samlRepo := repository.NewSAMLRepository(db)
+	samlService := saml.NewService(samlRepo, km, cfg)
+
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
@@ -29,7 +34,7 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 		MaxAge:           12 * time.Hour,
 	}))
 
-	//r.Use(middleware.CSRFMiddleware())
+	r.Use(middleware.CSRFMiddleware())
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(db)
@@ -37,6 +42,7 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	loginHandler := handlers.NewLoginHandler(db)
 	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
+	samlHandler := handlers.NewSAMLHandler(samlService, db)
 
 	r.GET("/health", healthHandler.Check)
 
@@ -53,6 +59,16 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	r.GET("/.well-known/openid-configuration", oauthHandler.Discover)
 	r.GET("/.well-known/jwks.json", oauthHandler.Jwks)
 	r.GET("/userinfo", oauthHandler.UserInfo)
+
+	rootSamlGroup := r.Group("/saml")
+	{
+		rootSamlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
+		rootSamlGroup.POST("/sp/acs", samlHandler.ACS)
+
+		rootSamlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
+
+		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
+	}
 
 	oauthGroup := r.Group("/oauth2")
 	{
@@ -77,6 +93,14 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 			tOAuthGroup.POST("/revoke", oauthHandler.Revoke)
 			tOAuthGroup.POST("/introspect", oauthHandler.Introspect)
 			tOAuthGroup.GET("/logout", oauthHandler.Logout)
+		}
+
+		samlGroup := tenantGroup.Group("/saml")
+		{
+			samlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
+			samlGroup.POST("/sp/acs", samlHandler.ACS)
+			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
+			samlGroup.GET("/login/:connection_id", samlHandler.Login)
 		}
 	}
 

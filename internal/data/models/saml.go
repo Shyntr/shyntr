@@ -3,21 +3,29 @@ package models
 import (
 	"time"
 
-	"github.com/google/uuid" // Eklendi
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// SAMLConnection stores configuration for external SAML Identity Providers.
+// SAMLConnection represents a trust relationship with an external SAML Identity Provider.
 type SAMLConnection struct {
-	ID             string `gorm:"primaryKey"`
-	Tenant         string `gorm:"index;not null"`
-	IdpSSOURL      string `gorm:"not null"`
-	IdpEntityID    string `gorm:"not null"`
-	IdpCert        string `gorm:"type:text"`
-	RelyingPartyID string
-	Active         bool `gorm:"default:true"`
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID       string `gorm:"primaryKey"`
+	TenantID string `gorm:"index;not null"`
+	Name     string `gorm:"not null"`
+
+	IdpMetadataURL string `gorm:"type:text"`
+	IdpMetadataXML string `gorm:"type:text"`
+	IdpEntityID    string `gorm:"index"`
+
+	SPCertificate string `gorm:"type:text"`
+	SPPrivateKey  string `gorm:"type:text"`
+
+	AttributeMapping []byte `gorm:"type:jsonb"`
+
+	Active    bool `gorm:"default:true"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 func (s *SAMLConnection) BeforeCreate(tx *gorm.DB) (err error) {
