@@ -74,6 +74,9 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 		rootSamlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
+		// IdP Routes
+		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
+		rootSamlGroup.POST("/idp/sso", samlHandler.IDPSSO)
 	}
 
 	oauthGroup := r.Group("/oauth2")
@@ -107,6 +110,9 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 			samlGroup.POST("/sp/acs", samlHandler.ACS)
 			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
+			// IdP Routes
+			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)
+			samlGroup.POST("/idp/sso", samlHandler.IDPSSO)
 		}
 
 		oidcGroup := tenantGroup.Group("/oidc")

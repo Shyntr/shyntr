@@ -158,6 +158,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 		loginReq := models.LoginRequest{
 			ID:                challengeID,
+			TenantID:          tenantID,
 			ClientID:          clientID,
 			RequestedScope:    pq.StringArray(ar.GetRequestedScopes()),
 			RequestedAudience: pq.StringArray(ar.GetRequestedAudience()),

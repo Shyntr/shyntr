@@ -19,11 +19,13 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/beevik/etree"
 	"github.com/crewjam/saml"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
+	goxmldsig "github.com/russellhaering/goxmldsig"
 )
 
 type Service struct {
@@ -243,7 +245,6 @@ func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) 
 		block, _ := pem.Decode([]byte(samlClient.SPCertificate))
 		if block != nil {
 			certStr := base64.StdEncoding.EncodeToString(block.Bytes)
-
 			keyDescriptor := saml.KeyDescriptor{
 				Use: "encryption",
 				KeyInfo: saml.KeyInfo{
@@ -254,7 +255,6 @@ func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) 
 					},
 				},
 			}
-
 			signingKeyDescriptor := keyDescriptor
 			signingKeyDescriptor.Use = "signing"
 
@@ -318,12 +318,168 @@ func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *h
 	return &authReq, nil
 }
 
+func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *saml.AuthnRequest, sp *models.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error) {
+	idp, err := s.GetIdentityProvider(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	subject := "unknown"
+	if v, ok := userAttributes["sub"].(string); ok {
+		subject = v
+	} else if v, ok := userAttributes["email"].(string); ok {
+		subject = v
+	}
+
+	samlAttributes := make(map[string][]string)
+	for k, v := range userAttributes {
+		samlAttributes[k] = []string{fmt.Sprintf("%v", v)}
+	}
+
+	assertionID := fmt.Sprintf("id-%d", now.UnixNano())
+
+	assertion := saml.Assertion{
+		ID:           assertionID,
+		IssueInstant: now,
+		Version:      "2.0",
+		Issuer: saml.Issuer{
+			Value: idp.MetadataURL.String(),
+		},
+		Subject: &saml.Subject{
+			NameID: &saml.NameID{
+				Format: string(saml.EmailAddressNameIDFormat),
+				Value:  subject,
+			},
+			SubjectConfirmations: []saml.SubjectConfirmation{
+				{
+					Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+					SubjectConfirmationData: &saml.SubjectConfirmationData{
+						InResponseTo: authReq.ID,
+						NotOnOrAfter: now.Add(5 * time.Minute),
+						Recipient:    authReq.AssertionConsumerServiceURL,
+					},
+				},
+			},
+		},
+		Conditions: &saml.Conditions{
+			NotBefore:    now.Add(-5 * time.Minute),
+			NotOnOrAfter: now.Add(5 * time.Minute),
+			AudienceRestrictions: []saml.AudienceRestriction{
+				{
+					Audience: saml.Audience{Value: authReq.Issuer.Value},
+				},
+			},
+		},
+		AuthnStatements: []saml.AuthnStatement{
+			{
+				AuthnInstant: now,
+				SessionIndex: assertionID,
+				AuthnContext: saml.AuthnContext{
+					AuthnContextClassRef: &saml.AuthnContextClassRef{
+						Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+					},
+				},
+			},
+		},
+		AttributeStatements: []saml.AttributeStatement{
+			{
+				Attributes: []saml.Attribute{},
+			},
+		},
+	}
+
+	for k, vals := range samlAttributes {
+		attr := saml.Attribute{
+			Name:       k,
+			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
+		}
+		for _, v := range vals {
+			attr.Values = append(attr.Values, saml.AttributeValue{
+				Type:  "xs:string",
+				Value: v,
+			})
+		}
+		assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, attr)
+	}
+
+	response := &saml.Response{
+		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
+		InResponseTo: authReq.ID,
+		IssueInstant: now,
+		Version:      "2.0",
+		Destination:  authReq.AssertionConsumerServiceURL,
+		Issuer: &saml.Issuer{
+			Value: idp.MetadataURL.String(),
+		},
+		Status: saml.Status{
+			StatusCode: saml.StatusCode{
+				Value: saml.StatusSuccess,
+			},
+		},
+		Assertion: &assertion,
+	}
+
+	respBytes, err := xml.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	signedXML, err := s.signResponseXML(respBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign response: %w", err)
+	}
+
+	b64Resp := base64.StdEncoding.EncodeToString(signedXML)
+
+	htmlForm := fmt.Sprintf(`
+		<!DOCTYPE html>
+		<html>
+		<body onload="document.forms[0].submit()">
+			<form method="post" action="%s">
+				<input type="hidden" name="SAMLResponse" value="%s" />
+				<input type="hidden" name="RelayState" value="%s" />
+				<noscript>
+					<p>Please click the button below to continue.</p>
+					<input type="submit" value="Continue" />
+				</noscript>
+			</form>
+		</body>
+		</html>
+	`, authReq.AssertionConsumerServiceURL, b64Resp, relayState)
+
+	return htmlForm, nil
+}
+
+func (s *Service) signResponseXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
+	signingContext, _ := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
+
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(xmlBytes); err != nil {
+		return nil, err
+	}
+
+	root := doc.Root()
+	if root == nil {
+		return nil, errors.New("empty xml doc")
+	}
+
+	signedElement, err := signingContext.SignEnveloped(root)
+	if err != nil {
+		return nil, err
+	}
+
+	newDoc := etree.NewDocument()
+	newDoc.SetRoot(signedElement)
+
+	return newDoc.WriteToBytes()
+}
+
 func (s *Service) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*models.SAMLConnection, error) {
 	meta := &saml.EntityDescriptor{}
 	if err := xml.Unmarshal([]byte(metadataXML), meta); err != nil {
 		return nil, fmt.Errorf("invalid metadata xml: %w", err)
 	}
-
 	conn := &models.SAMLConnection{
 		TenantID:       tenantID,
 		Name:           name,
@@ -331,29 +487,23 @@ func (s *Service) RegisterConnection(ctx context.Context, tenantID, name, metada
 		IdpEntityID:    meta.EntityID,
 		Active:         true,
 	}
-
 	err := s.Repo.CreateConnection(ctx, conn)
 	return conn, err
 }
 
 func (s *Service) generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error) {
 	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName: "Shyntr SAML Service Provider",
-		},
-		NotBefore: time.Now().Add(-1 * time.Minute),
-		NotAfter:  time.Now().Add(365 * 24 * time.Hour * 10),
-
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Shyntr SAML Service Provider"},
+		NotBefore:             time.Now().Add(-1 * time.Minute),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10),
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
 		return nil, err
 	}
-
 	return x509.ParseCertificate(derBytes)
 }

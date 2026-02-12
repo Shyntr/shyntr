@@ -9,6 +9,7 @@ import (
 
 type LoginRequest struct {
 	ID                string         `gorm:"primaryKey"`
+	TenantID          string         `gorm:"index"`
 	RequestedScope    pq.StringArray `gorm:"type:text[]"`
 	RequestedAudience pq.StringArray `gorm:"type:text[]"`
 	Skip              bool           `gorm:"default:false"`
