@@ -35,11 +35,12 @@ func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, err
 			GrantTypes:    clientModel.GrantTypes,
 			ResponseTypes: clientModel.ResponseTypes,
 			Scopes:        clientModel.Scopes,
+			Audience:      clientModel.Audience,
 			Public:        clientModel.Public,
-			Audience:      []string{},
 		},
-		JSONWebKeys:            clientModel.JSONWebKeys,
-		PostLogoutRedirectURIs: clientModel.PostLogoutRedirectURIs,
+		JSONWebKeys:             clientModel.JSONWebKeys,
+		PostLogoutRedirectURIs:  clientModel.PostLogoutRedirectURIs,
+		TokenEndpointAuthMethod: clientModel.TokenEndpointAuthMethod,
 	}, nil
 }
 

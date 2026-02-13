@@ -15,9 +15,14 @@ var (
 
 // InitLogger initializes the global logger.
 // In production, it outputs JSON. In dev, it outputs console-friendly text.
-func InitLogger() {
+func InitLogger(level string) {
 	once.Do(func() {
 		env := os.Getenv("GO_ENV")
+
+		logLevel, err := zapcore.ParseLevel(level)
+		if err != nil {
+			logLevel = zapcore.InfoLevel
+		}
 
 		var config zap.Config
 		if env == "production" {
@@ -29,7 +34,8 @@ func InitLogger() {
 			config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		}
 
-		var err error
+		config.Level = zap.NewAtomicLevelAt(logLevel)
+
 		Log, err = config.Build()
 		if err != nil {
 			panic("Failed to initialize logger: " + err.Error())
@@ -37,9 +43,8 @@ func InitLogger() {
 	})
 }
 
-// Sync flushes any buffered log entries.
 func Sync() {
 	if Log != nil {
-		_ = Log.Sync() // Ignore error on sync (common in stdout logging)
+		_ = Log.Sync()
 	}
 }

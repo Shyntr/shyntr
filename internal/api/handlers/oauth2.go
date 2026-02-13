@@ -83,6 +83,27 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
+	if client.EnforcePKCE {
+		if ar.GetRequestForm().Get("code_challenge") == "" {
+			h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHint("This client requires PKCE. Please include code_challenge."))
+			return
+		}
+	}
+
+	requestedAudience := ar.GetRequestedAudience()
+	if len(requestedAudience) > 0 && len(client.Audience) > 0 {
+		allowedAudience := make(map[string]bool)
+		for _, a := range client.Audience {
+			allowedAudience[a] = true
+		}
+		for _, reqAud := range requestedAudience {
+			if !allowedAudience[reqAud] {
+				h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHintf("The requested audience '%s' is not whitelisted for this client.", reqAud))
+				return
+			}
+		}
+	}
+
 	requestedScopes := ar.GetRequestedScopes()
 	allowedScopes := make(map[string]bool)
 	for _, s := range client.Scopes {
@@ -438,7 +459,7 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 
 		"scopes_supported": []string{"openid", "offline_access", "profile", "email", "address", "phone"},
 
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
 
 		"claims_supported": []string{"sub", "iss", "tenant_id", "name", "email", "email_verified", "phone_number", "address", "auth_time"},
 

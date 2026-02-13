@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/xml"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/crewjam/saml"
 	"github.com/nevzatcirak/shyntr/config"
@@ -16,6 +21,7 @@ import (
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -29,7 +35,7 @@ func main() {
 		Short: "Run database migrations",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg.DSN)
+			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -46,7 +52,7 @@ func main() {
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg.DSN)
+			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -65,7 +71,7 @@ func main() {
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg.DSN)
+			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -98,7 +104,7 @@ func main() {
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg.DSN)
+			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -149,10 +155,10 @@ func main() {
 }
 
 func runServer() {
-	logger.InitLogger()
 	cfg := config.LoadConfig()
+	logger.InitLogger(cfg.LogLevel)
 
-	db, err := data.ConnectDB(cfg.DSN)
+	db, err := data.ConnectDB(cfg)
 	if err != nil {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
@@ -164,16 +170,60 @@ func runServer() {
 
 	provider := auth.NewProvider(db, []byte(cfg.AppSecret), cfg.BaseIssuerURL, keyMgr)
 
-	r := router.SetupRoutes(db, provider, cfg, keyMgr)
+	publicRouter, adminRouter := router.SetupRouters(db, provider, cfg, keyMgr)
 
-	logger.Log.Info("Starting Shyntr Broker",
-		zap.String("port", cfg.Port),
-		zap.String("base_issuer", cfg.BaseIssuerURL),
-		zap.String("external_login", cfg.ExternalLoginURL),
-		zap.String("default_tenant", cfg.DefaultTenantID),
-	)
+	publicSrv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: publicRouter,
+	}
 
-	if err := r.Run(":" + cfg.Port); err != nil {
-		logger.Log.Fatal("Server failed to start", zap.Error(err))
+	adminSrv := &http.Server{
+		Addr:    ":" + cfg.AdminPort,
+		Handler: adminRouter,
+	}
+
+	g, ctx := errgroup.WithContext(context.Background())
+
+	g.Go(func() error {
+		logger.Log.Info("Starting Public Server", zap.String("port", cfg.Port))
+		if err := publicSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		logger.Log.Info("Starting Admin Server", zap.String("port", cfg.AdminPort))
+		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+		select {
+		case <-quit:
+			logger.Log.Info("Shutting down servers (Signal received)...")
+		case <-ctx.Done():
+			logger.Log.Info("Shutting down servers (Context cancelled)...")
+		}
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := publicSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Log.Error("Public server forced to shutdown", zap.Error(err))
+		}
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Log.Error("Admin server forced to shutdown", zap.Error(err))
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		logger.Log.Fatal("Server exit with error", zap.Error(err))
 	}
 }

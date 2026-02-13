@@ -4,18 +4,18 @@ import (
 	"log"
 	"time"
 
+	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-// ConnectDB establishes a connection to PostgreSQL.
-func ConnectDB(dsn string) (*gorm.DB, error) {
-	if dsn == "" {
+func ConnectDB(cfg *config.Config) (*gorm.DB, error) {
+	if cfg.DSN == "" {
 		log.Fatal("DSN (Database Source Name) is empty.")
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -27,8 +27,8 @@ func ConnectDB(dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	return db, nil

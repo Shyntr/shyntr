@@ -106,6 +106,9 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 
 	if conn != nil {
 		sp.ForceAuthn = &conn.ForceAuthn
+		if !conn.SignRequest {
+			sp.Key = nil
+		}
 	}
 
 	return sp, nil
@@ -379,15 +382,8 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		subject = v
 	}
 
-	samlAttributes := make(map[string][]string)
-	for k, v := range userAttributes {
-		samlAttributes[k] = []string{fmt.Sprintf("%v", v)}
-	}
-
-	assertionID := fmt.Sprintf("id-%d", now.UnixNano())
-
 	assertion := saml.Assertion{
-		ID:           assertionID,
+		ID:           fmt.Sprintf("id-%d", now.UnixNano()),
 		IssueInstant: now,
 		Version:      "2.0",
 		Issuer: saml.Issuer{
@@ -421,7 +417,7 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		AuthnStatements: []saml.AuthnStatement{
 			{
 				AuthnInstant: now,
-				SessionIndex: assertionID,
+				SessionIndex: fmt.Sprintf("id-%d", now.UnixNano()),
 				AuthnContext: saml.AuthnContext{
 					AuthnContextClassRef: &saml.AuthnContextClassRef{
 						Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
@@ -436,18 +432,51 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		},
 	}
 
-	for k, vals := range samlAttributes {
-		attr := saml.Attribute{
+	for k, v := range userAttributes {
+		assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, saml.Attribute{
 			Name:       k,
 			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
-		}
-		for _, v := range vals {
-			attr.Values = append(attr.Values, saml.AttributeValue{
+			Values: []saml.AttributeValue{{
 				Type:  "xs:string",
-				Value: v,
-			})
+				Value: fmt.Sprintf("%v", v),
+			}},
+		})
+	}
+
+	assertBytes, err := xml.Marshal(assertion)
+	if err != nil {
+		return "", err
+	}
+	docAssert := etree.NewDocument()
+	docAssert.ReadFromBytes(assertBytes)
+	rootAssert := docAssert.Root()
+
+	// Eğer SignAssertion true ise, Assertion'ı imzala
+	if sp.SignAssertion {
+		signedAssertBytes, err := s.signElementXML(assertBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign assertion: %w", err)
 		}
-		assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, attr)
+		docAssert = etree.NewDocument()
+		docAssert.ReadFromBytes(signedAssertBytes)
+		rootAssert = docAssert.Root()
+	}
+
+	var finalAssertionElement *etree.Element = rootAssert
+
+	if sp.EncryptAssertion && sp.SPCertificate != "" {
+		block, _ := pem.Decode([]byte(sp.SPCertificate))
+		if block != nil {
+			spCert, err := x509.ParseCertificate(block.Bytes)
+			if err == nil {
+				assertBytesToEncrypt, _ := docAssert.WriteToBytes()
+				encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
+				if err != nil {
+					return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+				}
+				finalAssertionElement = encryptedElem
+			}
+		}
 	}
 
 	response := &saml.Response{
@@ -466,79 +495,39 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		},
 	}
 
-	if sp.EncryptAssertion && sp.SPCertificate != "" {
-		block, _ := pem.Decode([]byte(sp.SPCertificate))
-		if block != nil {
-			spCert, err := x509.ParseCertificate(block.Bytes)
-			if err == nil {
-				encryptedElem, err := encryptAssertion(&assertion, spCert)
-				if err != nil {
-					return "", fmt.Errorf("failed to encrypt assertion: %w", err)
-				}
-				response.Assertion = nil
-				respBytes, _ := xml.Marshal(response)
+	response.Assertion = nil
+	respBytes, err := xml.Marshal(response)
+	if err != nil {
+		return "", err
+	}
 
-				doc := etree.NewDocument()
-				doc.ReadFromBytes(respBytes)
-				root := doc.Root()
+	docResp := etree.NewDocument()
+	docResp.ReadFromBytes(respBytes)
+	rootResp := docResp.Root()
 
-				root.AddChild(encryptedElem)
+	rootResp.AddChild(finalAssertionElement)
 
-				signedXMLBytes, err := doc.WriteToBytes()
-				if err != nil {
-					return "", err
-				}
+	finalXMLBytes, err := docResp.WriteToBytes()
+	if err != nil {
+		return "", err
+	}
 
-				signedXML, err := s.signResponseXML(signedXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
-				if err != nil {
-					return "", fmt.Errorf("failed to sign encrypted response: %w", err)
-				}
-
-				b64Resp := base64.StdEncoding.EncodeToString(signedXML)
-				return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
-			}
+	if sp.SignResponse {
+		finalXMLBytes, err = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign response: %w", err)
 		}
 	}
 
-	response.Assertion = &assertion
-	respBytes, err := xml.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	signedXML, err := s.signResponseXML(respBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
-	if err != nil {
-		return "", fmt.Errorf("failed to sign response: %w", err)
-	}
-
-	b64Resp := base64.StdEncoding.EncodeToString(signedXML)
+	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
 }
 
 func buildHTMLForm(acsURL, b64Resp, relayState string) string {
-	return fmt.Sprintf(`
-		<!DOCTYPE html>
-		<html>
-		<body onload="document.forms[0].submit()">
-			<form method="post" action="%s">
-				<input type="hidden" name="SAMLResponse" value="%s" />
-				<input type="hidden" name="RelayState" value="%s" />
-				<noscript>
-					<p>Please click the button below to continue.</p>
-					<input type="submit" value="Continue" />
-				</noscript>
-			</form>
-		</body>
-		</html>
-	`, acsURL, b64Resp, relayState)
+	return fmt.Sprintf(`<!DOCTYPE html><html><body onload="document.forms[0].submit()"><form method="post" action="%s"><input type="hidden" name="SAMLResponse" value="%s" /><input type="hidden" name="RelayState" value="%s" /><noscript><input type="submit" value="Continue" /></noscript></form></body></html>`, acsURL, b64Resp, relayState)
 }
 
-func encryptAssertion(assertion *saml.Assertion, cert *x509.Certificate) (*etree.Element, error) {
-	assertBytes, err := xml.Marshal(assertion)
-	if err != nil {
-		return nil, err
-	}
-
+func encryptAssertionBytes(assertionXML []byte, cert *x509.Certificate) (*etree.Element, error) {
 	symKey := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, symKey); err != nil {
 		return nil, err
@@ -556,8 +545,8 @@ func encryptAssertion(assertion *saml.Assertion, cert *x509.Certificate) (*etree
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
-	encryptedData := gcm.Seal(nonce, nonce, assertBytes, nil)
 
+	encryptedData := gcm.Seal(nonce, nonce, assertionXML, nil)
 	encryptedKey, err := rsa.EncryptOAEP(sha1.New(), rand.Reader, cert.PublicKey.(*rsa.PublicKey), symKey, nil)
 	if err != nil {
 		return nil, err
@@ -591,24 +580,47 @@ func encryptAssertion(assertion *saml.Assertion, cert *x509.Certificate) (*etree
 	return encAssert, nil
 }
 
+func (s *Service) signElementXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
+	signingContext, err := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
+	if err != nil {
+		return nil, err
+	}
+
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(xmlBytes); err != nil {
+		return nil, err
+	}
+	root := doc.Root()
+
+	if root.SelectAttr("ID") == nil {
+		return nil, errors.New("cannot sign element without ID attribute")
+	}
+
+	signedElement, err := signingContext.SignEnveloped(root)
+	if err != nil {
+		return nil, err
+	}
+
+	newDoc := etree.NewDocument()
+	newDoc.SetRoot(signedElement)
+	return newDoc.WriteToBytes()
+}
+
 func verifyRedirectSignature(req *http.Request, cert *x509.Certificate) error {
 	query := req.URL.Query()
 	signature := query.Get("Signature")
 	sigAlg := query.Get("SigAlg")
 	samlRequest := query.Get("SAMLRequest")
 	relayState := query.Get("RelayState")
-
 	if signature == "" {
 		return errors.New("missing signature")
 	}
 
 	var signedString string
 	if relayState != "" {
-		signedString = fmt.Sprintf("SAMLRequest=%s&RelayState=%s&SigAlg=%s",
-			url.QueryEscape(samlRequest), url.QueryEscape(relayState), url.QueryEscape(sigAlg))
+		signedString = fmt.Sprintf("SAMLRequest=%s&RelayState=%s&SigAlg=%s", url.QueryEscape(samlRequest), url.QueryEscape(relayState), url.QueryEscape(sigAlg))
 	} else {
-		signedString = fmt.Sprintf("SAMLRequest=%s&SigAlg=%s",
-			url.QueryEscape(samlRequest), url.QueryEscape(sigAlg))
+		signedString = fmt.Sprintf("SAMLRequest=%s&SigAlg=%s", url.QueryEscape(samlRequest), url.QueryEscape(sigAlg))
 	}
 
 	var hashAlg crypto.Hash
@@ -624,80 +636,40 @@ func verifyRedirectSignature(req *http.Request, cert *x509.Certificate) error {
 	sigBytes, _ := base64.StdEncoding.DecodeString(signature)
 	hasher := hashAlg.New()
 	hasher.Write([]byte(signedString))
-	hashed := hasher.Sum(nil)
-
-	return rsa.VerifyPKCS1v15(cert.PublicKey.(*rsa.PublicKey), hashAlg, hashed, sigBytes)
+	return rsa.VerifyPKCS1v15(cert.PublicKey.(*rsa.PublicKey), hashAlg, hasher.Sum(nil), sigBytes)
 }
 
 func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {
 	ks := &SingleCertStore{Cert: cert}
 	ctx := goxmldsig.NewDefaultValidationContext(ks)
-
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(xmlBytes); err != nil {
 		return err
 	}
-
 	if doc.Root() == nil {
 		return errors.New("empty xml doc")
 	}
-
 	_, err := ctx.Validate(doc.Root())
 	return err
-}
-
-func (s *Service) signResponseXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
-	signingContext, err := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
-	if err != nil {
-		return nil, err
-	}
-
-	doc := etree.NewDocument()
-	if err := doc.ReadFromBytes(xmlBytes); err != nil {
-		return nil, err
-	}
-
-	root := doc.Root()
-	if root == nil {
-		return nil, errors.New("empty xml doc")
-	}
-
-	signedElement, err := signingContext.SignEnveloped(root)
-	if err != nil {
-		return nil, err
-	}
-
-	newDoc := etree.NewDocument()
-	newDoc.SetRoot(signedElement)
-
-	return newDoc.WriteToBytes()
 }
 
 func (s *Service) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*models.SAMLConnection, error) {
 	meta := &saml.EntityDescriptor{}
 	if err := xml.Unmarshal([]byte(metadataXML), meta); err != nil {
-		return nil, fmt.Errorf("invalid metadata xml: %w", err)
+		return nil, err
 	}
 	conn := &models.SAMLConnection{
-		TenantID:       tenantID,
-		Name:           name,
-		IdpMetadataXML: metadataXML,
-		IdpEntityID:    meta.EntityID,
-		Active:         true,
+		TenantID: tenantID, Name: name, IdpMetadataXML: metadataXML, IdpEntityID: meta.EntityID, Active: true,
 	}
-	err := s.Repo.CreateConnection(ctx, conn)
-	return conn, err
+	return conn, s.Repo.CreateConnection(ctx, conn)
 }
 
 func (s *Service) generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error) {
 	template := x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Shyntr SAML Service Provider"},
-		NotBefore:             time.Now().Add(-1 * time.Minute),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Shyntr SAML IdP"},
+		NotBefore: time.Now().Add(-1 * time.Minute), NotAfter: time.Now().Add(365 * 24 * time.Hour * 10),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true,
 	}
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {

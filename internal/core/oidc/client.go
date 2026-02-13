@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +92,12 @@ func (s *ClientService) ExchangeAndUserInfo(ctx context.Context, tenantID, code,
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
 
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: s.Config.SkipTLSVerify},
+	}
+	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: tr}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
+
 	if conn.TokenEndpoint == "" || conn.UserInfoEndpoint == "" {
 		if conn.IssuerURL == "" {
 			return nil, errors.New("missing issuer url for discovery")
@@ -163,7 +170,15 @@ func (s *ClientService) discoverEndpoints(ctx context.Context, issuer string) (*
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: s.Config.SkipTLSVerify},
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: tr,
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
