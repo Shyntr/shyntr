@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
@@ -18,11 +19,12 @@ import (
 
 type SAMLHandler struct {
 	Service *saml.Service
+	Mapper  *mapper.Mapper
 	DB      *gorm.DB
 }
 
-func NewSAMLHandler(s *saml.Service, db *gorm.DB) *SAMLHandler {
-	return &SAMLHandler{Service: s, DB: db}
+func NewSAMLHandler(s *saml.Service, m *mapper.Mapper, db *gorm.DB) *SAMLHandler {
+	return &SAMLHandler{Service: s, Mapper: m, DB: db}
 }
 
 func (h *SAMLHandler) SPMetadata(c *gin.Context) {
@@ -128,20 +130,9 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		logger.Log.Warn("Connection not found for mapping, using raw attributes", zap.String("issuer", issuer))
 	}
 
-	finalAttributes := make(map[string]interface{})
-	mapping := make(map[string]string)
-
-	if len(conn.AttributeMapping) > 0 {
-		_ = json.Unmarshal(conn.AttributeMapping, &mapping)
-	}
-
-	for oidcKey, samlKey := range mapping {
-		if val, ok := rawAttributes[samlKey]; ok {
-			finalAttributes[oidcKey] = val
-		}
-	}
-
-	if len(finalAttributes) == 0 {
+	finalAttributes, err := h.Mapper.Map(rawAttributes, conn.AttributeMapping)
+	if err != nil {
+		logger.Log.Warn("Attribute mapping failed", zap.Error(err))
 		finalAttributes = rawAttributes
 	}
 
@@ -286,12 +277,26 @@ func (h *SAMLHandler) handleIDPPostLogin(c *gin.Context, tenantID, verifier stri
 		return
 	}
 
-	userAttrs := map[string]interface{}{
-		"sub":   loginReq.Subject,
-		"email": loginReq.Subject,
+	userAttrs := make(map[string]interface{})
+	for k, v := range ctxData {
+		if k != "saml_request" && k != "relay_state_raw" && k != "protocol" && k != "sp_entity_id" {
+			userAttrs[k] = v
+		}
+	}
+	userAttrs["sub"] = loginReq.Subject
+	if _, ok := userAttrs["email"]; !ok {
+		userAttrs["email"] = loginReq.Subject
 	}
 
-	htmlResponse, err := h.Service.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, &spClient, userAttrs, relayState)
+	// Mapping Uygula (Outbound: İç Veri -> SP Verisi)
+	// Kural: {"hedef_sp_key": "bizim_key"}
+	finalAttrs, err := h.Mapper.Map(userAttrs, spClient.AttributeMapping)
+	if err != nil {
+		logger.Log.Warn("Outbound mapping failed", zap.Error(err))
+		finalAttrs = userAttrs
+	}
+
+	htmlResponse, err := h.Service.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, &spClient, finalAttrs, relayState)
 	if err != nil {
 		logger.Log.Error("Failed to generate SAML Response", zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "response_generation_failed"})

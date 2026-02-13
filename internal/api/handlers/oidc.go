@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
@@ -17,11 +17,12 @@ import (
 
 type OIDCHandler struct {
 	Service *oidc.ClientService
+	Mapper  *mapper.Mapper
 	DB      *gorm.DB
 }
 
-func NewOIDCHandler(s *oidc.ClientService, db *gorm.DB) *OIDCHandler {
-	return &OIDCHandler{Service: s, DB: db}
+func NewOIDCHandler(s *oidc.ClientService, m *mapper.Mapper, db *gorm.DB) *OIDCHandler {
+	return &OIDCHandler{Service: s, Mapper: m, DB: db}
 }
 
 func (h *OIDCHandler) Login(c *gin.Context) {
@@ -64,13 +65,12 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	parts := strings.Split(state, "|")
-	if len(parts) != 2 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_state_format"})
+	loginChallenge, connectionID, err := h.Service.VerifyState(state)
+	if err != nil {
+		logger.Log.Warn("Invalid OIDC state", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_state_token"})
 		return
 	}
-	loginChallenge := parts[0]
-	connectionID := parts[1]
 
 	var loginReq models.LoginRequest
 	if err := h.DB.First(&loginReq, "id = ?", loginChallenge).Error; err != nil {
@@ -85,8 +85,18 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	// TODO: Connection üzerindeki AttributeMapping kurallarını uygula.
-	finalAttributes := userInfo
+	var conn models.OIDCConnection
+	if err := h.DB.Select("attribute_mapping").First(&conn, "id = ?", connectionID).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "connection_not_found"})
+		return
+	}
+
+	finalAttributes, err := h.Mapper.Map(userInfo, conn.AttributeMapping)
+	if err != nil {
+		logger.Log.Warn("Attribute mapping failed, falling back to raw", zap.Error(err))
+		finalAttributes = userInfo
+	}
+
 	subject, _ := userInfo["sub"].(string)
 	if subject == "" {
 		if id, ok := userInfo["id"].(string); ok {
@@ -100,6 +110,9 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	finalAttributes["source"] = "oidc"
 	finalAttributes["connection_id"] = connectionID
+	if _, ok := finalAttributes["sub"]; !ok {
+		finalAttributes["sub"] = subject
+	}
 
 	contextBytes, _ := json.Marshal(finalAttributes)
 	loginReq.Authenticated = true

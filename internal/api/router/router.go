@@ -9,6 +9,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/api/middleware"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
+	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
@@ -26,9 +27,10 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	samlRepo := repository.NewSAMLRepository(db)
 	oidcRepo := repository.NewOIDCRepository(db)
 
-	// Services
 	samlService := saml.NewService(samlRepo, km, cfg)
 	oidcService := oidc.NewClientService(oidcRepo, cfg)
+
+	attrMapper := mapper.New()
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -47,16 +49,18 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	loginHandler := handlers.NewLoginHandler(db)
 	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
-	samlHandler := handlers.NewSAMLHandler(samlService, db)
-	oidcHandler := handlers.NewOIDCHandler(oidcService, db)
+
+	samlHandler := handlers.NewSAMLHandler(samlService, attrMapper, db)
+	oidcHandler := handlers.NewOIDCHandler(oidcService, attrMapper, db)
 
 	r.GET("/health", healthHandler.Check)
 
-	// External UI Routes (Test only)
 	uiGroup := r.Group("/auth")
 	{
 		uiGroup.GET("/login", loginHandler.ShowLogin)
 		uiGroup.POST("/login", loginHandler.SubmitLogin)
+		uiGroup.GET("/methods", loginHandler.GetLoginMethods)
+
 		uiGroup.GET("/consent", consentHandler.ShowConsent)
 		uiGroup.POST("/consent", consentHandler.SubmitConsent)
 	}
@@ -70,11 +74,8 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 	{
 		rootSamlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
 		rootSamlGroup.POST("/sp/acs", samlHandler.ACS)
-
 		rootSamlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
-
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
-		// IdP Routes
 		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 		rootSamlGroup.POST("/idp/sso", samlHandler.IDPSSO)
 	}
@@ -110,7 +111,6 @@ func SetupRoutes(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, k
 			samlGroup.POST("/sp/acs", samlHandler.ACS)
 			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
-			// IdP Routes
 			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 			samlGroup.POST("/idp/sso", samlHandler.IDPSSO)
 		}

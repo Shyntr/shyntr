@@ -41,6 +41,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
 		&models.SAMLClient{},
+		&models.SAMLReplayCache{},
 		&models.OIDCConnection{},
 		&models.OAuth2Session{},
 		&models.SigningKey{},

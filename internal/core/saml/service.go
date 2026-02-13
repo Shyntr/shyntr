@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
+	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -27,6 +31,14 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	goxmldsig "github.com/russellhaering/goxmldsig"
 )
+
+type SingleCertStore struct {
+	Cert *x509.Certificate
+}
+
+func (s *SingleCertStore) Certificates() ([]*x509.Certificate, error) {
+	return []*x509.Certificate{s.Cert}, nil
+}
 
 type Service struct {
 	Repo   *repository.SAMLRepository
@@ -186,6 +198,10 @@ func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Requ
 		return nil, "", fmt.Errorf("validation failed: %w", err)
 	}
 
+	if err := s.Repo.CheckAndSaveMessageID(ctx, assertion.ID, tenantID, 1*time.Hour); err != nil {
+		return nil, "", fmt.Errorf("security alert (replay detected): %w", err)
+	}
+
 	relayState := req.FormValue("RelayState")
 	return assertion, relayState, nil
 }
@@ -255,10 +271,11 @@ func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) 
 					},
 				},
 			}
-			signingKeyDescriptor := keyDescriptor
-			signingKeyDescriptor.Use = "signing"
+			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, keyDescriptor)
 
-			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, keyDescriptor, signingKeyDescriptor)
+			signingKey := keyDescriptor
+			signingKey.Use = "signing"
+			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, signingKey)
 		}
 	}
 
@@ -266,9 +283,6 @@ func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) 
 }
 
 func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*saml.AuthnRequest, error) {
-	var rawRequest []byte
-	var err error
-
 	encodedReq := req.URL.Query().Get("SAMLRequest")
 	isRedirectBinding := encodedReq != ""
 
@@ -292,28 +306,61 @@ func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *h
 		}
 	}
 
+	var xmlBytes []byte
 	if isRedirectBinding {
 		flater := flate.NewReader(bytes.NewReader(decoded))
 		inflated, err := io.ReadAll(flater)
 		flater.Close()
 		if err == nil {
-			rawRequest = inflated
+			xmlBytes = inflated
 		} else {
-			rawRequest = decoded
+			xmlBytes = decoded
 		}
 	} else {
-		rawRequest = decoded
+		xmlBytes = decoded
 	}
 
 	var authReq saml.AuthnRequest
-	if err := xml.Unmarshal(rawRequest, &authReq); err != nil {
+	if err := xml.Unmarshal(xmlBytes, &authReq); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal auth request: %w", err)
 	}
 
-	// TODO: Signature Validation (Advanced)
-	// Redirect binding için imza query string'deki SigAlg ve Signature ile doğrulanır.
-	// POST binding için XML içinde <ds:Signature> vardır.
-	// Şu anlık protokol uyumluluğu (Schema check) yapıyoruz.
+	if err := s.Repo.CheckAndSaveMessageID(ctx, authReq.ID, tenantID, 15*time.Minute); err != nil {
+		return nil, fmt.Errorf("security alert (replay detected): %w", err)
+	}
+
+	issuer := authReq.Issuer.Value
+	if issuer == "" {
+		return nil, fmt.Errorf("missing issuer in AuthnRequest")
+	}
+
+	var spClient models.SAMLClient
+	if err := s.Repo.DB.Where("entity_id = ? AND tenant_id = ?", issuer, tenantID).First(&spClient).Error; err != nil {
+		return nil, fmt.Errorf("unknown service provider: %s", issuer)
+	}
+
+	if spClient.SPCertificate == "" {
+		return nil, fmt.Errorf("service provider signature validation failed: no certificate registered for entity %s", issuer)
+	}
+
+	block, _ := pem.Decode([]byte(spClient.SPCertificate))
+	if block == nil {
+		return nil, fmt.Errorf("invalid SP certificate format")
+	}
+	spCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
+	}
+
+	if isRedirectBinding {
+		if err := verifyRedirectSignature(req, spCert); err != nil {
+			return nil, fmt.Errorf("signature validation failed: %w", err)
+		}
+	} else {
+		if err := verifyPostSignature(xmlBytes, spCert); err != nil {
+			return nil, fmt.Errorf("xml signature validation failed: %w", err)
+		}
+	}
 
 	return &authReq, nil
 }
@@ -417,9 +464,43 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 				Value: saml.StatusSuccess,
 			},
 		},
-		Assertion: &assertion,
 	}
 
+	if sp.EncryptAssertion && sp.SPCertificate != "" {
+		block, _ := pem.Decode([]byte(sp.SPCertificate))
+		if block != nil {
+			spCert, err := x509.ParseCertificate(block.Bytes)
+			if err == nil {
+				encryptedElem, err := encryptAssertion(&assertion, spCert)
+				if err != nil {
+					return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+				}
+				response.Assertion = nil
+				respBytes, _ := xml.Marshal(response)
+
+				doc := etree.NewDocument()
+				doc.ReadFromBytes(respBytes)
+				root := doc.Root()
+
+				root.AddChild(encryptedElem)
+
+				signedXMLBytes, err := doc.WriteToBytes()
+				if err != nil {
+					return "", err
+				}
+
+				signedXML, err := s.signResponseXML(signedXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+				if err != nil {
+					return "", fmt.Errorf("failed to sign encrypted response: %w", err)
+				}
+
+				b64Resp := base64.StdEncoding.EncodeToString(signedXML)
+				return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
+			}
+		}
+	}
+
+	response.Assertion = &assertion
 	respBytes, err := xml.Marshal(response)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal response: %w", err)
@@ -431,8 +512,11 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 	}
 
 	b64Resp := base64.StdEncoding.EncodeToString(signedXML)
+	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
+}
 
-	htmlForm := fmt.Sprintf(`
+func buildHTMLForm(acsURL, b64Resp, relayState string) string {
+	return fmt.Sprintf(`
 		<!DOCTYPE html>
 		<html>
 		<body onload="document.forms[0].submit()">
@@ -446,13 +530,127 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 			</form>
 		</body>
 		</html>
-	`, authReq.AssertionConsumerServiceURL, b64Resp, relayState)
+	`, acsURL, b64Resp, relayState)
+}
 
-	return htmlForm, nil
+func encryptAssertion(assertion *saml.Assertion, cert *x509.Certificate) (*etree.Element, error) {
+	assertBytes, err := xml.Marshal(assertion)
+	if err != nil {
+		return nil, err
+	}
+
+	symKey := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, symKey); err != nil {
+		return nil, err
+	}
+
+	block, err := aes.NewCipher(symKey)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	encryptedData := gcm.Seal(nonce, nonce, assertBytes, nil)
+
+	encryptedKey, err := rsa.EncryptOAEP(sha1.New(), rand.Reader, cert.PublicKey.(*rsa.PublicKey), symKey, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	encAssert := etree.NewElement("saml:EncryptedAssertion")
+	encAssert.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
+
+	encData := encAssert.CreateElement("xenc:EncryptedData")
+	encData.CreateAttr("xmlns:xenc", "http://www.w3.org/2001/04/xmlenc#")
+	encData.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
+
+	encMethod := encData.CreateElement("xenc:EncryptionMethod")
+	encMethod.CreateAttr("Algorithm", "http://www.w3.org/2009/xmlenc11#aes256-gcm")
+
+	keyInfo := encData.CreateElement("ds:KeyInfo")
+	keyInfo.CreateAttr("xmlns:ds", "http://www.w3.org/2000/09/xmldsig#")
+
+	encKey := keyInfo.CreateElement("xenc:EncryptedKey")
+	encKeyMethod := encKey.CreateElement("xenc:EncryptionMethod")
+	encKeyMethod.CreateAttr("Algorithm", "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p")
+
+	encKeyCipher := encKey.CreateElement("xenc:CipherData")
+	encKeyVal := encKeyCipher.CreateElement("xenc:CipherValue")
+	encKeyVal.SetText(base64.StdEncoding.EncodeToString(encryptedKey))
+
+	cipherData := encData.CreateElement("xenc:CipherData")
+	cipherVal := cipherData.CreateElement("xenc:CipherValue")
+	cipherVal.SetText(base64.StdEncoding.EncodeToString(encryptedData))
+
+	return encAssert, nil
+}
+
+func verifyRedirectSignature(req *http.Request, cert *x509.Certificate) error {
+	query := req.URL.Query()
+	signature := query.Get("Signature")
+	sigAlg := query.Get("SigAlg")
+	samlRequest := query.Get("SAMLRequest")
+	relayState := query.Get("RelayState")
+
+	if signature == "" {
+		return errors.New("missing signature")
+	}
+
+	var signedString string
+	if relayState != "" {
+		signedString = fmt.Sprintf("SAMLRequest=%s&RelayState=%s&SigAlg=%s",
+			url.QueryEscape(samlRequest), url.QueryEscape(relayState), url.QueryEscape(sigAlg))
+	} else {
+		signedString = fmt.Sprintf("SAMLRequest=%s&SigAlg=%s",
+			url.QueryEscape(samlRequest), url.QueryEscape(sigAlg))
+	}
+
+	var hashAlg crypto.Hash
+	switch sigAlg {
+	case "http://www.w3.org/2000/09/xmldsig#rsa-sha1":
+		hashAlg = crypto.SHA1
+	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256":
+		hashAlg = crypto.SHA256
+	default:
+		return fmt.Errorf("unsupported signature algorithm: %s", sigAlg)
+	}
+
+	sigBytes, _ := base64.StdEncoding.DecodeString(signature)
+	hasher := hashAlg.New()
+	hasher.Write([]byte(signedString))
+	hashed := hasher.Sum(nil)
+
+	return rsa.VerifyPKCS1v15(cert.PublicKey.(*rsa.PublicKey), hashAlg, hashed, sigBytes)
+}
+
+func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {
+	ks := &SingleCertStore{Cert: cert}
+	ctx := goxmldsig.NewDefaultValidationContext(ks)
+
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(xmlBytes); err != nil {
+		return err
+	}
+
+	if doc.Root() == nil {
+		return errors.New("empty xml doc")
+	}
+
+	_, err := ctx.Validate(doc.Root())
+	return err
 }
 
 func (s *Service) signResponseXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
-	signingContext, _ := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
+	signingContext, err := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
+	if err != nil {
+		return nil, err
+	}
 
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(xmlBytes); err != nil {
