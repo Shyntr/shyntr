@@ -17,7 +17,7 @@ services:
       - EXTERNAL_CONSENT_URL=http://localhost:3000/consent
 
       # Security
-      - ADMIN_CORS_ALLOWED_ORIGINS=http://localhost:3000
+      - ADMIN_CORS_ALLOWED_ORIGINS=http://localhost:3274
       - LOG_LEVEL=info
       - SKIP_TLS_VERIFY=true #Development only
     depends_on:

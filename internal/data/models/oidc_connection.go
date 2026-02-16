@@ -11,27 +11,27 @@ import (
 // OIDCConnection represents a trust relationship with an external OIDC Provider.
 // Shyntr acts as an OIDC Client (RP) in this relationship.
 type OIDCConnection struct {
-	ID       string `gorm:"primaryKey"`
-	TenantID string `gorm:"index;not null"`
-	Name     string `gorm:"not null"`
+	ID       string `gorm:"primaryKey" json:"id"`
+	TenantID string `gorm:"index;not null" json:"tenant_id"`
+	Name     string `gorm:"not null" json:"name"`
 
-	IssuerURL    string `gorm:"not null"`
-	ClientID     string `gorm:"not null"`
-	ClientSecret string `gorm:"not null"`
+	IssuerURL    string `gorm:"not null" json:"issuer_url"`
+	ClientID     string `gorm:"not null" json:"client_id"`
+	ClientSecret string `gorm:"not null" json:"client_secret"`
 
-	AuthorizationEndpoint string
-	TokenEndpoint         string
-	UserInfoEndpoint      string
-	JWKSURI               string
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"user_info_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
 
-	Scopes pq.StringArray `gorm:"type:text[]"` // ["openid", "profile", "email"]
+	Scopes pq.StringArray `gorm:"type:text[]" json:"scopes"`
 
-	AttributeMapping []byte `gorm:"type:jsonb"`
+	AttributeMapping []byte `gorm:"type:jsonb" json:"attribute_mapping"`
 
-	Active    bool `gorm:"default:true"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	Active    bool           `gorm:"default:true" json:"active"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (c *OIDCConnection) BeforeCreate(tx *gorm.DB) (err error) {

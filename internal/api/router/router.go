@@ -147,20 +147,42 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 
 		mgmtGroup := adminGroup.Group("/management")
 		{
+			// Dashboard Stats
+			mgmtGroup.GET("/dashboard/stats", mgmtHandler.GetDashboardStats)
+
+			// Tenants
+			mgmtGroup.GET("/tenants", mgmtHandler.ListTenants)
+			mgmtGroup.GET("/tenants/:id", mgmtHandler.GetTenant)
+			mgmtGroup.POST("/tenants", mgmtHandler.CreateTenant)
+			mgmtGroup.PUT("/tenants/:id", mgmtHandler.UpdateTenant)
+			mgmtGroup.DELETE("/tenants/:id", mgmtHandler.DeleteTenant)
+
 			// OAuth2 Clients
 			mgmtGroup.GET("/clients", mgmtHandler.ListClients)
+			mgmtGroup.GET("/clients/tenant/:tenant_id", mgmtHandler.ListClientsByTenant)
+			mgmtGroup.GET("/clients/:id", mgmtHandler.GetClient)
 			mgmtGroup.POST("/clients", mgmtHandler.CreateClient)
 			mgmtGroup.PUT("/clients/:id", mgmtHandler.UpdateClient)
 			mgmtGroup.DELETE("/clients/:id", mgmtHandler.DeleteClient)
 
-			// SAML Connections
+			// SAML Clients (Service Providers)
+			mgmtGroup.GET("/saml-clients", mgmtHandler.ListSAMLClients)
+			mgmtGroup.GET("/saml-clients/tenant/:tenant_id", mgmtHandler.ListSAMLClientsByTenant)
+			mgmtGroup.GET("/saml-clients/:id", mgmtHandler.GetSAMLClient)
+			mgmtGroup.POST("/saml-clients", mgmtHandler.CreateSAMLClient)
+			mgmtGroup.PUT("/saml-clients/:id", mgmtHandler.UpdateSAMLClient)
+			mgmtGroup.DELETE("/saml-clients/:id", mgmtHandler.DeleteSAMLClient)
+
+			// SAML Connections (Identity Providers)
 			mgmtGroup.GET("/saml-connections", mgmtHandler.ListSAMLConnections)
+			mgmtGroup.GET("/saml-connections/:id", mgmtHandler.GetSAMLConnection)
 			mgmtGroup.POST("/saml-connections", mgmtHandler.CreateSAMLConnection)
 			mgmtGroup.PUT("/saml-connections/:id", mgmtHandler.UpdateSAMLConnection)
 			mgmtGroup.DELETE("/saml-connections/:id", mgmtHandler.DeleteSAMLConnection)
 
 			// OIDC Connections
 			mgmtGroup.GET("/oidc-connections", mgmtHandler.ListOIDCConnections)
+			mgmtGroup.GET("/oidc-connections/:id", mgmtHandler.GetOIDCConnection)
 			mgmtGroup.POST("/oidc-connections", mgmtHandler.CreateOIDCConnection)
 			mgmtGroup.PUT("/oidc-connections/:id", mgmtHandler.UpdateOIDCConnection)
 			mgmtGroup.DELETE("/oidc-connections/:id", mgmtHandler.DeleteOIDCConnection)
