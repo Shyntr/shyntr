@@ -45,14 +45,15 @@ func LoadConfig() *Config {
 	viper.SetDefault("ADMIN_PORT", "7497")
 	viper.SetDefault("DSN", "postgres://shyntr:secretpassword@localhost:5432/shyntr?sslmode=disable")
 	viper.SetDefault("APP_SECRET", "12345678901234567890123456789012")
-	//viper.SetDefault("APP_SECRET", "change-me-please-very-secret-key-32-bytes")
-	viper.SetDefault("ISSUER_URL", "http://localhost:8080")
+
+	viper.SetDefault("ISSUER_URL", "http://localhost:7496")
+
 	viper.SetDefault("COOKIE_SECURE", false)
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3274"})
 	viper.SetDefault("ADMIN_CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3274", "http://localhost:7497"})
 
-	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:8080/auth/login")
-	viper.SetDefault("EXTERNAL_CONSENT_URL", "http://localhost:8080/auth/consent")
+	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:3000/login")
+	viper.SetDefault("EXTERNAL_CONSENT_URL", "http://localhost:3000/consent")
 
 	viper.SetDefault("DEFAULT_TENANT_ID", "default")
 

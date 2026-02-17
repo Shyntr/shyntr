@@ -26,7 +26,7 @@ type OIDCConnection struct {
 
 	Scopes pq.StringArray `gorm:"type:text[]" json:"scopes"`
 
-	AttributeMapping []byte `gorm:"type:jsonb" json:"attribute_mapping"`
+	AttributeMapping map[string]string `gorm:"serializer:json" json:"attribute_mapping"`
 
 	Active    bool           `gorm:"default:true" json:"active"`
 	CreatedAt time.Time      `json:"created_at"`

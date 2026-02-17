@@ -271,7 +271,8 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		Headers: &fositejwt.Headers{
 			Extra: map[string]interface{}{"kid": consts.SigningKeyID},
 		},
-		Subject: userID,
+		Subject:   userID,
+		ExpiresAt: make(map[fosite.TokenType]time.Time),
 	}
 
 	session.ExpiresAt[fosite.AccessToken] = now.Add(accessTokenLife)
@@ -453,7 +454,24 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 		"introspection_endpoint": makeURL("/oauth2/introspect"),
 		"end_session_endpoint":   makeURL("/oauth2/logout"),
 
-		"response_types_supported":              []string{"code", "token", "id_token", "code id_token"},
+		"response_types_supported": []string{
+			"code",
+			"token",
+			"id_token",
+			"code id_token",
+			"code token",
+			"code id_token token",
+		},
+
+		"response_modes_supported": []string{"query", "fragment", "form_post"},
+
+		"grant_types_supported": []string{
+			"authorization_code",
+			"implicit",
+			"refresh_token",
+			"client_credentials",
+		},
+
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 

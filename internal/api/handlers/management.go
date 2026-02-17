@@ -21,24 +21,24 @@ func NewManagementHandler(db *gorm.DB) *ManagementHandler {
 	return &ManagementHandler{DB: db}
 }
 
-func (h *ManagementHandler) checkTenantExists(c *gin.Context, tenantID string) bool {
-	if tenantID == "" {
+func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
+	if inputID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id_required"})
-		return false
+		return "", false
 	}
 
-	var count int64
-	if err := h.DB.Model(&models.Tenant{}).Where("id = ?", tenantID).Count(&count).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database_error"})
-		return false
+	var tenant models.Tenant
+
+	if err := h.DB.Select("id").First(&tenant, "id = ?", inputID).Error; err == nil {
+		return tenant.ID, true
 	}
 
-	if count == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "tenant_not_found", "message": "The specified tenant does not exist."})
-		return false
+	if err := h.DB.Select("id").First(&tenant, "name = ?", inputID).Error; err == nil {
+		return tenant.ID, true
 	}
 
-	return true
+	c.JSON(http.StatusNotFound, gin.H{"error": "tenant_not_found", "message": "The specified tenant does not exist."})
+	return "", false
 }
 
 func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
@@ -89,11 +89,12 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 		}
 
 		activity := map[string]interface{}{
-			"id":        l.ID,
-			"subject":   l.Subject,
-			"client_id": l.ClientID,
-			"status":    status,
-			"timestamp": l.CreatedAt,
+			"id":              l.ID,
+			"subject":         l.Subject,
+			"client_id":       l.ClientID,
+			"saml_request_id": l.SAMLRequestID,
+			"status":          status,
+			"timestamp":       l.CreatedAt,
 		}
 		stats.RecentActivity = append(stats.RecentActivity, activity)
 	}
@@ -177,9 +178,11 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		return
 	}
 
-	if !h.checkTenantExists(c, client.TenantID) {
+	realTenantID, ok := h.resolveTenantID(c, client.TenantID)
+	if !ok {
 		return
 	}
+	client.TenantID = realTenantID
 
 	if client.Secret != "" {
 		hashed, err := crypto.HashPassword(client.Secret)
@@ -334,9 +337,11 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		return
 	}
 
-	if !h.checkTenantExists(c, client.TenantID) {
+	realTenantID, ok := h.resolveTenantID(c, client.TenantID)
+	if !ok {
 		return
 	}
+	client.TenantID = realTenantID
 
 	if err := h.DB.Create(&client).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create saml client"})
@@ -353,20 +358,29 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
-		"name":              req.Name,
-		"entity_id":         req.EntityID,
-		"acs_url":           req.ACSURL,
-		"sp_certificate":    req.SPCertificate,
-		"attribute_mapping": req.AttributeMapping,
-		"force_authn":       req.ForceAuthn,
-		"sign_response":     req.SignResponse,
-		"sign_assertion":    req.SignAssertion,
-		"encrypt_assertion": req.EncryptAssertion,
-		"active":            req.Active,
-	}
+	result := h.DB.Model(&models.SAMLClient{}).
+		Where("id = ?", id).
+		Select(
+			"Name", "EntityID", "ACSURL", "SPCertificate",
+			"AttributeMapping", "ForceAuthn", "SignResponse",
+			"SignAssertion", "EncryptAssertion", "Active", "TenantID",
+		).
+		Updates(models.SAMLClient{
+			Name:             req.Name,
+			EntityID:         req.EntityID,
+			TenantID:         req.TenantID,
+			ACSURL:           req.ACSURL,
+			SPCertificate:    req.SPCertificate,
+			AttributeMapping: req.AttributeMapping,
+			ForceAuthn:       req.ForceAuthn,
+			SignResponse:     req.SignResponse,
+			SignAssertion:    req.SignAssertion,
+			EncryptAssertion: req.EncryptAssertion,
+			Active:           req.Active,
+		})
 
-	if err := h.DB.Model(&models.SAMLClient{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	if result.Error != nil {
+		logger.Log.Error("Update failed", zap.Error(result.Error))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
 		return
 	}
@@ -391,9 +405,11 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		return
 	}
 
-	if !h.checkTenantExists(c, conn.TenantID) {
+	realTenantID, ok := h.resolveTenantID(c, conn.TenantID)
+	if !ok {
 		return
 	}
+	conn.TenantID = realTenantID
 
 	if conn.IdpMetadataXML != "" {
 		meta := &saml.EntityDescriptor{}
@@ -456,14 +472,15 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
-		"name":              req.Name,
-		"attribute_mapping": req.AttributeMapping,
-		"force_authn":       req.ForceAuthn,
-		"sign_request":      req.SignRequest,
-		"active":            req.Active,
-		"sp_private_key":    req.SPPrivateKey,
-		"sp_certificate":    req.SPCertificate,
+	updateData := models.SAMLConnection{
+		Name:             req.Name,
+		TenantID:         req.TenantID,
+		AttributeMapping: req.AttributeMapping,
+		ForceAuthn:       req.ForceAuthn,
+		SignRequest:      req.SignRequest,
+		Active:           req.Active,
+		SPPrivateKey:     req.SPPrivateKey,
+		SPCertificate:    req.SPCertificate,
 	}
 
 	if req.IdpMetadataXML != "" {
@@ -472,11 +489,12 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_metadata_xml", "details": err.Error()})
 			return
 		}
-		updates["idp_metadata_xml"] = req.IdpMetadataXML
-		updates["idp_entity_id"] = meta.EntityID
+		updateData.IdpMetadataXML = req.IdpMetadataXML
+		updateData.IdpEntityID = meta.EntityID
 	}
 
-	result := h.DB.Model(&models.SAMLConnection{}).Where("id = ?", id).Updates(updates)
+	result := h.DB.Model(&models.SAMLConnection{}).Where("id = ?", id).Updates(updateData)
+
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
 		return
@@ -506,9 +524,11 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 		return
 	}
 
-	if !h.checkTenantExists(c, conn.TenantID) {
+	realTenantID, ok := h.resolveTenantID(c, conn.TenantID)
+	if !ok {
 		return
 	}
+	conn.TenantID = realTenantID
 
 	if err := h.DB.Create(&conn).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create oidc connection"})
@@ -559,21 +579,23 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
-		"name":                   req.Name,
-		"issuer_url":             req.IssuerURL,
-		"client_id":              req.ClientID,
-		"client_secret":          req.ClientSecret,
-		"authorization_endpoint": req.AuthorizationEndpoint,
-		"token_endpoint":         req.TokenEndpoint,
-		"user_info_endpoint":     req.UserInfoEndpoint,
-		"jwks_uri":               req.JWKSURI,
-		"scopes":                 req.Scopes,
-		"attribute_mapping":      req.AttributeMapping,
-		"active":                 req.Active,
+	updateData := models.OIDCConnection{
+		Name:                  req.Name,
+		TenantID:              req.TenantID,
+		IssuerURL:             req.IssuerURL,
+		ClientID:              req.ClientID,
+		ClientSecret:          req.ClientSecret,
+		AuthorizationEndpoint: req.AuthorizationEndpoint,
+		TokenEndpoint:         req.TokenEndpoint,
+		UserInfoEndpoint:      req.UserInfoEndpoint,
+		JWKSURI:               req.JWKSURI,
+		Scopes:                req.Scopes,
+		AttributeMapping:      req.AttributeMapping,
+		Active:                req.Active,
 	}
 
-	result := h.DB.Model(&models.OIDCConnection{}).Where("id = ?", id).Updates(updates)
+	result := h.DB.Model(&models.OIDCConnection{}).Where("id = ?", id).Updates(updateData)
+
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
 		return

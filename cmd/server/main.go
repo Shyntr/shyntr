@@ -21,6 +21,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -56,23 +57,50 @@ func main() {
 		},
 	}
 
+	// ==========================================
+	// TENANT COMMANDS
+	// ==========================================
+
+	// CREATE TENANT
+	var (
+		tenantID, tenantName, tenantDisplay, tenantDesc string
+	)
 	var createTenantCmd = &cobra.Command{
-		Use:   "create-tenant [id] [name]",
+		Use:   "create-tenant",
 		Short: "Create a new tenant",
-		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			tenant := models.Tenant{ID: args[0], Name: args[1], DisplayName: args[1], Description: "CLI Created"}
+
+			if tenantID == "" {
+				tenantID, _ = utils.GenerateRandomHex(4) // Random ID if empty
+			}
+			if tenantName == "" {
+				tenantName = tenantID
+			}
+			if tenantDisplay == "" {
+				tenantDisplay = tenantName
+			}
+
+			tenant := models.Tenant{
+				ID:          tenantID,
+				Name:        tenantName,
+				DisplayName: tenantDisplay,
+				Description: tenantDesc,
+			}
 			if err := db.Create(&tenant).Error; err != nil {
 				log.Fatalf("Failed: %v", err)
 			}
-			log.Printf("Tenant created: %s", tenant.ID)
+			log.Printf("Tenant created: %s (%s)", tenant.Name, tenant.ID)
 		},
 	}
+	createTenantCmd.Flags().StringVar(&tenantID, "id", "", "Tenant ID (slug)")
+	createTenantCmd.Flags().StringVar(&tenantName, "name", "", "Tenant Name")
+	createTenantCmd.Flags().StringVar(&tenantDisplay, "display-name", "", "Display Name")
+	createTenantCmd.Flags().StringVar(&tenantDesc, "desc", "CLI Created", "Description")
 
 	var getTenantCmd = &cobra.Command{
 		Use:   "get-tenant [id]",
@@ -93,21 +121,37 @@ func main() {
 	}
 
 	var updateTenantCmd = &cobra.Command{
-		Use:   "update-tenant [id] [new_name]",
-		Short: "Update tenant name",
-		Args:  cobra.ExactArgs(2),
+		Use:   "update-tenant [id]",
+		Short: "Update tenant details",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			if err := db.Model(&models.Tenant{}).Where("id = ?", args[0]).Update("name", args[1]).Error; err != nil {
+
+			updates := make(map[string]interface{})
+			if tenantName != "" {
+				updates["name"] = tenantName
+			}
+			if tenantDisplay != "" {
+				updates["display_name"] = tenantDisplay
+			}
+
+			if len(updates) == 0 {
+				log.Println("No changes detected.")
+				return
+			}
+
+			if err := db.Model(&models.Tenant{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
 			log.Println("Tenant updated.")
 		},
 	}
+	updateTenantCmd.Flags().StringVar(&tenantName, "name", "", "New Tenant Name")
+	updateTenantCmd.Flags().StringVar(&tenantDisplay, "display-name", "", "New Display Name")
 
 	var deleteTenantCmd = &cobra.Command{
 		Use:   "delete-tenant [id]",
@@ -133,35 +177,80 @@ func main() {
 	// OIDC CLIENT COMMANDS
 	// ==========================================
 
+	// CREATE CLIENT
+	var (
+		clientID, clientName, clientSecret string
+		redirectURIs                       []string
+		isPublic                           bool
+	)
 	var createClientCmd = &cobra.Command{
-		Use:   "create-client [tenant_id] [client_id] [name] [secret]",
-		Short: "Create OIDC Client",
-		Args:  cobra.ExactArgs(4),
+		Use:   "create-client",
+		Short: "Create OIDC Client (Use flags)",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			hashedSecret, _ := crypto.HashPassword(args[3])
+
+			// Defaults
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if clientID == "" {
+				clientID, _ = utils.GenerateRandomHex(8)
+			}
+			if clientName == "" {
+				clientName = "New Client " + clientID
+			}
+			if clientSecret == "" && !isPublic {
+				clientSecret, _ = utils.GenerateRandomHex(16)
+			}
+			if len(redirectURIs) == 0 {
+				redirectURIs = []string{"http://localhost:8080/callback"}
+			}
+
+			hashedSecret := ""
+			if clientSecret != "" {
+				hashedSecret, _ = crypto.HashPassword(clientSecret)
+			}
+
+			authMethod := "client_secret_basic"
+			if isPublic {
+				authMethod = "none"
+			}
+
 			client := models.OAuth2Client{
-				ID:                      args[1],
-				TenantID:                args[0],
-				Name:                    args[2],
+				ID:                      clientID,
+				TenantID:                tenantID,
+				Name:                    clientName,
 				Secret:                  hashedSecret,
-				RedirectURIs:            []string{"http://localhost:8080/callback"},
-				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials"},
-				ResponseTypes:           []string{"code", "token", "id_token"},
+				RedirectURIs:            redirectURIs,
+				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
+				ResponseTypes:           []string{"code", "token", "id_token", "code id_token", "code token", "code id_token token"},
 				Scopes:                  []string{"openid", "profile", "email", "offline_access"},
-				TokenEndpointAuthMethod: "client_secret_basic",
+				TokenEndpointAuthMethod: authMethod,
+				Public:                  isPublic,
 			}
 
 			if err := db.Create(&client).Error; err != nil {
 				log.Fatalf("Failed: %v", err)
 			}
-			log.Printf("Client created: %s", client.ID)
+
+			log.Printf("Client Created Successfully!")
+			log.Printf("Tenant: %s", client.TenantID)
+			log.Printf("Client ID: %s", client.ID)
+			if !isPublic {
+				log.Printf("Client Secret: %s", clientSecret)
+			}
 		},
 	}
+	createClientCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createClientCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID (Auto-generated if empty)")
+	createClientCmd.Flags().StringVar(&clientName, "name", "", "Client Name")
+	createClientCmd.Flags().StringVar(&clientSecret, "secret", "", "Client Secret (Auto-generated if empty)")
+	createClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "Comma separated Redirect URIs")
+	createClientCmd.Flags().BoolVar(&isPublic, "public", false, "Is Public Client (SPA/Mobile)")
 
 	var getClientCmd = &cobra.Command{
 		Use:   "get-client [client_id]",
@@ -177,27 +266,42 @@ func main() {
 			if err := db.First(&client, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Client not found: %v", err)
 			}
-			client.Secret = "*****" // Maskele
 			printJSON(client)
 		},
 	}
 
 	var updateClientCmd = &cobra.Command{
-		Use:   "update-client [client_id] [new_name]",
-		Short: "Update OIDC Client Name (ID remains unchanged)",
-		Args:  cobra.ExactArgs(2),
+		Use:   "update-client [client_id]",
+		Short: "Update OIDC Client details",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			if err := db.Model(&models.OAuth2Client{}).Where("id = ?", args[0]).Update("name", args[1]).Error; err != nil {
+
+			updates := make(map[string]interface{})
+			if clientName != "" {
+				updates["name"] = clientName
+			}
+			if len(redirectURIs) > 0 {
+				updates["redirect_uris"] = redirectURIs
+			}
+			if clientSecret != "" {
+				hashed, _ := crypto.HashPassword(clientSecret)
+				updates["secret"] = hashed
+			}
+
+			if err := db.Model(&models.OAuth2Client{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
-			log.Println("Client name updated.")
+			log.Println("Client updated.")
 		},
 	}
+	updateClientCmd.Flags().StringVar(&clientName, "name", "", "New Client Name")
+	updateClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "New Redirect URIs")
+	updateClientCmd.Flags().StringVar(&clientSecret, "secret", "", "New Client Secret")
 
 	var deleteClientCmd = &cobra.Command{
 		Use:   "delete-client [client_id]",
@@ -220,10 +324,12 @@ func main() {
 	// SAML CLIENT COMMANDS (SP)
 	// ==========================================
 
+	var (
+		samlEntityID, samlACSURL string
+	)
 	var createSAMLClientCmd = &cobra.Command{
-		Use:   "create-saml-client [tenant_id] [name] [entity_id] [acs_url]",
+		Use:   "create-saml-client",
 		Short: "Create SAML Service Provider",
-		Args:  cobra.ExactArgs(4),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
@@ -231,11 +337,21 @@ func main() {
 				log.Fatalf("Database connection failed: %v", err)
 			}
 
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if samlEntityID == "" || samlACSURL == "" {
+				log.Fatal("Entity ID and ACS URL are required flags.")
+			}
+			if clientName == "" {
+				clientName = "SAML App"
+			}
+
 			client := models.SAMLClient{
-				TenantID:      args[0],
-				Name:          args[1],
-				EntityID:      args[2],
-				ACSURL:        args[3],
+				TenantID:      tenantID,
+				Name:          clientName,
+				EntityID:      samlEntityID,
+				ACSURL:        samlACSURL,
 				Active:        true,
 				SignResponse:  true,
 				SignAssertion: true,
@@ -247,10 +363,32 @@ func main() {
 			log.Printf("SAML Client created: %s", client.EntityID)
 		},
 	}
+	createSAMLClientCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createSAMLClientCmd.Flags().StringVar(&clientName, "name", "", "App Name")
+	createSAMLClientCmd.Flags().StringVar(&samlEntityID, "entity-id", "", "Entity ID (Required)")
+	createSAMLClientCmd.Flags().StringVar(&samlACSURL, "acs-url", "", "ACS URL (Required)")
 
 	var getSAMLClientCmd = &cobra.Command{
 		Use:   "get-saml-client [entity_id]",
-		Short: "Get SAML Client by EntityID",
+		Short: "Get SAML Client",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := data.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Error: %v", err)
+			}
+			var client models.SAMLClient
+			if err := db.First(&client, "entity_id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Not Found: %v", err)
+			}
+			printJSON(client)
+		},
+	}
+
+	var updateSAMLClientCmd = &cobra.Command{
+		Use:   "update-saml-client [entity_id]",
+		Short: "Update SAML Client (SP) details",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -258,30 +396,28 @@ func main() {
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			var client models.SAMLClient
-			if err := db.First(&client, "entity_id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Client not found: %v", err)
-			}
-			printJSON(client)
-		},
-	}
 
-	var updateSAMLClientCmd = &cobra.Command{
-		Use:   "update-saml-client [entity_id] [new_acs_url]",
-		Short: "Update SAML Client ACS URL",
-		Args:  cobra.ExactArgs(2),
-		Run: func(cmd *cobra.Command, args []string) {
-			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
-			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+			updates := make(map[string]interface{})
+			if samlACSURL != "" {
+				updates["acs_url"] = samlACSURL
 			}
-			if err := db.Model(&models.SAMLClient{}).Where("entity_id = ?", args[0]).Update("acs_url", args[1]).Error; err != nil {
+			if clientName != "" {
+				updates["name"] = clientName
+			}
+
+			if len(updates) == 0 {
+				log.Println("No changes detected.")
+				return
+			}
+
+			if err := db.Model(&models.SAMLClient{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
-			log.Println("SAML Client ACS URL updated.")
+			log.Println("SAML Client updated.")
 		},
 	}
+	updateSAMLClientCmd.Flags().StringVar(&samlACSURL, "acs-url", "", "New ACS URL")
+	updateSAMLClientCmd.Flags().StringVar(&clientName, "name", "", "New App Name")
 
 	var deleteSAMLClientCmd = &cobra.Command{
 		Use:   "delete-saml-client [entity_id]",
@@ -291,10 +427,10 @@ func main() {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClient{}).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("Delete Failed: %v", err)
 			}
 			log.Println("SAML Client deleted.")
 		},
@@ -304,22 +440,37 @@ func main() {
 	// SAML CONNECTION COMMANDS (IDP)
 	// ==========================================
 
+	var metadataFile string
 	var createSAMLConnectionCmd = &cobra.Command{
-		Use:   "create-saml-connection [tenant_id] [name] [metadata_file_path]",
+		Use:   "create-saml-connection",
 		Short: "Register SAML IDP Connection",
-		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
-			xmlBytes, _ := os.ReadFile(args[2])
+
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if metadataFile == "" {
+				log.Fatal("--metadata-file is required")
+			}
+			if clientName == "" {
+				clientName = "SAML IDP"
+			}
+
+			xmlBytes, err := os.ReadFile(metadataFile)
+			if err != nil {
+				log.Fatalf("Failed to read metadata file: %v", err)
+			}
+
 			meta := &saml.EntityDescriptor{}
 			_ = xml.Unmarshal(xmlBytes, meta)
 			conn := models.SAMLConnection{
-				TenantID:       args[0],
-				Name:           args[1],
+				TenantID:       tenantID,
+				Name:           clientName,
 				IdpMetadataXML: string(xmlBytes),
 				IdpEntityID:    meta.EntityID,
 				Active:         true,
@@ -331,20 +482,23 @@ func main() {
 			log.Printf("SAML Connection created: %s", conn.Name)
 		},
 	}
+	createSAMLConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createSAMLConnectionCmd.Flags().StringVar(&clientName, "name", "", "Connection Name")
+	createSAMLConnectionCmd.Flags().StringVar(&metadataFile, "metadata-file", "", "Path to metadata XML file")
 
 	var getSAMLConnectionCmd = &cobra.Command{
 		Use:   "get-saml-connection [id]",
-		Short: "Get SAML Connection details",
+		Short: "Get SAML Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
 			var conn models.SAMLConnection
 			if err := db.First(&conn, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Connection not found: %v", err)
+				log.Fatalf("Not Found: %v", err)
 			}
 			printJSON(conn)
 		},
@@ -358,10 +512,10 @@ func main() {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
 			if err := db.Delete(&models.SAMLConnection{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("Delete Failed: %v", err)
 			}
 			log.Println("SAML Connection deleted.")
 		},
@@ -371,22 +525,33 @@ func main() {
 	// OIDC CONNECTION COMMANDS (External IDP)
 	// ==========================================
 
+	var issuerURL string
 	var createOIDCConnectionCmd = &cobra.Command{
-		Use:   "create-oidc-connection [tenant_id] [name] [issuer_url] [client_id] [client_secret]",
+		Use:   "create-oidc-connection",
 		Short: "Register OIDC Provider",
-		Args:  cobra.ExactArgs(5),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
+
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if issuerURL == "" || clientID == "" || clientSecret == "" {
+				log.Fatal("Issuer, Client ID, and Client Secret are required.")
+			}
+			if clientName == "" {
+				clientName = "OIDC Provider"
+			}
+
 			conn := models.OIDCConnection{
-				TenantID:     args[0],
-				Name:         args[1],
-				IssuerURL:    args[2],
-				ClientID:     args[3],
-				ClientSecret: args[4],
+				TenantID:     tenantID,
+				Name:         clientName,
+				IssuerURL:    issuerURL,
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
 				Active:       true,
 				Scopes:       []string{"openid", "profile", "email"},
 			}
@@ -397,20 +562,25 @@ func main() {
 			log.Printf("OIDC Connection created: %s", conn.Name)
 		},
 	}
+	createOIDCConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createOIDCConnectionCmd.Flags().StringVar(&clientName, "name", "", "Connection Name")
+	createOIDCConnectionCmd.Flags().StringVar(&issuerURL, "issuer", "", "Issuer URL")
+	createOIDCConnectionCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID")
+	createOIDCConnectionCmd.Flags().StringVar(&clientSecret, "client-secret", "", "Client Secret")
 
 	var getOIDCConnectionCmd = &cobra.Command{
 		Use:   "get-oidc-connection [id]",
-		Short: "Get OIDC Connection details",
+		Short: "Get OIDC Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
 			var conn models.OIDCConnection
 			if err := db.First(&conn, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Connection not found: %v", err)
+				log.Fatalf("Not Found: %v", err)
 			}
 			printJSON(conn)
 		},
@@ -424,10 +594,10 @@ func main() {
 			cfg := config.LoadConfig()
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
-				log.Fatalf("Database connection failed: %v", err)
+				log.Fatalf("DB Error: %v", err)
 			}
 			if err := db.Delete(&models.OIDCConnection{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("Delete Failed: %v", err)
 			}
 			log.Println("OIDC Connection deleted.")
 		},
@@ -469,6 +639,19 @@ func runServer() {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
 
+	var count int64
+	if err := db.Model(&models.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
+		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
+		defaultTenant := models.Tenant{
+			ID:          cfg.DefaultTenantID,
+			Name:        "default",
+			DisplayName: "Default System Tenant",
+			Description: "Automatically created default tenant",
+		}
+		if err := db.Create(&defaultTenant).Error; err != nil {
+			logger.Log.Error("Failed to create default tenant", zap.Error(err))
+		}
+	}
 	worker.StartCleanupJob(db)
 
 	keyMgr := auth.NewKeyManager(db, cfg)

@@ -17,7 +17,7 @@ type SAMLConnection struct {
 	IdpEntityID     string `gorm:"index" json:"idp_entity_id"`
 	IdpSingleSignOn string `json:"idp_single_sign_on"`
 
-	AttributeMapping []byte `gorm:"type:jsonb" json:"attribute_mapping"`
+	AttributeMapping map[string]string `gorm:"serializer:json" json:"attribute_mapping"`
 
 	ForceAuthn  bool `gorm:"default:false" json:"force_authn"`
 	SignRequest bool `gorm:"default:true" json:"sign_request"`
@@ -41,13 +41,13 @@ func (c *SAMLConnection) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type SAMLClient struct {
-	ID               string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
-	TenantID         string `gorm:"index;not null" json:"tenant_id"`
-	Name             string `gorm:"not null" json:"name"`
-	EntityID         string `gorm:"uniqueIndex;not null" json:"entity_id"`
-	ACSURL           string `gorm:"not null" json:"acs_url"`
-	SPCertificate    string `gorm:"type:text" json:"sp_certificate"`
-	AttributeMapping []byte `gorm:"type:jsonb" json:"attribute_mapping"`
+	ID               string            `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	TenantID         string            `gorm:"index;not null" json:"tenant_id"`
+	Name             string            `gorm:"not null" json:"name"`
+	EntityID         string            `gorm:"uniqueIndex;not null" json:"entity_id"`
+	ACSURL           string            `gorm:"not null" json:"acs_url"`
+	SPCertificate    string            `gorm:"type:text" json:"sp_certificate"`
+	AttributeMapping map[string]string `gorm:"serializer:json" json:"attribute_mapping"`
 
 	ForceAuthn       bool `gorm:"default:false" json:"force_authn"`
 	SignResponse     bool `gorm:"default:true" json:"sign_response"`
