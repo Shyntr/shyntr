@@ -25,9 +25,9 @@ import (
 )
 
 func setupFullStack() (*gin.Engine, *gorm.DB, *auth.KeyManager) {
-	logger.InitLogger()
+	logger.InitLogger("info")
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		panic(err)
 	}
@@ -48,12 +48,13 @@ func setupFullStack() (*gin.Engine, *gorm.DB, *auth.KeyManager) {
 
 	provider := auth.NewProvider(db, []byte(cfg.AppSecret), "http://localhost:8080", keyMgr)
 
-	r := router.SetupRoutes(db, provider, cfg, keyMgr)
-	return r, db, keyMgr
+	publicRouter, _ := router.SetupRouters(db, provider, cfg, keyMgr)
+	return publicRouter, db, keyMgr
 }
 
 func TestScenario_TenantIsolation(t *testing.T) {
 	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
 
 	clientA := models.OAuth2Client{
 		ID:           "client-tenant-a",
@@ -74,6 +75,7 @@ func TestScenario_TenantIsolation(t *testing.T) {
 
 func TestScenario_StrictScopes(t *testing.T) {
 	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
 
 	client := models.OAuth2Client{
 		ID:           "limited-client",
@@ -91,8 +93,56 @@ func TestScenario_StrictScopes(t *testing.T) {
 	assert.Contains(t, w.Header().Get("Location"), "error=invalid_scope")
 }
 
+func TestScenario_PKCE_Enforcement(t *testing.T) {
+	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
+
+	client := models.OAuth2Client{
+		ID:           "pkce-client",
+		TenantID:     "default",
+		RedirectURIs: pq.StringArray{"http://localhost/cb"},
+		Scopes:       pq.StringArray{"openid"},
+		EnforcePKCE:  true, // ZERO TRUST: PKCE Zorunlu
+	}
+	db.Create(&client)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/t/default/oauth2/auth?client_id=pkce-client&response_type=code&scope=openid&state=12345678", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	location := w.Header().Get("Location")
+	assert.Contains(t, location, "error=invalid_request")
+	assert.Contains(t, location, "code_challenge")
+}
+
+func TestScenario_Audience_Restriction(t *testing.T) {
+	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
+
+	client := models.OAuth2Client{
+		ID:           "aud-client",
+		TenantID:     "default",
+		RedirectURIs: pq.StringArray{"http://localhost/cb"},
+		Scopes:       pq.StringArray{"openid"},
+		Audience:     pq.StringArray{"https://api.trusted.com"},
+	}
+	db.Create(&client)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/t/default/oauth2/auth?client_id=aud-client&response_type=code&scope=openid&audience=https://api.hacker.com&state=12345678", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	location := w.Header().Get("Location")
+	assert.Contains(t, location, "error=invalid_request")
+	assert.Contains(t, location, "whitelisted")
+}
+
 func TestScenario_OIDC_Prompts(t *testing.T) {
 	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
+	defer db.Exec("DELETE FROM login_requests")
 
 	client := models.OAuth2Client{
 		ID:           "prompt-client",
@@ -109,8 +159,7 @@ func TestScenario_OIDC_Prompts(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusSeeOther, w.Code)
-		location := w.Header().Get("Location")
-		assert.Contains(t, location, "error=login_required")
+		assert.Contains(t, w.Header().Get("Location"), "error=login_required")
 	})
 
 	t.Run("Prompt None With Session Succeeds", func(t *testing.T) {
@@ -126,21 +175,18 @@ func TestScenario_OIDC_Prompts(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/t/default/oauth2/auth?client_id=prompt-client&response_type=code&scope=openid&prompt=none&state=12345678", nil)
-
 		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: simulatedUserID})
-
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusFound, w.Code)
-		location := w.Header().Get("Location")
-
-		assert.NotContains(t, location, "error=login_required")
-		assert.Contains(t, location, "consent_challenge=")
+		assert.NotContains(t, w.Header().Get("Location"), "error=login_required")
+		assert.Contains(t, w.Header().Get("Location"), "consent_challenge=")
 	})
 }
 
 func TestScenario_SecureLogout(t *testing.T) {
 	r, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_clients")
 
 	validRedirect := "http://trusted.com/bye"
 	client := models.OAuth2Client{
@@ -189,6 +235,8 @@ func TestScenario_SecureLogout(t *testing.T) {
 
 func TestScenario_GracePeriod(t *testing.T) {
 	_, db, _ := setupFullStack()
+	defer db.Exec("DELETE FROM o_auth2_sessions")
+
 	repo := repository.NewSQLStore(db)
 	ctx := context.Background()
 

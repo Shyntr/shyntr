@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -67,7 +68,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		return
 	}
 
-	redirectURL, requestID, err := h.Service.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge)
+	redirectURLOrHTML, requestID, err := h.Service.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge)
 	if err != nil {
 		logger.Log.Error("Failed to initiate SAML SSO", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "sso_init_failed", "details": err.Error()})
@@ -79,7 +80,11 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		h.DB.Save(&loginReq)
 	}
 
-	c.Redirect(http.StatusFound, redirectURL)
+	if strings.HasPrefix(strings.TrimSpace(redirectURLOrHTML), "<") {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(redirectURLOrHTML))
+	} else {
+		c.Redirect(http.StatusFound, redirectURLOrHTML)
+	}
 }
 
 func (h *SAMLHandler) ACS(c *gin.Context) {

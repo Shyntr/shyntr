@@ -51,6 +51,14 @@ func (h *LoginHandler) SubmitLogin(c *gin.Context) {
 		return
 	}
 
+	if loginReq.TenantID != "default" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "local_login_disabled",
+			"message": "This tenant only supports SSO (SAML/OIDC) authentication.",
+		})
+		return
+	}
+
 	if req.Username == "admin" && req.Password == "password" {
 		loginReq.Authenticated = true
 		loginReq.Subject = "user-admin-123"
@@ -83,7 +91,10 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 	}
 
 	if loginReq.Authenticated {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "already_authenticated", "redirect_to": fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID)})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       "already_authenticated",
+			"redirect_to": fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID),
+		})
 		return
 	}
 
@@ -105,11 +116,13 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 
 	methods := []AuthMethod{}
 
-	methods = append(methods, AuthMethod{
-		ID:   "basic-auth",
-		Type: "password",
-		Name: "Username & Password",
-	})
+	if tenantID == "default" {
+		methods = append(methods, AuthMethod{
+			ID:   "basic-auth",
+			Type: "password",
+			Name: "Username & Password",
+		})
+	}
 
 	for _, conn := range samlConns {
 		methods = append(methods, AuthMethod{

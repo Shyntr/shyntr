@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v3"
+	"github.com/lib/pq"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/ory/fosite"
 	"gorm.io/gorm"
@@ -132,13 +133,14 @@ func (s *SQLStore) createSession(ctx context.Context, signature string, request 
 	}
 
 	sess := models.OAuth2Session{
-		Signature:   signature,
-		RequestID:   request.GetID(),
-		ClientID:    request.GetClient().GetID(),
-		Type:        tokenType,
-		SessionData: sessionJSON,
-		Active:      true,
-		CreatedAt:   time.Now(),
+		Signature:     signature,
+		RequestID:     request.GetID(),
+		ClientID:      request.GetClient().GetID(),
+		Type:          tokenType,
+		SessionData:   sessionJSON,
+		GrantedScopes: pq.StringArray(request.GetGrantedScopes()),
+		Active:        true,
+		CreatedAt:     time.Now(),
 	}
 	return s.DB.WithContext(ctx).Create(&sess).Error
 }
@@ -167,6 +169,11 @@ func (s *SQLStore) getSession(ctx context.Context, signature string, session fos
 		Session:     session,
 		RequestedAt: sess.CreatedAt,
 	}
+
+	for _, scope := range sess.GrantedScopes {
+		req.GrantScope(scope)
+	}
+
 	return req, nil
 }
 

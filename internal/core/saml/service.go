@@ -108,6 +108,7 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 		sp.ForceAuthn = &conn.ForceAuthn
 		if !conn.SignRequest {
 			sp.Key = nil
+			sp.SignatureMethod = ""
 		}
 	}
 
@@ -134,7 +135,12 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 	binding := saml.HTTPRedirectBinding
 	ssoURL := sp.GetSSOBindingLocation(binding)
 	if ssoURL == "" {
-		return "", "", fmt.Errorf("no SSO URL found for binding %s", binding)
+		binding = saml.HTTPPostBinding
+		ssoURL = sp.GetSSOBindingLocation(binding)
+	}
+
+	if ssoURL == "" {
+		return "", "", fmt.Errorf("no SSO URL found for HTTP-Redirect or HTTP-POST bindings")
 	}
 
 	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, relayState)
@@ -142,12 +148,15 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	redirectURL, err := req.Redirect(relayState, sp)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate redirect url: %w", err)
+	if binding == saml.HTTPRedirectBinding {
+		redirectURL, err := req.Redirect(relayState, sp)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate redirect url: %w", err)
+		}
+		return redirectURL.String(), req.ID, nil
 	}
 
-	return redirectURL.String(), req.ID, nil
+	return string(req.Post(relayState)), req.ID, nil
 }
 
 func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Request, possibleRequestID string) (*saml.Assertion, string, error) {

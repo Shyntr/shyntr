@@ -9,7 +9,7 @@ import (
 )
 
 type SAMLConnection struct {
-	ID       string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ID       string `gorm:"primaryKey;type:uuid" json:"id"`
 	TenantID string `gorm:"index;not null" json:"tenant_id"`
 	Name     string `gorm:"not null" json:"name"`
 
@@ -41,7 +41,7 @@ func (c *SAMLConnection) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 type SAMLClient struct {
-	ID               string            `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ID               string            `gorm:"primaryKey;type:uuid" json:"id"`
 	TenantID         string            `gorm:"index;not null" json:"tenant_id"`
 	Name             string            `gorm:"not null" json:"name"`
 	EntityID         string            `gorm:"uniqueIndex;not null" json:"entity_id"`

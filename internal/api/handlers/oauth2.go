@@ -394,19 +394,60 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
 		return
 	}
 
-	ctx := c.Request.Context()
-	_, ar, err := h.Provider.Fosite.IntrospectToken(ctx, token, fosite.AccessToken, &openid.DefaultSession{})
+	session := &openid.DefaultSession{}
+	_, accessRequest, err := h.Provider.Fosite.IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
 	}
 
-	session := ar.GetSession().(*openid.DefaultSession)
-	c.JSON(http.StatusOK, session.Claims.ToMap())
+	sess, ok := accessRequest.GetSession().(*openid.DefaultSession)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_session_type"})
+		return
+	}
+
+	subject := sess.Subject
+	if subject == "" && sess.Claims != nil {
+		subject = sess.Claims.Subject
+	}
+
+	var userCtx map[string]interface{}
+	var loginReq models.LoginRequest
+
+	if subject != "" {
+		err = h.DB.Where("subject = ? AND authenticated = ?", subject, true).
+			Order("updated_at desc").
+			First(&loginReq).Error
+
+		if err == nil && len(loginReq.Context) > 0 {
+			json.Unmarshal(loginReq.Context, &userCtx)
+		}
+	}
+
+	if userCtx == nil || len(userCtx) == 0 {
+		if sess.Claims != nil && sess.Claims.Extra != nil {
+			userCtx = sess.Claims.Extra
+		} else {
+			userCtx = make(map[string]interface{})
+		}
+	}
+
+	grantedScopes := accessRequest.GetGrantedScopes()
+
+	if len(grantedScopes) == 0 && sess.Claims != nil && sess.Claims.Extra != nil {
+		if scopeStr, ok := sess.Claims.Extra["scope"].(string); ok {
+			grantedScopes = strings.Split(scopeStr, " ")
+		}
+	}
+
+	safeClaims := auth.MapClaims(subject, userCtx, grantedScopes)
+
+	c.JSON(http.StatusOK, safeClaims)
 }
 
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
