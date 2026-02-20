@@ -46,6 +46,7 @@ func main() {
 		Short: "Run database migrations",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
+			logger.InitLogger(cfg.LogLevel)
 			db, err := data.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
@@ -53,7 +54,8 @@ func main() {
 			if err := data.MigrateDB(db); err != nil {
 				log.Fatalf("Migration failed: %v", err)
 			}
-			log.Println("Database migration completed successfully.")
+			data.SeedDefaultTenant(db)
+			logger.Log.Info("Database migration completed successfully.")
 		},
 	}
 

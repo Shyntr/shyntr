@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 
 	"github.com/crewjam/saml"
@@ -157,16 +158,48 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 }
 
 func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
-	id := c.Param("id")
-	if id == "default" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete default tenant"})
+	tenantID := c.Param("id")
+
+	if tenantID == "default" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot_delete_default_tenant"})
 		return
 	}
-	if err := h.DB.Delete(&models.Tenant{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.OAuth2Client{}).Error; err != nil {
+			return fmt.Errorf("failed to delete oidc clients: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.SAMLClient{}).Error; err != nil {
+			return fmt.Errorf("failed to delete saml clients: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.OIDCConnection{}).Error; err != nil {
+			return fmt.Errorf("failed to delete oidc connections: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.SAMLConnection{}).Error; err != nil {
+			return fmt.Errorf("failed to delete saml connections: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.LoginRequest{}).Error; err != nil {
+			return fmt.Errorf("failed to delete login requests: %w", err)
+		}
+
+		if err := tx.Where("id = ?", tenantID).Delete(&models.Tenant{}).Error; err != nil {
+			return fmt.Errorf("failed to delete tenant: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		logger.Log.Error("Failed to cascade delete tenant", zap.String("tenant_id", tenantID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_delete_tenant", "details": err.Error()})
 		return
 	}
-	c.JSON(http.StatusNoContent, nil)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Tenant and all associated resources deleted successfully"})
 }
 
 // --- OAuth2 Clients Management ---
