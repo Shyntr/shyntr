@@ -54,7 +54,6 @@ func main() {
 			if err := data.MigrateDB(db); err != nil {
 				log.Fatalf("Migration failed: %v", err)
 			}
-			data.SeedDefaultTenant(db)
 			logger.Log.Info("Database migration completed successfully.")
 		},
 	}
@@ -644,15 +643,7 @@ func runServer() {
 	var count int64
 	if err := db.Model(&models.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
 		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
-		defaultTenant := models.Tenant{
-			ID:          cfg.DefaultTenantID,
-			Name:        "default",
-			DisplayName: "Default System Tenant",
-			Description: "Automatically created default tenant",
-		}
-		if err := db.Create(&defaultTenant).Error; err != nil {
-			logger.Log.Error("Failed to create default tenant", zap.Error(err))
-		}
+		data.SeedDefaultTenant(db, cfg)
 	}
 	worker.StartCleanupJob(db)
 

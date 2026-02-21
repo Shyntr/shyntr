@@ -19,5 +19,5 @@ const (
 	// Environment Variables
 	EnvAppSecret     = "APP_SECRET"
 	EnvDatabaseDSN   = "DSN"
-	EnvRSAPrivateKey = "APP_RSA_KEY_BASE64" // For injecting keys via Env
+	EnvRSAPrivateKey = "APP_PRIVATE_KEY_BASE64"
 )

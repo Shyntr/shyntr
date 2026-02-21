@@ -18,7 +18,7 @@ type Config struct {
 	CookieSecure        bool     `mapstructure:"COOKIE_SECURE"`
 	AllowedOrigins      []string `mapstructure:"CORS_ALLOWED_ORIGINS"`
 	AdminAllowedOrigins []string `mapstructure:"ADMIN_CORS_ALLOWED_ORIGINS"`
-	RSAPrivateKeyBase64 string   `mapstructure:"APP_RSA_KEY_BASE64"`
+	RSAPrivateKeyBase64 string   `mapstructure:"APP_PRIVATE_KEY_BASE64"`
 	LogLevel            string   `mapstructure:"LOG_LEVEL"`
 
 	// Security Tuning

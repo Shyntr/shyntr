@@ -53,7 +53,7 @@ func MigrateDB(db *gorm.DB) error {
 	)
 }
 
-func SeedDefaultTenant(db *gorm.DB) {
+func SeedDefaultTenant(db *gorm.DB, cfg *config.Config) {
 	var count int64
 	if err := db.Model(&models.Tenant{}).Where("id = ?", "default").Count(&count).Error; err != nil {
 		logger.Log.Error("Failed to check default tenant", zap.Error(err))
@@ -62,7 +62,7 @@ func SeedDefaultTenant(db *gorm.DB) {
 
 	if count == 0 {
 		defaultTenant := models.Tenant{
-			ID:          "default",
+			ID:          cfg.DefaultTenantID,
 			Name:        "default",
 			DisplayName: "Default Tenant",
 			Description: "This is the default (root) isolation area of the system. All applications (clients) and identity providers (connections) operate in this space unless a specific tenant (customer/domain) is designated. This tenant cannot be deleted to ensure system integrity.",
