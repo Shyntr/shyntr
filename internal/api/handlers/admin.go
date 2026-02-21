@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/config"
+	"github.com/nevzatcirak/shyntr/internal/api/response"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -40,13 +41,13 @@ func (h *AdminHandler) fetchClient(clientID string) *models.OAuth2Client {
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing login_challenge"})
+		c.Error(response.NewAppError(http.StatusBadRequest, "Missing login_challenge parameter", nil))
 		return
 	}
 
 	var req models.LoginRequest
 	if err := h.DB.First(&req, "id = ?", challenge).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "login request not found or expired"})
+		c.Error(response.NewAppError(http.StatusNotFound, "Login request not found or expired", err))
 		return
 	}
 
@@ -58,7 +59,7 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	tenant := h.fetchTenant(req.TenantID)
 	client := h.fetchClient(req.ClientID)
 
-	response := gin.H{
+	resp := gin.H{
 		"challenge":   req.ID,
 		"client_id":   req.ClientID,
 		"request_url": req.RequestURL,
@@ -70,7 +71,7 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 		"client":      client,
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
@@ -84,13 +85,13 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
 	var req models.LoginRequest
 	if err := h.DB.First(&req, "id = ?", challenge).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "login request not found"})
+		c.Error(response.NewAppError(http.StatusNotFound, "Login request not found", err))
 		return
 	}
 
@@ -105,7 +106,7 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	}
 
 	if err := h.DB.Save(&req).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update login request"})
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update login request", err))
 		return
 	}
 
@@ -123,9 +124,12 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 
 func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
-	h.DB.Model(&models.LoginRequest{}).Where("id = ?", challenge).Updates(map[string]interface{}{
+	if err := h.DB.Model(&models.LoginRequest{}).Where("id = ?", challenge).Updates(map[string]interface{}{
 		"active": false,
-	})
+	}).Error; err != nil {
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+rejected+login",
@@ -135,13 +139,13 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing consent_challenge"})
+		c.Error(response.NewAppError(http.StatusBadRequest, "Missing consent_challenge parameter", nil))
 		return
 	}
 
 	var req models.ConsentRequest
 	if err := h.DB.First(&req, "id = ?", challenge).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "consent request not found or expired"})
+		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found or expired", err))
 		return
 	}
 
@@ -174,13 +178,13 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
 	var req models.ConsentRequest
 	if err := h.DB.First(&req, "id = ?", challenge).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "consent request not found"})
+		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found", err))
 		return
 	}
 
@@ -192,7 +196,7 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	req.RememberFor = body.RememberFor
 
 	if err := h.DB.Save(&req).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update consent request"})
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update consent request", err))
 		return
 	}
 
@@ -211,9 +215,12 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 
-	h.DB.Model(&models.ConsentRequest{}).Where("id = ?", challenge).Updates(map[string]interface{}{
+	if err := h.DB.Model(&models.ConsentRequest{}).Where("id = ?", challenge).Updates(map[string]interface{}{
 		"active": false,
-	})
+	}).Error; err != nil {
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+denied+access",

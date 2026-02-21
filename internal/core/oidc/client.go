@@ -14,6 +14,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 )
@@ -95,7 +96,7 @@ func (s *ClientService) ExchangeAndUserInfo(ctx context.Context, tenantID, code,
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: s.Config.SkipTLSVerify},
 	}
-	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: tr}
+	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(tr)}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
 	if conn.TokenEndpoint == "" || conn.UserInfoEndpoint == "" {
@@ -176,7 +177,7 @@ func (s *ClientService) discoverEndpoints(ctx context.Context, issuer string) (*
 
 	client := &http.Client{
 		Timeout:   10 * time.Second,
-		Transport: tr,
+		Transport: otelhttp.NewTransport(tr),
 	}
 
 	resp, err := client.Do(req)

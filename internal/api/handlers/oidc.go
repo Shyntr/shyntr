@@ -47,7 +47,7 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 
 	redirectURL, err := h.Service.InitiateAuth(c.Request.Context(), tenantID, connectionID, loginChallenge)
 	if err != nil {
-		logger.Log.Error("Failed to initiate OIDC", zap.Error(err))
+		logger.FromGin(c).Error("Failed to initiate OIDC", zap.Error(err), zap.String("protocol", "oidc"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "oidc_init_failed", "details": err.Error()})
 		return
 	}
@@ -67,7 +67,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	loginChallenge, connectionID, err := h.Service.VerifyState(state)
 	if err != nil {
-		logger.Log.Warn("Invalid OIDC state", zap.Error(err))
+		logger.FromGin(c).Warn("Invalid OIDC state", zap.Error(err), zap.String("protocol", "oidc"))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_state_token"})
 		return
 	}
@@ -80,7 +80,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	userInfo, err := h.Service.ExchangeAndUserInfo(c.Request.Context(), tenantID, code, connectionID)
 	if err != nil {
-		logger.Log.Error("OIDC Exchange Failed", zap.Error(err))
+		logger.FromGin(c).Error("OIDC Exchange Failed", zap.Error(err), zap.String("protocol", "oidc"))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token_exchange_failed", "details": err.Error()})
 		return
 	}
@@ -93,7 +93,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	finalAttributes, err := h.Mapper.Map(userInfo, conn.AttributeMapping)
 	if err != nil {
-		logger.Log.Warn("Attribute mapping failed, falling back to raw", zap.Error(err))
+		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "oidc"))
 		finalAttributes = userInfo
 	}
 
@@ -126,5 +126,6 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 
 	redirectURL := fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID)
+	logger.FromGin(c).Info("OIDC SSO callback processed successfully", zap.String("user_sub", subject), zap.String("protocol", "oidc"))
 	c.Redirect(http.StatusFound, redirectURL)
 }
