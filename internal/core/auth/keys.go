@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 
 	"github.com/go-jose/go-jose/v3"
 	"github.com/nevzatcirak/shyntr/config"
@@ -83,11 +84,28 @@ func parseBase64PEM(b64 string) (*rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block")
 	}
-	return x509.ParsePKCS1PrivateKey(block.Bytes)
+
+	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err == nil {
+		return privKey, nil
+	}
+
+	parsedKey, errPKCS8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if errPKCS8 != nil {
+		return nil, fmt.Errorf("failed to parse private key. PKCS#1 error: %v, PKCS#8 error: %v", err, errPKCS8)
+	}
+
+	rsaPrivKey, ok := parsedKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("parsed PKCS#8 key is not a valid RSA private key")
+	}
+
+	return rsaPrivKey, nil
 }
 
 func GeneratePublicJWKS(privateKey *rsa.PrivateKey) *jose.JSONWebKeySet {

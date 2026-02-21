@@ -21,6 +21,9 @@ FROM alpine:latest
 
 WORKDIR /app
 
+ENV GIN_MODE=release
+ENV GO_ENV=production
+
 # Install CA certificates for SSL
 RUN apk add --no-cache ca-certificates
 
@@ -28,8 +31,7 @@ RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/shyntr .
 
 # Expose port
-EXPOSE 7496
-EXPOSE 7497
+EXPOSE 7496 7497
 
 # Default command (can be overridden to 'migrate' or other CLI commands)
 CMD ["./shyntr", "serve"]
