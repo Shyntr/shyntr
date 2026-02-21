@@ -32,6 +32,10 @@ func cleanupExpiredData(db *gorm.DB) {
 		logger.Log.Error("Cleanup failed: BlacklistedJTI", zap.Error(err))
 	}
 
+	if err := db.Where("expires_at < ?", now).Delete(&models.SAMLReplayCache{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: SAMLReplayCache", zap.Error(err))
+	}
+
 	if err := db.Where("created_at < ?", expirationHorizon).Delete(&models.LoginRequest{}).Error; err != nil {
 		logger.Log.Error("Cleanup failed: LoginRequest", zap.Error(err))
 	}

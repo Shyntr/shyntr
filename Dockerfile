@@ -28,7 +28,8 @@ RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/shyntr .
 
 # Expose port
-EXPOSE 8080
+EXPOSE 7496
+EXPOSE 7497
 
 # Default command (can be overridden to 'migrate' or other CLI commands)
 CMD ["./shyntr", "serve"]

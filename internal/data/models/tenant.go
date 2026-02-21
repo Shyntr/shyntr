@@ -10,13 +10,17 @@ import (
 // Tenant represents an isolated environment within Shyntr.
 // Each tenant has its own Configuration and Clients.
 type Tenant struct {
-	ID        string `gorm:"primaryKey"` // e.g., "default", "customer-a"
-	Name      string `gorm:"not null"`
-	IssuerURL string // Optional: Custom domain support
+	ID   string `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"uniqueIndex;not null" json:"name"`
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	DisplayName string `gorm:"default:''" json:"display_name"`
+	Description string `gorm:"default:''" json:"description"`
+
+	IssuerURL string `json:"issuer_url"`
+
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (t *Tenant) BeforeCreate(tx *gorm.DB) (err error) {

@@ -9,6 +9,7 @@ import (
 
 type LoginRequest struct {
 	ID                string         `gorm:"primaryKey"`
+	TenantID          string         `gorm:"index"`
 	RequestedScope    pq.StringArray `gorm:"type:text[]"`
 	RequestedAudience pq.StringArray `gorm:"type:text[]"`
 	Skip              bool           `gorm:"default:false"`
@@ -20,6 +21,8 @@ type LoginRequest struct {
 	Active            bool           `gorm:"default:true"`
 	SessionID         string
 	ClientIP          string
+
+	SAMLRequestID string `gorm:"index"`
 
 	Remember    bool `gorm:"default:false"`
 	RememberFor int  `gorm:"default:0"`

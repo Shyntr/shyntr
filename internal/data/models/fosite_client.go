@@ -11,6 +11,8 @@ type ExtendedClient struct {
 	JSONWebKeys *jose.JSONWebKeySet `json:"jwks,omitempty"`
 
 	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
+
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
 }
 
 func (c *ExtendedClient) GetJSONWebKeys() *jose.JSONWebKeySet {
@@ -19,4 +21,8 @@ func (c *ExtendedClient) GetJSONWebKeys() *jose.JSONWebKeySet {
 
 func (c *ExtendedClient) GetPostLogoutRedirectURIs() []string {
 	return c.PostLogoutRedirectURIs
+}
+
+func (c *ExtendedClient) GetTokenEndpointAuthMethod() string {
+	return c.TokenEndpointAuthMethod
 }

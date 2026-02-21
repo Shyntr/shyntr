@@ -1,0 +1,650 @@
+package handlers
+
+import (
+	"encoding/xml"
+	"fmt"
+	"net/http"
+
+	"github.com/crewjam/saml"
+	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/nevzatcirak/shyntr/pkg/crypto"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+)
+
+type ManagementHandler struct {
+	DB *gorm.DB
+}
+
+func NewManagementHandler(db *gorm.DB) *ManagementHandler {
+	return &ManagementHandler{DB: db}
+}
+
+func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
+	if inputID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id_required"})
+		return "", false
+	}
+
+	var tenant models.Tenant
+
+	if err := h.DB.Select("id").First(&tenant, "id = ?", inputID).Error; err == nil {
+		return tenant.ID, true
+	}
+
+	if err := h.DB.Select("id").First(&tenant, "name = ?", inputID).Error; err == nil {
+		return tenant.ID, true
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"error": "tenant_not_found", "message": "The specified tenant does not exist."})
+	return "", false
+}
+
+func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
+	tenantID := c.Query("tenant_id")
+
+	var stats struct {
+		TotalOIDCClients     int64                    `json:"total_oidc_clients"`
+		TotalSAMLClients     int64                    `json:"total_saml_clients"`
+		TotalSAMLConnections int64                    `json:"total_saml_connections"`
+		TotalOIDCConnections int64                    `json:"total_oidc_connections"`
+		TotalTenants         int64                    `json:"total_tenants"`
+		PublicClients        int64                    `json:"public_clients"`
+		ConfidentialClients  int64                    `json:"confidential_clients"`
+		RecentActivity       []map[string]interface{} `json:"recent_activity"`
+	}
+
+	applyFilter := func(db *gorm.DB) *gorm.DB {
+		if tenantID != "" {
+			return db.Where("tenant_id = ?", tenantID)
+		}
+		return db
+	}
+
+	applyFilter(h.DB.Model(&models.OAuth2Client{})).Count(&stats.TotalOIDCClients)
+	applyFilter(h.DB.Model(&models.SAMLClient{})).Count(&stats.TotalSAMLClients)
+	applyFilter(h.DB.Model(&models.SAMLConnection{})).Count(&stats.TotalSAMLConnections)
+	applyFilter(h.DB.Model(&models.OIDCConnection{})).Count(&stats.TotalOIDCConnections)
+
+	h.DB.Model(&models.Tenant{}).Count(&stats.TotalTenants)
+
+	applyFilter(h.DB.Model(&models.OAuth2Client{}).Where("public = ?", true)).Count(&stats.PublicClients)
+	applyFilter(h.DB.Model(&models.OAuth2Client{}).Where("public = ?", false)).Count(&stats.ConfidentialClients)
+
+	var recentLogins []models.LoginRequest
+	loginQuery := h.DB.Order("created_at desc").Limit(5)
+	if tenantID != "" {
+		loginQuery = loginQuery.Where("tenant_id = ?", tenantID)
+	}
+	loginQuery.Find(&recentLogins)
+
+	stats.RecentActivity = make([]map[string]interface{}, 0)
+	for _, l := range recentLogins {
+		status := "Pending"
+		if l.Authenticated {
+			status = "Success"
+		} else if !l.Active {
+			status = "Failed"
+		}
+
+		activity := map[string]interface{}{
+			"id":              l.ID,
+			"subject":         l.Subject,
+			"client_id":       l.ClientID,
+			"saml_request_id": l.SAMLRequestID,
+			"status":          status,
+			"timestamp":       l.CreatedAt,
+		}
+		stats.RecentActivity = append(stats.RecentActivity, activity)
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+func (h *ManagementHandler) ListTenants(c *gin.Context) {
+	var tenants []models.Tenant
+	if err := h.DB.Find(&tenants).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, tenants)
+}
+
+func (h *ManagementHandler) GetTenant(c *gin.Context) {
+	id := c.Param("id")
+	var tenant models.Tenant
+	if err := h.DB.First(&tenant, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
+	c.JSON(http.StatusOK, tenant)
+}
+
+func (h *ManagementHandler) CreateTenant(c *gin.Context) {
+	var tenant models.Tenant
+	if err := c.ShouldBindJSON(&tenant); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.DB.Create(&tenant).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create tenant"})
+		return
+	}
+	c.JSON(http.StatusCreated, tenant)
+}
+
+func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
+	id := c.Param("id")
+	var req models.Tenant
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updates := map[string]interface{}{
+		"name":         req.Name,
+		"display_name": req.DisplayName,
+		"description":  req.Description,
+		"issuer_url":   req.IssuerURL,
+	}
+
+	if err := h.DB.Model(&models.Tenant{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
+	tenantID := c.Param("id")
+
+	if tenantID == "default" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot_delete_default_tenant"})
+		return
+	}
+
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.OAuth2Client{}).Error; err != nil {
+			return fmt.Errorf("failed to delete oidc clients: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.SAMLClient{}).Error; err != nil {
+			return fmt.Errorf("failed to delete saml clients: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.OIDCConnection{}).Error; err != nil {
+			return fmt.Errorf("failed to delete oidc connections: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.SAMLConnection{}).Error; err != nil {
+			return fmt.Errorf("failed to delete saml connections: %w", err)
+		}
+
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.LoginRequest{}).Error; err != nil {
+			return fmt.Errorf("failed to delete login requests: %w", err)
+		}
+
+		if err := tx.Where("id = ?", tenantID).Delete(&models.Tenant{}).Error; err != nil {
+			return fmt.Errorf("failed to delete tenant: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		logger.Log.Error("Failed to cascade delete tenant", zap.String("tenant_id", tenantID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_delete_tenant", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Tenant and all associated resources deleted successfully"})
+}
+
+// --- OAuth2 Clients Management ---
+
+func (h *ManagementHandler) CreateClient(c *gin.Context) {
+	var client models.OAuth2Client
+	if err := c.ShouldBindJSON(&client); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, client.TenantID)
+	if !ok {
+		return
+	}
+	client.TenantID = realTenantID
+
+	if client.Secret != "" {
+		hashed, err := crypto.HashPassword(client.Secret)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash secret"})
+			return
+		}
+		client.Secret = hashed
+	}
+
+	if err := h.DB.Create(&client).Error; err != nil {
+		logger.Log.Error("Failed to create client", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create client"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, client)
+}
+
+func (h *ManagementHandler) ListClients(c *gin.Context) {
+	var clients []models.OAuth2Client
+	if err := h.DB.Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, clients)
+}
+
+func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		return
+	}
+
+	var clients []models.OAuth2Client
+	if err := h.DB.Where("tenant_id = ?", tenantID).Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+
+	for i := range clients {
+		clients[i].Secret = "*****"
+	}
+
+	c.JSON(http.StatusOK, clients)
+}
+
+func (h *ManagementHandler) GetClient(c *gin.Context) {
+	id := c.Param("id")
+	var client models.OAuth2Client
+	if err := h.DB.First(&client, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "client not found"})
+		return
+	}
+	client.Secret = "*****"
+	c.JSON(http.StatusOK, client)
+}
+
+func (h *ManagementHandler) UpdateClient(c *gin.Context) {
+	id := c.Param("id")
+	var req models.OAuth2Client
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var client models.OAuth2Client
+	if err := h.DB.First(&client, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "client not found"})
+		return
+	}
+
+	updates := map[string]interface{}{
+		"name":                       req.Name,
+		"redirect_uris":              req.RedirectURIs,
+		"scopes":                     req.Scopes,
+		"grant_types":                req.GrantTypes,
+		"response_types":             req.ResponseTypes,
+		"public":                     req.Public,
+		"token_endpoint_auth_method": req.TokenEndpointAuthMethod,
+		"enforce_pkce":               req.EnforcePKCE,
+		"allowed_cors_origins":       req.AllowedCORSOrigins,
+		"audience":                   req.Audience,
+		"post_logout_redirect_uris":  req.PostLogoutRedirectURIs,
+		"access_token_lifespan":      req.AccessTokenLifespan,
+		"id_token_lifespan":          req.IDTokenLifespan,
+		"refresh_token_lifespan":     req.RefreshTokenLifespan,
+	}
+
+	if req.Secret != "" && req.Secret != "*****" {
+		hashed, _ := crypto.HashPassword(req.Secret)
+		updates["secret"] = hashed
+	}
+
+	if err := h.DB.Model(&client).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *ManagementHandler) DeleteClient(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.DB.Delete(&models.OAuth2Client{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
+	var clients []models.SAMLClient
+	if err := h.DB.Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, clients)
+}
+
+func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		return
+	}
+
+	var clients []models.SAMLClient
+	if err := h.DB.Where("tenant_id = ?", tenantID).Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, clients)
+}
+
+func (h *ManagementHandler) GetSAMLClient(c *gin.Context) {
+	id := c.Param("id")
+	var client models.SAMLClient
+	if err := h.DB.First(&client, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "saml client not found"})
+		return
+	}
+	c.JSON(http.StatusOK, client)
+}
+
+func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
+	var client models.SAMLClient
+	if err := c.ShouldBindJSON(&client); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, client.TenantID)
+	if !ok {
+		return
+	}
+	client.TenantID = realTenantID
+
+	if err := h.DB.Create(&client).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create saml client"})
+		return
+	}
+	c.JSON(http.StatusCreated, client)
+}
+
+func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
+	id := c.Param("id")
+	var req models.SAMLClient
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := h.DB.Model(&models.SAMLClient{}).
+		Where("id = ?", id).
+		Select(
+			"Name", "EntityID", "ACSURL", "SPCertificate",
+			"AttributeMapping", "ForceAuthn", "SignResponse",
+			"SignAssertion", "EncryptAssertion", "Active", "TenantID",
+		).
+		Updates(models.SAMLClient{
+			Name:             req.Name,
+			EntityID:         req.EntityID,
+			TenantID:         req.TenantID,
+			ACSURL:           req.ACSURL,
+			SPCertificate:    req.SPCertificate,
+			AttributeMapping: req.AttributeMapping,
+			ForceAuthn:       req.ForceAuthn,
+			SignResponse:     req.SignResponse,
+			SignAssertion:    req.SignAssertion,
+			EncryptAssertion: req.EncryptAssertion,
+			Active:           req.Active,
+		})
+
+	if result.Error != nil {
+		logger.Log.Error("Update failed", zap.Error(result.Error))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.DB.Delete(&models.SAMLClient{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// --- SAML Connection Management (Identity Providers) ---
+
+func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
+	var conn models.SAMLConnection
+	if err := c.ShouldBindJSON(&conn); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, conn.TenantID)
+	if !ok {
+		return
+	}
+	conn.TenantID = realTenantID
+
+	if conn.IdpMetadataXML != "" {
+		meta := &saml.EntityDescriptor{}
+		if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), meta); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_metadata_xml", "details": err.Error()})
+			return
+		}
+		conn.IdpEntityID = meta.EntityID
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "idp_metadata_xml_required"})
+		return
+	}
+
+	if err := h.DB.Create(&conn).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create saml connection"})
+		return
+	}
+	c.JSON(http.StatusCreated, conn)
+}
+
+func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
+	var conns []models.SAMLConnection
+	if err := h.DB.Find(&conns).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, conns)
+}
+
+func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		return
+	}
+
+	var conns []models.SAMLConnection
+	if err := h.DB.Where("tenant_id = ?", tenantID).Find(&conns).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, conns)
+}
+
+func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
+	id := c.Param("id")
+	var conn models.SAMLConnection
+	if err := h.DB.First(&conn, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+		return
+	}
+	c.JSON(http.StatusOK, conn)
+}
+
+func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
+	id := c.Param("id")
+	var req models.SAMLConnection
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updateData := models.SAMLConnection{
+		Name:             req.Name,
+		TenantID:         req.TenantID,
+		AttributeMapping: req.AttributeMapping,
+		ForceAuthn:       req.ForceAuthn,
+		SignRequest:      req.SignRequest,
+		Active:           req.Active,
+		SPPrivateKey:     req.SPPrivateKey,
+		SPCertificate:    req.SPCertificate,
+	}
+
+	if req.IdpMetadataXML != "" {
+		meta := &saml.EntityDescriptor{}
+		if err := xml.Unmarshal([]byte(req.IdpMetadataXML), meta); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_metadata_xml", "details": err.Error()})
+			return
+		}
+		updateData.IdpMetadataXML = req.IdpMetadataXML
+		updateData.IdpEntityID = meta.EntityID
+	}
+
+	result := h.DB.Model(&models.SAMLConnection{}).Where("id = ?", id).Updates(updateData)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.DB.Delete(&models.SAMLConnection{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// --- OIDC Connection Management ---
+
+func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
+	var conn models.OIDCConnection
+	if err := c.ShouldBindJSON(&conn); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, conn.TenantID)
+	if !ok {
+		return
+	}
+	conn.TenantID = realTenantID
+
+	if err := h.DB.Create(&conn).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create oidc connection"})
+		return
+	}
+	c.JSON(http.StatusCreated, conn)
+}
+
+func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
+	var conns []models.OIDCConnection
+	if err := h.DB.Find(&conns).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, conns)
+}
+
+func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		return
+	}
+
+	var conns []models.OIDCConnection
+	if err := h.DB.Where("tenant_id = ?", tenantID).Find(&conns).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, conns)
+}
+
+func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
+	id := c.Param("id")
+	var conn models.OIDCConnection
+	if err := h.DB.First(&conn, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+		return
+	}
+	c.JSON(http.StatusOK, conn)
+}
+
+func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
+	id := c.Param("id")
+	var req models.OIDCConnection
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updateData := models.OIDCConnection{
+		Name:                  req.Name,
+		TenantID:              req.TenantID,
+		IssuerURL:             req.IssuerURL,
+		ClientID:              req.ClientID,
+		ClientSecret:          req.ClientSecret,
+		AuthorizationEndpoint: req.AuthorizationEndpoint,
+		TokenEndpoint:         req.TokenEndpoint,
+		UserInfoEndpoint:      req.UserInfoEndpoint,
+		JWKSURI:               req.JWKSURI,
+		Scopes:                req.Scopes,
+		AttributeMapping:      req.AttributeMapping,
+		Active:                req.Active,
+	}
+
+	result := h.DB.Model(&models.OIDCConnection{}).Where("id = ?", id).Updates(updateData)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.DB.Delete(&models.OIDCConnection{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/config"
@@ -18,6 +19,22 @@ type AdminHandler struct {
 
 func NewAdminHandler(db *gorm.DB, cfg *config.Config) *AdminHandler {
 	return &AdminHandler{DB: db, Config: cfg}
+}
+
+func (h *AdminHandler) fetchTenant(tenantID string) *models.Tenant {
+	var tenant models.Tenant
+	if err := h.DB.First(&tenant, "id = ?", tenantID).Error; err != nil {
+		return nil
+	}
+	return &tenant
+}
+
+func (h *AdminHandler) fetchClient(clientID string) *models.OAuth2Client {
+	var client models.OAuth2Client
+	if err := h.DB.First(&client, "id = ?", clientID).Error; err != nil {
+		return nil
+	}
+	return &client
 }
 
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
@@ -38,7 +55,10 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 		_ = json.Unmarshal(req.Context, &contextMap)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	tenant := h.fetchTenant(req.TenantID)
+	client := h.fetchClient(req.ClientID)
+
+	response := gin.H{
 		"challenge":   req.ID,
 		"client_id":   req.ClientID,
 		"request_url": req.RequestURL,
@@ -46,7 +66,11 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 		"scopes":      req.RequestedScope,
 		"subject":     req.Subject,
 		"context":     contextMap,
-	})
+		"tenant":      tenant,
+		"client":      client,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
@@ -85,7 +109,12 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		return
 	}
 
-	redirectTo := fmt.Sprintf("%s&login_verifier=%s", req.RequestURL, req.ID)
+	redirectPath := req.RequestURL
+	if !strings.HasPrefix(redirectPath, "http") {
+		redirectPath = fmt.Sprintf("%s%s", h.Config.BaseIssuerURL, req.RequestURL)
+	}
+
+	redirectTo := fmt.Sprintf("%s&login_verifier=%s", redirectPath, req.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": redirectTo,
@@ -116,6 +145,12 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 		return
 	}
 
+	client := h.fetchClient(req.ClientID)
+	var tenant *models.Tenant
+	if client != nil {
+		tenant = h.fetchTenant(client.TenantID)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"challenge":          req.ID,
 		"client_id":          req.ClientID,
@@ -124,6 +159,8 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 		"requested_audience": req.RequestedAudience,
 		"skip":               req.Skip,
 		"request_url":        req.RequestURL,
+		"client":             client,
+		"tenant":             tenant,
 	})
 }
 
@@ -159,7 +196,12 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		return
 	}
 
-	redirectTo := fmt.Sprintf("%s&consent_verifier=%s", req.RequestURL, req.ID)
+	redirectPath := req.RequestURL
+	if !strings.HasPrefix(redirectPath, "http") {
+		redirectPath = fmt.Sprintf("%s%s", h.Config.BaseIssuerURL, req.RequestURL)
+	}
+
+	redirectTo := fmt.Sprintf("%s&consent_verifier=%s", redirectPath, req.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": redirectTo,

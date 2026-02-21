@@ -7,29 +7,40 @@ import (
 	"github.com/lib/pq"
 )
 
-// OAuth2Client represents a registered application.
-// Now supports Multi-Tenancy via TenantID and AppID.
+// OAuth2Client represents a registered application with advanced security policies.
 type OAuth2Client struct {
-	ID            string         `gorm:"primaryKey"`
-	TenantID      string         `gorm:"index;not null"`
-	AppID         string         `gorm:"index"`
-	Secret        string         `gorm:"not null"`
-	RedirectURIs  pq.StringArray `gorm:"type:text[]"`
-	GrantTypes    pq.StringArray `gorm:"type:text[]"`
-	ResponseTypes pq.StringArray `gorm:"type:text[]"`
-	Scopes        pq.StringArray `gorm:"type:text[]"`
+	ID       string `gorm:"primaryKey" json:"client_id"`
+	TenantID string `gorm:"index;not null" json:"tenant_id"`
+	Name     string `gorm:"not null;default:'Unnamed Client'" json:"name"`
+	AppID    string `gorm:"index" json:"app_id"`
+	Secret   string `gorm:"not null" json:"client_secret,omitempty"`
 
-	PostLogoutRedirectURIs pq.StringArray `gorm:"type:text[]"`
+	// --- Protocol Flows ---
+	RedirectURIs  pq.StringArray `gorm:"type:text[]" json:"redirect_uris"`
+	GrantTypes    pq.StringArray `gorm:"type:text[]" json:"grant_types"`    // authorization_code, refresh_token...
+	ResponseTypes pq.StringArray `gorm:"type:text[]" json:"response_types"` // code, token, id_token
 
-	JSONWebKeys *jose.JSONWebKeySet `gorm:"type:jsonb"`
+	// --- Access Control ---
+	Scopes   pq.StringArray `gorm:"type:text[]" json:"scopes"`
+	Audience pq.StringArray `gorm:"type:text[]" json:"audience"`
 
-	Public      bool
-	SkipConsent bool `gorm:"default:false"`
+	// --- Security Settings ---
+	Public                  bool           `json:"public"` // True for SPA/Mobile
+	TokenEndpointAuthMethod string         `gorm:"default:'client_secret_basic'" json:"token_endpoint_auth_method"`
+	EnforcePKCE             bool           `gorm:"default:false" json:"enforce_pkce"`
+	AllowedCORSOrigins      pq.StringArray `gorm:"type:text[]" json:"allowed_cors_origins"`
 
-	AccessTokenLifespan  string `gorm:"default:''"`
-	RefreshTokenLifespan string `gorm:"default:''"`
-	IDTokenLifespan      string `gorm:"default:''"`
+	// --- Advanced ---
+	PostLogoutRedirectURIs pq.StringArray      `gorm:"type:text[]" json:"post_logout_redirect_uris"`
+	JSONWebKeys            *jose.JSONWebKeySet `gorm:"type:jsonb" json:"jwks,omitempty"`
+	SkipConsent            bool                `gorm:"default:false" json:"skip_consent"`
+	SubjectType            string              `gorm:"default:'public'" json:"subject_type"`
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// --- Lifespans ---
+	AccessTokenLifespan  string `gorm:"default:''" json:"access_token_lifespan,omitempty"`
+	RefreshTokenLifespan string `gorm:"default:''" json:"refresh_token_lifespan,omitempty"`
+	IDTokenLifespan      string `gorm:"default:''" json:"id_token_lifespan,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

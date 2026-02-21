@@ -5,23 +5,32 @@ services:
       dockerfile: Dockerfile
     container_name: shyntr_app
     ports:
-      - "8080:8080"
+      - "7496:7496" # Public Port (SHYN)
+      - "7497:7497" # Admin Port (ADMN)
     environment:
       - DSN=postgres://shyntr:secretpassword@postgres:5432/shyntr?sslmode=disable
       - APP_SECRET=12345678901234567890123456789012
+      - PORT=7496
+      - ADMIN_PORT=7497
+      - ISSUER_URL=http://localhost:7496
+      - EXTERNAL_LOGIN_URL=http://localhost:3000/login
+      - EXTERNAL_CONSENT_URL=http://localhost:3000/consent
 
-      # URLs
-      - PORT=8080
-      - ISSUER_URL=http://localhost:8080
-      - EXTERNAL_LOGIN_URL=http://localhost:8080/auth/login
-      - EXTERNAL_CONSENT_URL=http://localhost:8080/auth/consent
-      - COOKIE_SECURE=false
-      - CORS_ALLOWED_ORIGINS=*
+      # Security
+      - ADMIN_CORS_ALLOWED_ORIGINS=http://localhost:3274
+      - LOG_LEVEL=info
+      - SKIP_TLS_VERIFY=true #Development only
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - shyntr-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7496/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     command: >
       sh -c "./shyntr migrate && ./shyntr serve"
 
