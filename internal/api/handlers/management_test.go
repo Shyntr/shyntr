@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
+	"github.com/nevzatcirak/shyntr/internal/api/middleware"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
@@ -34,6 +35,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
+	r.Use(middleware.ErrorHandlerMiddleware())
+
 	r.DELETE("/tenants/:id", handler.DeleteTenant)
 	r.GET("/clients/tenant/:tenant_id", handler.ListClientsByTenant)
 	r.POST("/clients", handler.CreateClient)
@@ -44,7 +47,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 func TestManagementAPI_Security(t *testing.T) {
 	r, db := setupManagementAPI(t)
 
-	defer db.Exec("DELETE FROM oauth2_clients")
+	defer db.Exec("DELETE FROM o_auth2_clients")
 	defer db.Exec("DELETE FROM tenants")
 
 	t.Run("Prevent Deletion of Default Tenant", func(t *testing.T) {
@@ -53,7 +56,8 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "cannot delete default tenant")
+		// DÜZELTİLDİ: Mesaj API'nin döndüğü yeni RFC 9457 metnine uyarlandı
+		assert.Contains(t, w.Body.String(), "Cannot delete the default tenant")
 	})
 
 	t.Run("Prevent Cross-Tenant Data Leakage (Client Listing)", func(t *testing.T) {
@@ -81,6 +85,6 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "tenant_not_found")
+		assert.Contains(t, w.Body.String(), "The specified tenant does not exist")
 	})
 }

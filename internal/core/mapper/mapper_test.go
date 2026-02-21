@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
+	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,10 +24,10 @@ func TestAttributeMapper_DataSanitization(t *testing.T) {
 	}
 
 	t.Run("Map Flat and Nested Attributes Safely", func(t *testing.T) {
-		rules := map[string]string{
-			"email":      "personal_info.contact.primary_email",
-			"given_name": "personal_info.first_name",
-			"subject":    "sub",
+		rules := map[string]models.AttributeMappingRule{
+			"email":      {Source: "personal_info.contact.primary_email"},
+			"given_name": {Source: "personal_info.first_name"},
+			"subject":    {Source: "sub"},
 		}
 
 		result, err := attrMapper.Map(rawIdpData, rules)
@@ -38,10 +39,10 @@ func TestAttributeMapper_DataSanitization(t *testing.T) {
 	})
 
 	t.Run("Handle Missing or Malformed Data Gracefully", func(t *testing.T) {
-		rules := map[string]string{
-			"email":     "personal_info.contact.secondary_email",
-			"last_name": "does_not_exist",
-			"bad_path":  "personal_info.first_name.invalid",
+		rules := map[string]models.AttributeMappingRule{
+			"email":     {Source: "personal_info.contact.secondary_email"},
+			"last_name": {Source: "does_not_exist"},
+			"bad_path":  {Source: "personal_info.first_name.invalid"},
 		}
 
 		result, err := attrMapper.Map(rawIdpData, rules)
