@@ -7,7 +7,7 @@ It is designed to be protocol-agnostic, supporting OAuth2, OIDC, and SAML native
 
 ### Prerequisites
 
-* **Go**: Version `1.23` or later.
+* **Go**: Version `1.25.7` or later.
 * **PostgreSQL**: Version `16` or later.
 
 ### Installation

@@ -8,20 +8,16 @@
 
 **Shyntr** is a lightweight, visionary Identity Broker designed to bridge the gap between modern applications and
 diverse Identity Providers. It acts as a universal adapter, unblocking the complexity of authentication protocols so you
-can focus on building your product.
-
-Whether you need to expose your custom user database via standard OIDC or federate legacy SAML services with a modern
-OAuth2 provider, Shyntr is the missing link.
+can focus on building your product. Whether you need to expose your custom user database via standard OIDC or federate
+legacy SAML services with a modern OAuth2 provider, Shyntr is the missing link.
 
 ---
 
 ## 🌐 The Vision
 
 Identity management is fragmented. Developers are stuck building translation layers between legacy SAML systems, modern
-OIDC clients, and custom backends.
-
-**Shyntr unifies this chaos.** It does not manage users; it manages the *conversation* between your users and your
-applications.
+OIDC clients, and custom backends. **Shyntr unifies this chaos.** It does not manage users; it manages the
+*conversation* between your users and your applications.
 
 ### ⚡ What Shyntr Does
 
@@ -54,8 +50,8 @@ lifting, token generation, and protocol flow, while your system simply approves 
 
 Shyntr is **headless by design**. We don't force a generic login page on you.
 
-* **You control the experience:** Build your Login, Consent, and Logout pages in your preferred technology (React, Vue,
-  Go, etc.).
+* **You control the experience:** Build your Login, Consent, and Logout pages in your preferred technology (React,
+  Next.js, Vue, etc.).
 * **We handle the plumbing:** Shyntr redirects the user to your UI for verification and waits for a secure "Access
   Granted" signal to issue the tokens.
 
@@ -66,50 +62,54 @@ of different customers with distinct configurations, keys, and protocol requirem
 
 ---
 
-## 🛡️ Security & Compliance
+## 🛡️ Security, Compliance & Observability
 
-Shyntr is built with a security-first mindset, adhering to strict OAuth2/OIDC standards:
+Shyntr is built with a security-first mindset, adhering to strict industry standards:
 
 * **OpenID Connect Core 1.0:** Full support for `prompt`, `max_age`, `auth_time`, and strict scope validation.
 * **RP-Initiated Logout:** Secure session termination with `id_token_hint` and `post_logout_redirect_uri` validation.
 * **Advanced Security:**
     * **RFC 7523:** Private Key JWT authentication for clients.
-    * **Replay Protection:** JTI (JWT ID) tracking to prevent token reuse.
-    * **Tenant Isolation:** Strict validation to prevent cross-tenant token usage.
+    * **Replay Protection:** JTI (JWT ID) and SAML Message ID tracking to prevent token reuse.
+    * **Tenant Isolation:** Strict validation to prevent cross-tenant data leakage.
     * **Grace Period:** Refresh Token Rotation with network-failure tolerance.
+* **Enterprise Observability:**
+    * **W3C Trace Context:** Native OpenTelemetry (OTel) integration for distributed tracing across microservices.
+    * **RFC 9457:** Standardized Problem Details for HTTP APIs, ensuring predictable and secure error handling on
+      management endpoints.
 
 ## 🔌 The Headless Flow (How it works)
 
 Shyntr decouples the **Logic** from the **UI**. Here is the authentication flow:
 
-1.  **Challenge:** When a user needs to login, Shyntr generates a `login_challenge` and redirects the user to your **External Login UI**.
-2.  **Verification:** Your UI validates the user (username/password, MFA, etc.).
-3.  **Accept:** Your UI calls Shyntr's Admin API (`PUT /admin/login/accept`) with the authenticated User ID.
-4.  **Resume:** Shyntr verifies the handshake and issues the tokens (Access, Refresh, ID Token).
+1. **Challenge:** When a user needs to login, Shyntr generates a `login_challenge` and redirects the user to your *
+   *External Login UI**.
+2. **Verification:** Your UI validates the user (username/password, MFA, SAML/OIDC SSO, etc.).
+3. **Accept:** Your UI calls Shyntr's Admin API (`PUT /admin/login/accept`) with the authenticated User ID and context
+   claims.
+4. **Resume:** Shyntr verifies the handshake and issues the tokens (Access, Refresh, ID Token).
 
 ---
 
-## Status
+## 📚 Documentation
 
-🚧 **Project is currently in active development.**
-Shyntr is evolving into a production-ready Identity Broker. Follow the repository for updates on the roadmap and
-protocol support.
+To get the most out of Shyntr, please refer to our detailed guides:
+
+* [**Configuration Guide (CONFIG.md)**](./CONFIG.md): Learn about all environment variables, database settings, and
+  tuning parameters required to run Shyntr in production.
+* [**CLI Reference Guide (CLI.md)**](./CLI.md): Discover how to manage tenants, OIDC/SAML clients, and identity
+  providers directly from the terminal without needing direct database access.
 
 ---
 
 ## 🤝 Contributing
 
 We love community! 💖
-
 Found a bug? Have a great idea? Feel free to jump in! We appreciate every piece of feedback and contribution.
-Let's build the ultimate Identity Broker together! 🚀
 
 ## 📄 License
 
-Free as in freedom! 🦅
-
-Shyntr is proudly open-source and licensed under the **Apache-2.0** license.
-Check the [LICENSE](https://github.com/Shyntr/shyntr/blob/main/LICENSE) file for the boring legal details.
+Shyntr is proudly open-source and licensed under the **Apache-2.0** license. Check the [LICENSE](https://github.com/Shyntr/shyntr/blob/main/LICENSE) file for details.
 
 ---
 
