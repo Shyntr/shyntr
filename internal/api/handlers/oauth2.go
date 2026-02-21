@@ -78,7 +78,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	var client models.OAuth2Client
 	if err := h.DB.First(&client, "id = ? AND tenant_id = ?", clientID, tenantID).Error; err != nil {
-		logger.Log.Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String("tenant_id", tenantID))
+		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String("tenant_id", tenantID))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
 		return
 	}
@@ -145,11 +145,11 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 			if len(loginReq.Context) > 0 {
 				if err := json.Unmarshal(loginReq.Context, &userContext); err != nil {
-					logger.Log.Error("Failed to unmarshal user context", zap.Error(err))
+					logger.FromGin(c).Error("Failed to unmarshal user context", zap.Error(err))
 				}
 			}
 		} else {
-			logger.Log.Warn("Invalid or expired login verifier", zap.String("verifier", verifier))
+			logger.FromGin(c).Warn("Invalid or expired login verifier", zap.String("verifier", verifier))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_login_verifier"})
 			return
 		}
@@ -163,7 +163,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			rememberForDuration = lastLogin.RememberFor
 			if len(lastLogin.Context) > 0 {
 				if err := json.Unmarshal(lastLogin.Context, &userContext); err != nil {
-					logger.Log.Error("Failed to unmarshal SSO user context", zap.Error(err))
+					logger.FromGin(c).Error("Failed to unmarshal SSO user context", zap.Error(err))
 				}
 			}
 		}
@@ -172,7 +172,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	if userID == "" || forceLogin {
 		challengeID, err := utils.GenerateRandomHex(16)
 		if err != nil {
-			logger.Log.Error("Failed to generate challenge", zap.Error(err))
+			logger.FromGin(c).Error("Failed to generate challenge", zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal_server_error"})
 			return
 		}
@@ -192,7 +192,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		}
 
 		if err := h.DB.Create(&loginReq).Error; err != nil {
-			logger.Log.Error("Failed to save login request", zap.Error(err))
+			logger.FromGin(c).Error("Failed to save login request", zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database_error"})
 			return
 		}
@@ -332,7 +332,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	}
 
 	if dbClient.TenantID != urlTenantID {
-		logger.Log.Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
+		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}

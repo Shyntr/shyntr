@@ -13,6 +13,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"gorm.io/gorm"
 )
 
@@ -38,8 +39,8 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 
 	public := gin.New()
 	public.Use(gin.Recovery())
-	public.Use(middleware.RequestLogger())
 	public.Use(middleware.SecurityHeaders())
+	public.Use(otelgin.Middleware("shyntr-public-api"))
 
 	public.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -124,7 +125,8 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 
 	admin := gin.New()
 	admin.Use(gin.Recovery())
-	admin.Use(middleware.RequestLogger())
+	admin.Use(otelgin.Middleware("shyntr-admin-api"))
+	admin.Use(middleware.ErrorHandlerMiddleware())
 	admin.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AdminAllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

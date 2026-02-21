@@ -36,7 +36,7 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 
 	sp, err := h.Service.BuildServiceProvider(c.Request.Context(), tenantID, nil)
 	if err != nil {
-		logger.Log.Error("Failed to initialize SP", zap.Error(err))
+		logger.FromGin(c).Error("Failed to initialize SP", zap.Error(err), zap.String("protocol", "saml"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "saml_initialization_failed"})
 		return
 	}
@@ -45,7 +45,7 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
-		logger.Log.Error("Failed to write metadata XML", zap.Error(err))
+		logger.FromGin(c).Error("Failed to write metadata XML", zap.Error(err), zap.String("protocol", "saml"))
 	}
 }
 
@@ -70,7 +70,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 
 	redirectURLOrHTML, requestID, err := h.Service.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge)
 	if err != nil {
-		logger.Log.Error("Failed to initiate SAML SSO", zap.Error(err))
+		logger.FromGin(c).Error("Failed to initiate SAML SSO", zap.Error(err), zap.String("protocol", "saml"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "sso_init_failed", "details": err.Error()})
 		return
 	}
@@ -95,21 +95,21 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	relayState := c.PostForm("RelayState")
 	if relayState == "" {
-		logger.Log.Warn("Missing RelayState in SAML Response")
+		logger.FromGin(c).Warn("Missing RelayState in SAML Response", zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_relay_state"})
 		return
 	}
 
 	var loginReq models.LoginRequest
 	if err := h.DB.First(&loginReq, "id = ?", relayState).Error; err != nil {
-		logger.Log.Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", relayState))
+		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", relayState), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session"})
 		return
 	}
 
 	assertion, _, err := h.Service.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
 	if err != nil {
-		logger.Log.Warn("SAML ACS Validation Failed", zap.Error(err))
+		logger.FromGin(c).Warn("SAML ACS Validation Failed", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_saml_response", "details": err.Error()})
 		return
 	}
@@ -132,12 +132,12 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	issuer := assertion.Issuer.Value
 	var conn models.SAMLConnection
 	if err := h.DB.Select("attribute_mapping").Where("tenant_id = ? AND idp_entity_id = ?", tenantID, issuer).First(&conn).Error; err != nil {
-		logger.Log.Warn("Connection not found for mapping, using raw attributes", zap.String("issuer", issuer))
+		logger.FromGin(c).Warn("Connection not found for mapping, using raw attributes", zap.String("issuer", issuer), zap.String("protocol", "saml"))
 	}
 
 	finalAttributes, err := h.Mapper.Map(rawAttributes, conn.AttributeMapping)
 	if err != nil {
-		logger.Log.Warn("Attribute mapping failed", zap.Error(err))
+		logger.FromGin(c).Warn("Attribute mapping failed", zap.Error(err), zap.String("protocol", "saml"))
 		finalAttributes = rawAttributes
 	}
 
@@ -154,7 +154,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	loginReq.UpdatedAt = time.Now()
 
 	if err := h.DB.Save(&loginReq).Error; err != nil {
-		logger.Log.Error("Failed to update login request", zap.Error(err))
+		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
@@ -171,7 +171,7 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 
 	idp, err := h.Service.GetIdentityProvider(c.Request.Context(), tenantID)
 	if err != nil {
-		logger.Log.Error("Failed to initialize IdP", zap.Error(err))
+		logger.FromGin(c).Error("Failed to initialize IdP", zap.Error(err), zap.String("protocol", "saml"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "idp_init_failed"})
 		return
 	}
@@ -180,7 +180,7 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
-		logger.Log.Error("Failed to write metadata XML", zap.Error(err))
+		logger.FromGin(c).Error("Failed to write metadata XML", zap.Error(err), zap.String("protocol", "saml"))
 	}
 }
 
@@ -197,14 +197,14 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 
 	authReq, err := h.Service.ParseAuthnRequest(c.Request.Context(), tenantID, c.Request)
 	if err != nil {
-		logger.Log.Error("Failed to parse SAML AuthnRequest", zap.Error(err))
+		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_saml_request", "details": err.Error()})
 		return
 	}
 
 	var spClient models.SAMLClient
 	if err := h.DB.Where("entity_id = ? AND tenant_id = ?", authReq.Issuer.Value, tenantID).First(&spClient).Error; err != nil {
-		logger.Log.Warn("Unknown SP EntityID", zap.String("entity_id", authReq.Issuer.Value))
+		logger.FromGin(c).Warn("Unknown SP EntityID", zap.String("entity_id", authReq.Issuer.Value), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "unknown_service_provider"})
 		return
 	}
@@ -271,7 +271,7 @@ func (h *SAMLHandler) handleIDPPostLogin(c *gin.Context, tenantID, verifier stri
 
 	authReq, err := h.Service.ParseAuthnRequest(c.Request.Context(), tenantID, mockURL)
 	if err != nil {
-		logger.Log.Error("Failed to re-parse SAML Request", zap.Error(err))
+		logger.FromGin(c).Error("Failed to re-parse SAML Request", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_original_request"})
 		return
 	}
@@ -297,13 +297,13 @@ func (h *SAMLHandler) handleIDPPostLogin(c *gin.Context, tenantID, verifier stri
 	// Kural: {"hedef_sp_key": "bizim_key"}
 	finalAttrs, err := h.Mapper.Map(userAttrs, spClient.AttributeMapping)
 	if err != nil {
-		logger.Log.Warn("Outbound mapping failed", zap.Error(err))
+		logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))
 		finalAttrs = userAttrs
 	}
 
 	htmlResponse, err := h.Service.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, &spClient, finalAttrs, relayState)
 	if err != nil {
-		logger.Log.Error("Failed to generate SAML Response", zap.Error(err))
+		logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "response_generation_failed"})
 		return
 	}
