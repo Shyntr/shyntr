@@ -7,13 +7,15 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  release-binaries:
-    name: Build and Release Binaries
+  build-binaries:
+    name: Build Binaries (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         goos: [linux, windows, darwin]
         goarch: [amd64, arm64]
@@ -62,20 +64,45 @@ jobs:
         run: |
           sha256sum ${{ env.BINARY_NAME }} > ${{ env.BINARY_NAME }}.sha256
 
-      - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Binary to Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
             ${{ env.BINARY_NAME }}
             ${{ env.BINARY_NAME }}.sha256
+          retention-days: 1
+
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-binaries
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-assets/*
           draft: false
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
 
   release-docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: release-binaries
+    needs: create-github-release
 
     steps:
       - name: Checkout Source Code
@@ -123,19 +150,3 @@ jobs:
           repository: shyntr/shyntr
           short-description: "Shyntr - Protocol Agnostic Identity Hub and Zero Trust Broker"
           readme-filepath: ./README.md
-
-  create-github-release:
-    name: Create GitHub Release
-    runs-on: ubuntu-latest
-    needs: release-docker
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
-          generate_release_notes: true
