@@ -15,14 +15,16 @@ legacy SAML services with a modern OAuth2 provider, Shyntr is the missing link.
 
 ## 🚀 Quickstart
 
-The fastest way to experience Shyntr is using our official `docker-compose.yml`. It spins up the complete ecosystem: the
+The fastest way to experience Shyntr is using our official `quickstart/docker-compose.local.yml`. It spins up the complete ecosystem: the
 core database, the Identity Hub backend, the management Dashboard, and the user-facing Auth Portal.
 
 Create a `docker-compose.yml` file with the following content:
 
 ```yaml
 services:
+  # ----------------------------------------
   # 1. DATABASE (PostgreSQL)
+  # ----------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: shyntr_db
@@ -42,9 +44,11 @@ services:
     networks:
       - shyntr-net
 
+  # ----------------------------------------
   # 2. SHYNTR IDENTITY HUB (Backend)
+  # ----------------------------------------
   shyntr-backend:
-    image: shyntr/shyntr:1.0.0-beta.1
+    image: shyntr/shyntr:1.0.0-beta.2
     container_name: shyntr_app
     ports:
       - "7496:7496" # Public Port (SHYN)
@@ -57,12 +61,15 @@ services:
       - PORT=7496
       - ADMIN_PORT=7497
       - ISSUER_URL=http://localhost:7496
+      - APP_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUpRZ0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQ1N3d2dna29BZ0VBQW9JQ0FRREhERFR5NlQvQ2dINksKUHY1Z3FBUlRUZ2szU3B5V2JBOTllNU5DamZYb3EvY3ZWR1V2dkkxSmsvU1NwNUk5V3pwY0pvQ2RJWGZteHhOUworc2dhNG1uTCtGTVpYdGhwTnlwOElwS1dhNE5vblN5K3RESVhuTndGZlA4SUU3eGZjb0g3NVpaMTMvNjVyVWUvCnhDVzVmUWNPZ0EyWTNXRStuVW5OVjRKVm9tdmM5NGZHUmpQTHlwMGI1SHZTYkZjZzRxbitZQ0JnVUpXbUtjaW0KangwK3RsTG5UdXFHU3daZEpKMmk5ZDlKa0xBNmpZOWcvZWZxeENjZWs5OFJaOUhiOGZqYVYzYnY2WkRWZHJzRApXVUdyc0tCWHdjSVF3MGphbC9wZ1E5WkoycG1aTGdtcFNNbWF1M2lFOWI4UUora3Q5bXRlemFlQlE1S2krbm9VCmt6SkpiSDZCYzd1MllaM3hqdzZ3SDA5WCtSUnMveVJJSFkxaEtGNjJ2TFIzWHlRVEVlRWdrVW1yR0ZjdlZzY1YKaDV4SkJSWFBLczF1QnNuWkxabGV2VXRUUHJmMGV4ZTZxYXRMcUNKZXV5T1lHSEpvNHlMWHJIdkpoQWluRFFiYQo5VFlLeUxaQTBWUnUzN29KODh0UmxnUlQ3SWt6elJuZTE2VmdFRElidGswdTg0OWhvV3VSc0t5ajJlYUlSS2xQCk44cWQ2M0lxQkhGVXVEeThBWFRkVTNvRFh0ZEJJVlpYSmRlc2ZxQWtqMUZNS3R3QTRRcVZndHRLMUVFWE9tYkIKV3BmZ0VIcitCa3BaWW54MHBhL1BZRVU2MW9CZ0xpZWRaOTdjVlJlVXlsZVRtUzY0d0ZFb3RpVEtHS3pOaHlBOQppcG5HbjRJWU9OZUdkazhPZVA2R2ZrOGpEU0wydFFJREFRQUJBb0lDQUIydVM4ejNEQXRvVnJZdHE0ZmxOZlBvCkhJYXlxUVBqTERJbGRiR0VjcWxWenordkFZR3JSNVF6ckZJY0M3bjdld25Yc2ZEOFZ5RkNDVGNqN3lmWElEaUsKbUhXZGgzNjArN0JVQlhESnFtZzBtOEg2SThnU20xcDBKNkZnTkFRMWtuMXA0RlJHYVBqdUJsZHBtOGg3aE14YwpPdXJUQkJldW81MHJrZU5NRzNKeE5MMVRwWkNiYjI4RDFKVHRrOVp6Qmk5SXpUc2ZlUmswZk5lZFdwcUozSFhpCmRpVTlWYjhZNFNxMktDd1RsN3U3ZFNoYzVETEZPaUljb2JRNk8zaGxMaHI4MU43MGdLVGNGZ25yU3RnYnQrVXUKSHM2YUdDaUVaaERwdksvNW1WTFdveGtyb2VoaFVSamVmaldlQmU3VkluQ2FFUUs4L1VZeFBIZ0o5UU11MnZRVwpTS1c5RExJLzBzL3lCZytqV25sSnZlT1A2Z0pLSEZ5aU16dDhGc0FWa3FES1kxaDFxR05RcEgxSkVNeXc5QW1LCjBwTkxLc3FUOWIrTGI5TUFpWFgwL1plNDZaQWcwSjludlNCczlWaU1HMkc4R092c2ZoVEVEcGtGeUVYM1FjS04KUWFKV3B2eEE5M1ZJZkNzWDdZTlM1YjhFZEhwa2RqQUE0RkRldmliMEc1T05lNTBvdUlaTEtxS1FXR2Z6NHZuegorVVN1eVpCZUhTNHNtK25lYWQ3OXZPQUxVNW9qcjVvRHJna24wem5FaUQ2UTkraFNHc0RnVGpreDdicVpmaEhKClROdkR4MzcvSTAvWk9CTzlwUlU5M0l1Q21TaFpLa0VhdjdwVmdvMEtTaUF5TnpzS0lxUE94enMxVzhRT0FiTmMKWVhCa2ZIRURHS0JpSFk5cUpMMFJBb0lCQVFEdnlLL0xGY0NjVyt5TFY2V1AvMjNUQlJQcHlmdE5hNy96ckdCUApMN0l2NkJYbnJ4OS9rZGEreGh6RkhYMGVyOFRLdlFQcWZyUnlaaFMrWjJ6Y1g3S2NlWFBESlN3T3dnWU5xOGliCnBNLzh0ZnBmbDNaWmdPYXg2bnoxRmw1L1RadnlyMkp0b09EUTBhSElIdGNsd3VDdG40SGRlTmlCVEZyUEZqMGgKdU1QSWZuVmxrZ0xEaWU2aGVDZU9yYlR5bkNuOFpaeXNZNFNBMmVncFArMmNCYzZ1Q3UzZmZ3ekE5bE9WNnBvUgpYaHVTemhiQWdzVEkwYmtvRDNCTTJSdERkNXp0TGUxYkZOWUZ1NHNhVGszNnBJLzJDUlpZdXZnbkJZamU5aWxiCndQZVRXNW10MHlNZzJmMmVRL2dHS1hicDZYOWY0V2htb2YzTGxaNzEwc2I2NVZqNUFvSUJBUURVZ2tQQUcxQWUKNXdFNHJLcmVSNkU5dUk5b21VR2ZoUU5lN2FxbnNFT3hJMU5VWmRSMThvV083cGplTlZseGQ0b2ZubldETTc1NwpXaTFFVnRLOXB0aG43RThqbEVnQ2RISXUyVmpLbVJaYWtSK3h6c2MwRU1NNGduQUtIM0dldjlEcTg3TVNHRDhOCkFTVmk1bnNWbFJ2bmUzYzFES3FJQ0RPK25abWhJN1RHYmx0djZ3Y0lneWtFR3hlR1B6U3laWmp6bnNkb3BDY2cKRHhCUE9mUmcrRSt2ZTdqbnZGT2lVbEVKOUtmcHVmLzZ2SU1nMlRES0k4RGE1UXpCd0xHRHlvTi9MZ1lpMmU1Ngp6TnJ3UkRSUXlmYTZqZlNZQW5yVEVDUHFOTU1HWVlVUFlTOW9ob2tBM3BhMmYyaEFOa2JJVWNyNHFldFpDc3RaClNucDF2bm83QmhhZEFvSUJBRVJHcTYrekdPNHN5cFQrdHZqaXJYM3BzenJkdFgzZEVZSXI4aHg2STAyNjB3bnUKZHBTWGpVTXpIQndRZ29FTFlZaXMrNEY0NUo2eWJIT3U5WE5tbUhBdnNRTy9BT1dPMzdSaTFyTmk0WW8rc3ZVbgpKcDdqc2t5MHpUSG9WYTRBQmtpN0lkYS9lV1JjWEtta0JuVU5JWGF1dFlhL2t6NTE1R0dWSG9FTW9FcmxuejMxCnJtM0pSN2FZaFFMK2VVaWZxT0RpZWhNb0h5R2xhcExjVGljZ0RETElqK1VVd3lmcXUvQXpKZjJPQTJIdzVzK1kKTExwVjVWZi8xV1U4YUtQMFdpMjY1eHdKT2N2V0ZBekFnVG0rUS9PMXNMUkJRTW16ckw1MzcxemQvR0RzTXowbwpvcGNIRzAxR1kwZzE1Rk5FbG0xUnZLMkVzTVNZYlBQb09acFZWZGtDZ2dFQVpualNGcWFWQWZHK2d3ZXY5VE54Ckt3UCtFeUFqcHJwTEg5RlhBemxaeXVjUDNaaWsxS00zaCs3QnhCVFJwb2RRRVdNbG96aW1WM0RxZHhPdTEwakcKL1lYVHU0SmJIdVByMDI5M0EyckNmcldRSlB0aXoxWnQ3S2ZwUXRoYXY0UWJSOUJ2dnYvMkYxMUFHK3FyMjRKbApURUFiQVhlMEc1aG82emV2eHlZaW03VEhYclprVTlSN1NNR1BuR3FLREtRMUZ2U3ZqMlBvZ2VzQm9GSi81dXFWCjhqYWt1UW4xQWtiVFVRdXFsR2ZlYVpmUlcxdWZ6VGxrVzZrcmQ1cGxmdmwrWXl0Y1JoMzBnejZaTEZhWEs0WFgKOWFsU0VxTFBlMHRESmtKKzhHckI4T0thSzdzRUFXbFVIM2hjV3VwUlEzTTlmcDdoSDdTMnpiMitRMXl3TUJvRgplUUtDQVFFQTVHdUhpRGwzOHc2Vnp4UXRxN1crbmdhVDRDVzVIYkQyNHZKTXFHUEhVZXRjWU0zQnpmcUtwbWFsCnBYRFNPYVNsSGc1c1hzamNRTXJrTFlGdW1IU1JhUUFjamZHYUd6c0hFYm1EWWMyZWtLZ2FPdHdha1grUVA0Z1EKQ0xwbXVEZk5RM0I2cXJKVnRyQkwyRS9jamYzZjROdUhmMEExWHlrcDcvTEdkcjdwMlVXQ2Q3Zjk2MDE1UE8wMgpqMkhka1JRanZwcmZrTzBkWFZHTlJKckFGZUlKZTN2dmtsMlRHTkhTTUNkVVVQMHVoT3EwUXRrVEFKbDV1eitZClhBMkpLWXNZekFCeFhXRVBCUlE3WDFBWUVXV1B2QTB0RFVkaTQ4bGtjMnB1L2dVODgra3ZaNGIwTXB4QU5qNHMKR0Z3MllMMkEyQ240ZEw2TWxFUUR3STFkeFBpdmZ3PT0KLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLQo=
+
       - EXTERNAL_LOGIN_URL=http://localhost:3000/login
       - EXTERNAL_CONSENT_URL=http://localhost:3000/consent
+
       - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3274
       - ADMIN_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3274,http://localhost:7497
       - LOG_LEVEL=info
-      - SKIP_TLS_VERIFY=true # Development only
+      - SKIP_TLS_VERIFY=true #Development only
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,9 +84,11 @@ services:
     command: >
       sh -c "./shyntr migrate && ./shyntr serve"
 
+  # ----------------------------------------
   # 3. SHYNTR DASHBOARD (React / Nginx)
+  # ----------------------------------------
   shyntr-dashboard:
-    image: shyntr/shyntr-dashboard:1.0.0-beta.1
+    image: shyntr/shyntr-dashboard:1.0.0-beta.2
     container_name: shyntr_dashboard
     ports:
       - "3274:80"
@@ -92,9 +101,11 @@ services:
     networks:
       - shyntr-net
 
+  # ----------------------------------------
   # 4. SHYNTR AUTH PORTAL (Next.js)
+  # ----------------------------------------
   shyntr-auth-portal:
-    image: shyntr/shyntr-auth-portal:1.0.0-beta.1
+    image: shyntr/shyntr-auth-portal:1.0.0-beta.2
     container_name: shyntr_auth_portal
     ports:
       - "3000:3000"
@@ -107,6 +118,9 @@ services:
     networks:
       - shyntr-net
 
+# ----------------------------------------
+# VOLUMES & NETWORKS
+# ----------------------------------------
 volumes:
   postgres_data:
 
