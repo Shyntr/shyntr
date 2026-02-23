@@ -49,7 +49,6 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	public.Use(middleware.CSRFMiddleware())
 
 	// Public Routes
 	public.GET("/health", healthHandler.Check)
