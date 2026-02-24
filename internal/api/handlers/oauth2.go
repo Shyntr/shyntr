@@ -132,6 +132,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	var userID string
 	var authTime time.Time = time.Now()
 	var userContext map[string]interface{}
+	var consentContext map[string]interface{}
 	isRemembered := false
 	rememberForDuration := 0
 
@@ -213,6 +214,11 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			if err := h.DB.First(&consentReq, "id = ? AND authenticated = ?", consentVerifier, true).Error; err != nil {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_consent_verifier"})
 				return
+			}
+			if len(consentReq.Context) > 0 {
+				if err := json.Unmarshal(consentReq.Context, &consentContext); err != nil {
+					logger.FromGin(c).Error("Failed to unmarshal SSO consent context", zap.Error(err))
+				}
 			}
 			grantedScopes = consentReq.GrantedScope
 			grantedAudience = consentReq.GrantedAudience
@@ -300,6 +306,14 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	session.Claims.Add("tenant_id", tenantID)
 	session.JWTClaims.Extra["tenant_id"] = tenantID
+
+	if consentContext != nil {
+		for k, v := range consentContext {
+			session.Claims.Add(k, v)
+			session.JWTClaims.Extra[k] = v
+		}
+	}
+
 	if userContext != nil {
 		mappedClaims := auth.MapClaims(userID, userContext, grantedScopes)
 		for k, v := range mappedClaims {

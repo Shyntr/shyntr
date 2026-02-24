@@ -175,6 +175,10 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		GrantAudience []string `json:"grant_audience"`
 		Remember      bool     `json:"remember"`
 		RememberFor   int      `json:"remember_for"`
+		Session       *struct {
+			AccessToken map[string]any `json:"access_token"`
+			IDToken     map[string]any `json:"id_token"`
+		} `json:"session,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -194,6 +198,10 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	req.Active = true
 	req.Remember = body.Remember
 	req.RememberFor = body.RememberFor
+	sessionBytes, err := json.Marshal(body.Session)
+	if err == nil {
+		req.Context = sessionBytes
+	}
 
 	if err := h.DB.Save(&req).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update consent request", err))

@@ -37,6 +37,7 @@ type ConsentRequest struct {
 	LoginChallenge    string         `gorm:"index"`
 	ClientID          string         `gorm:"index;not null"`
 	Subject           string         `gorm:"index;not null"`
+	Context           []byte         `gorm:"type:jsonb"`
 	RequestedScope    pq.StringArray `gorm:"type:text[]"`
 	RequestedAudience pq.StringArray `gorm:"type:text[]"`
 	GrantedScope      pq.StringArray `gorm:"type:text[]"`

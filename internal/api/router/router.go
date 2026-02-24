@@ -57,6 +57,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	public.GET("/.well-known/openid-configuration", oauthHandler.Discover)
 	public.GET("/.well-known/jwks.json", oauthHandler.Jwks)
 	public.GET("/userinfo", oauthHandler.UserInfo)
+	public.POST("/userinfo", oauthHandler.UserInfo)
 
 	// Authentication UI Redirects (User facing)
 	uiGroup := public.Group("/auth")
@@ -95,6 +96,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 		tenantGroup.GET("/.well-known/openid-configuration", oauthHandler.Discover)
 		tenantGroup.GET("/.well-known/jwks.json", oauthHandler.Jwks)
 		tenantGroup.GET("/userinfo", oauthHandler.UserInfo)
+		tenantGroup.POST("/userinfo", oauthHandler.UserInfo)
 
 		tOAuthGroup := tenantGroup.Group("/oauth2")
 		{
