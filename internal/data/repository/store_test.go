@@ -57,7 +57,9 @@ func TestSQLStore_RevokeRefreshTokenMaybeGracePeriod(t *testing.T) {
 	timeUntilExpiry := time.Until(updatedSession.ExpiresAt)
 	assert.True(t, timeUntilExpiry < 20*time.Second, "Expiry should be shortened for grace period")
 	assert.True(t, timeUntilExpiry > 0, "Token should still be valid for a few seconds")
-	assert.True(t, updatedSession.Active, "Token should remain active during grace period")
+	assert.False(t, updatedSession.Active, "Token must be inactive to prevent DB unique constraint violations")
+	assert.NotNil(t, updatedSession.GraceExpiresAt, "GraceExpiresAt must be set for the tolerance period")
+	assert.True(t, updatedSession.GraceExpiresAt.After(time.Now()), "Grace period must be in the future")
 }
 
 func TestSQLStore_ClientAssertionJWTValid(t *testing.T) {

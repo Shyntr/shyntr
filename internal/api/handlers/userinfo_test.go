@@ -17,8 +17,8 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
+	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/openid"
-	"github.com/ory/fosite/token/hmac"
 	"github.com/ory/fosite/token/jwt"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
@@ -95,15 +95,6 @@ func TestUserInfo_Security_LeastPrivilege(t *testing.T) {
 	t.Run("Enforce Scope Restrictions on UserInfo", func(t *testing.T) {
 		store := repository.NewSQLStore(db)
 
-		hmacStrategy := &hmac.HMACStrategy{
-			Config: &fosite.Config{
-				GlobalSecret: []byte("12345678901234567890123456789012"),
-			},
-		}
-
-		token, signature, err := hmacStrategy.Generate(context.Background())
-		assert.NoError(t, err)
-
 		session := models.NewJWTSession(subject)
 		session.DefaultSession = &openid.DefaultSession{
 			Subject: subject,
@@ -116,11 +107,29 @@ func TestUserInfo_Security_LeastPrivilege(t *testing.T) {
 				fosite.AccessToken: time.Now().Add(1 * time.Hour),
 			},
 		}
+		session.JWTClaims.Issuer = "http://localhost:7496"
+		session.JWTClaims.Extra["client_id"] = clientID
 
 		fositeReq := fosite.NewAccessRequest(session)
 		fositeReq.GrantScope("openid")
 		fositeReq.GrantScope("email")
 		fositeReq.Client = &fosite.DefaultClient{ID: clientID}
+
+		km := auth.NewKeyManager(db, &config.Config{AppSecret: "12345678901234567890123456789012"})
+		rsaKey := km.GetActivePrivateKey()
+
+		hmacStrat := compose.NewOAuth2HMACStrategy(&fosite.Config{
+			GlobalSecret: []byte("12345678901234567890123456789012"),
+		})
+
+		jwtStrategy := compose.NewOAuth2JWTStrategy(
+			func(ctx context.Context) (interface{}, error) { return rsaKey, nil },
+			hmacStrat,
+			&fosite.Config{},
+		)
+
+		token, signature, err := jwtStrategy.GenerateAccessToken(context.Background(), fositeReq)
+		assert.NoError(t, err)
 
 		err = store.CreateAccessTokenSession(context.Background(), signature, fositeReq)
 		assert.NoError(t, err)
