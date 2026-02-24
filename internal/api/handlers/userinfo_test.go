@@ -104,7 +104,8 @@ func TestUserInfo_Security_LeastPrivilege(t *testing.T) {
 		token, signature, err := hmacStrategy.Generate(context.Background())
 		assert.NoError(t, err)
 
-		session := &openid.DefaultSession{
+		session := models.NewJWTSession(subject)
+		session.DefaultSession = &openid.DefaultSession{
 			Subject: subject,
 			Claims: &jwt.IDTokenClaims{
 				Subject: subject,

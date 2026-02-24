@@ -257,8 +257,8 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	issuer := h.getIssuer(c)
 	now := time.Now()
-
-	session := &openid.DefaultSession{
+	session := models.NewJWTSession(userID)
+	session.DefaultSession = &openid.DefaultSession{
 		Claims: &fositejwt.IDTokenClaims{
 			Issuer:      issuer,
 			Subject:     userID,
@@ -267,6 +267,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			RequestedAt: now,
 			AuthTime:    authTime,
 			ExpiresAt:   now.Add(idTokenLife),
+			Extra:       map[string]interface{}{"client_id": clientID, "auth_time": time.Now().Unix(), "amr": []string{"pwd"}},
 		},
 		Headers: &fositejwt.Headers{
 			Extra: map[string]interface{}{"kid": consts.SigningKeyID},
@@ -276,6 +277,12 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	session.ExpiresAt[fosite.AccessToken] = now.Add(accessTokenLife)
+	session.JWTClaims.Issuer = issuer
+	session.JWTClaims.Subject = userID
+	session.JWTClaims.Audience = grantedAudience
+	session.JWTClaims.Extra["client_id"] = clientID
+	session.JWTClaims.Extra["auth_time"] = time.Now().Unix()
+	session.JWTClaims.Extra["amr"] = []string{"pwd"}
 
 	hasOfflineAccess := false
 	for _, s := range grantedScopes {
@@ -292,10 +299,12 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	session.Claims.Add("tenant_id", tenantID)
+	session.JWTClaims.Extra["tenant_id"] = tenantID
 	if userContext != nil {
 		mappedClaims := auth.MapClaims(userID, userContext, grantedScopes)
 		for k, v := range mappedClaims {
 			session.Claims.Add(k, v)
+			session.JWTClaims.Extra[k] = v
 		}
 	}
 
@@ -317,9 +326,10 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 func (h *OAuth2Handler) Token(c *gin.Context) {
 	ctx := c.Request.Context()
-	session := &openid.DefaultSession{}
-	ar, err := h.Provider.Fosite.NewAccessRequest(ctx, c.Request, session)
+	emptySession := models.NewJWTSession("")
+	ar, err := h.Provider.Fosite.NewAccessRequest(ctx, c.Request, emptySession)
 	if err != nil {
+		logger.LogFositeError(c, err, "Failed to create access request in TokenEndpoint")
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
@@ -327,6 +337,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	urlTenantID := h.resolveTenantID(c)
 	var dbClient models.OAuth2Client
 	if err := h.DB.Select("tenant_id").First(&dbClient, "id = ?", ar.GetClient().GetID()).Error; err != nil {
+		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
@@ -339,6 +350,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 
 	response, err := h.Provider.Fosite.NewAccessResponse(ctx, ar)
 	if err != nil {
+		logger.LogFositeError(c, err, "Failed to create access response in TokenEndpoint")
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
@@ -398,14 +410,14 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
-	session := &openid.DefaultSession{}
+	session := models.NewJWTSession("")
 	_, accessRequest, err := h.Provider.Fosite.IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
 	}
 
-	sess, ok := accessRequest.GetSession().(*openid.DefaultSession)
+	sess, ok := accessRequest.GetSession().(*models.JWTSession)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_session_type"})
 		return
@@ -451,7 +463,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
-	session := &openid.DefaultSession{}
+	session := models.NewJWTSession("")
 	ar, err := h.Provider.Fosite.NewIntrospectionRequest(c.Request.Context(), c.Request, session)
 	if err != nil {
 		h.Provider.Fosite.WriteIntrospectionError(c.Request.Context(), c.Writer, err)

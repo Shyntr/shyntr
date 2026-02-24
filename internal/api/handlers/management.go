@@ -224,6 +224,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		}
 		client.Secret = hashedSecret
 	}
+	client.ResponseModes = []string{"query", "fragment", "form_post"}
 
 	if err := h.DB.Create(&client).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create OIDC client", err))

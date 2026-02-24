@@ -19,6 +19,7 @@ type OAuth2Client struct {
 	RedirectURIs  pq.StringArray `gorm:"type:text[]" json:"redirect_uris"`
 	GrantTypes    pq.StringArray `gorm:"type:text[]" json:"grant_types"`    // authorization_code, refresh_token...
 	ResponseTypes pq.StringArray `gorm:"type:text[]" json:"response_types"` // code, token, id_token
+	ResponseModes pq.StringArray `gorm:"type:text[]" json:"response_modes"`
 
 	// --- Access Control ---
 	Scopes   pq.StringArray `gorm:"type:text[]" json:"scopes"`

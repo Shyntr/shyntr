@@ -32,6 +32,11 @@ func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, err
 		return nil, fosite.ErrNotFound
 	}
 
+	var responseModes []fosite.ResponseModeType
+	for _, rm := range clientModel.ResponseModes {
+		responseModes = append(responseModes, fosite.ResponseModeType(rm))
+	}
+
 	return &models.ExtendedClient{
 		DefaultClient: &fosite.DefaultClient{
 			ID:            clientModel.ID,
@@ -46,6 +51,7 @@ func (s *SQLStore) GetClient(ctx context.Context, id string) (fosite.Client, err
 		JSONWebKeys:             clientModel.JSONWebKeys,
 		PostLogoutRedirectURIs:  clientModel.PostLogoutRedirectURIs,
 		TokenEndpointAuthMethod: clientModel.TokenEndpointAuthMethod,
+		ResponseModes:           responseModes,
 	}, nil
 }
 
@@ -274,8 +280,16 @@ func (s *SQLStore) getSession(ctx context.Context, signature string, session fos
 		if err != nil {
 			return nil, fosite.ErrNotFound
 		}
-	} else if !sess.Active {
+	} else if !sess.Active && tokenType != "authorize_code" {
 		return nil, fosite.ErrNotFound
+	}
+
+	if len(sess.SessionData) == 0 {
+		return nil, fosite.ErrNotFound
+	}
+
+	if session == nil {
+		session = models.NewJWTSession("")
 	}
 
 	if err := json.Unmarshal(sess.SessionData, session); err != nil {
@@ -315,23 +329,11 @@ func (s *SQLStore) getSession(ctx context.Context, signature string, session fos
 		req.GrantScope(scope)
 	}
 
-	if tokenType == "authorize_code" && sess.UsedAt != nil {
+	if tokenType == "authorize_code" && (!sess.Active || sess.UsedAt != nil) {
 		return req, fosite.ErrInvalidatedAuthorizeCode
 	}
 
 	return req, nil
-}
-
-func (s *SQLStore) deleteSession(ctx context.Context, signature string) error {
-	now := time.Now()
-	return s.DB.WithContext(ctx).
-		Model(&models.OAuth2Session{}).
-		Where("signature = ? AND type = ?", signature, "authorize_code").
-		Updates(map[string]any{
-			"active":     false,
-			"used_at":    &now,
-			"expires_at": now,
-		}).Error
 }
 
 func (s *SQLStore) deleteSessionTyped(ctx context.Context, signature string, tokenType string) error {
@@ -351,7 +353,7 @@ func (s *SQLStore) GetAccessTokenSession(ctx context.Context, signature string, 
 }
 
 func (s *SQLStore) DeleteAccessTokenSession(ctx context.Context, signature string) error {
-	return s.deleteSession(ctx, signature)
+	return s.deleteSessionTyped(ctx, signature, "access_token")
 }
 
 // --- Refresh Token ---
@@ -378,7 +380,7 @@ func (s *SQLStore) GetRefreshTokenSession(ctx context.Context, signature string,
 }
 
 func (s *SQLStore) DeleteRefreshTokenSession(ctx context.Context, signature string) error {
-	return s.deleteSession(ctx, signature)
+	return s.deleteSessionTyped(ctx, signature, "refresh_token")
 }
 
 // --- Authorize Code ---
@@ -442,17 +444,16 @@ func (s *SQLStore) RevokeRefreshToken(ctx context.Context, requestID string) err
 
 func (s *SQLStore) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, signature string) error {
 	graceDuration := 15 * time.Second
-	newExpiry := time.Now().Add(graceDuration)
+	graceEnd := time.Now().Add(graceDuration)
 
-	filter := &models.OAuth2Session{
-		RequestID: requestID,
-		Signature: signature,
-		Type:      "refresh_token",
-	}
 	return s.DB.WithContext(ctx).
 		Model(&models.OAuth2Session{}).
-		Where(filter).
-		Updates(map[string]interface{}{"expires_at": newExpiry, "active": true}).Error
+		Where("request_id = ? AND signature = ? AND type = ?", requestID, signature, "refresh_token").
+		Updates(map[string]any{
+			"active":           false,
+			"grace_expires_at": &graceEnd,
+			"expires_at":       graceEnd,
+		}).Error
 }
 
 func (s *SQLStore) RevokeAccessToken(ctx context.Context, requestID string) error {
@@ -478,7 +479,7 @@ func (s *SQLStore) GetPKCERequestSession(ctx context.Context, signature string, 
 }
 
 func (s *SQLStore) DeletePKCERequestSession(ctx context.Context, signature string) error {
-	return s.deleteSession(ctx, signature)
+	return s.deleteSessionTyped(ctx, signature, "pkce")
 }
 
 // --- OpenID Connect ---
@@ -492,5 +493,5 @@ func (s *SQLStore) GetOpenIDConnectSession(ctx context.Context, signature string
 }
 
 func (s *SQLStore) DeleteOpenIDConnectSession(ctx context.Context, signature string) error {
-	return s.deleteSession(ctx, signature)
+	return s.deleteSessionTyped(ctx, signature, "oidc")
 }

@@ -55,18 +55,44 @@ func MigrateDB(db *gorm.DB) error {
 	}
 
 	if db.Migrator().HasTable("o_auth2_sessions") {
+		if db.Dialector.Name() == "postgres" {
+			fixPrimaryKeySQL := `
+			DO $$
+			DECLARE
+				pk_columns integer;
+			BEGIN
+				-- Safely count the number of columns in the current primary key
+				SELECT count(a.attname) INTO pk_columns
+				FROM   pg_index i
+				JOIN   pg_attribute a ON a.attrelid = i.indrelid
+									 AND a.attnum = ANY(i.indkey)
+				WHERE  i.indrelid = 'o_auth2_sessions'::regclass
+				AND    i.indisprimary;
+
+				-- If the primary key has only 1 column (the old schema), migrate to composite key
+				IF pk_columns = 1 THEN
+					ALTER TABLE o_auth2_sessions DROP CONSTRAINT o_auth2_sessions_pkey;
+					ALTER TABLE o_auth2_sessions ADD PRIMARY KEY (signature, type);
+				END IF;
+			END $$;
+			`
+			if err := db.Exec(fixPrimaryKeySQL).Error; err != nil {
+				return err
+			}
+		}
+
 		if err := db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS oauth2_sessions_one_active_refresh_per_request
 		ON o_auth2_sessions (request_id)
 		WHERE type = 'refresh_token' AND active = TRUE;
-	`).Error; err != nil {
+		`).Error; err != nil {
 			return err
 		}
 
 		if err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS oauth2_sessions_family_lookup
 		ON o_auth2_sessions (token_family_id, type);
-	`).Error; err != nil {
+		`).Error; err != nil {
 			return err
 		}
 
@@ -74,7 +100,7 @@ func MigrateDB(db *gorm.DB) error {
 		CREATE INDEX IF NOT EXISTS oauth2_sessions_refresh_grace_lookup
 		ON o_auth2_sessions (request_id, signature, grace_expires_at, grace_used_at)
 		WHERE type = 'refresh_token';
-	`).Error; err != nil {
+		`).Error; err != nil {
 			return err
 		}
 	}

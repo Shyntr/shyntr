@@ -231,6 +231,7 @@ func main() {
 				RedirectURIs:            redirectURIs,
 				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
 				ResponseTypes:           []string{"code", "token", "id_token", "code id_token", "code token", "code id_token token"},
+				ResponseModes:           []string{"query", "fragment", "form_post"},
 				Scopes:                  []string{"openid", "profile", "email", "offline_access"},
 				TokenEndpointAuthMethod: authMethod,
 				Public:                  isPublic,
