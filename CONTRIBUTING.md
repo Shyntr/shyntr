@@ -50,3 +50,12 @@ Shyntr follows a **Hexagonal Architecture**:
 1.  All code and comments must be in **English**.
 2.  Do not use any external branding (other than strictly required library imports).
 3.  Keep the core logic independent of specific frameworks where possible.
+
+### Database Constraints & Persistence
+* **Composite Primary Keys:** The `o_auth2_sessions` table strictly uses a composite primary key (`signature`, `type`). Never attempt to query or delete a session by `signature` alone, as this will cause cross-token-type data leaks.
+* **Refresh Token Uniqueness:** A partial unique index enforces that only one active refresh token can exist per `request_id` to prevent token cloning.
+
+### Testing Discipline
+Shyntr enforces strict testing standards for security boundaries:
+* **No Mock Strings for Tokens:** When writing tests for protected endpoints (like `/userinfo`), you cannot use dummy strings (e.g., `"fake-token-123"`). You must instantiate the `compose.NewOAuth2JWTStrategy`, generate a cryptographically valid JWT Access Token with proper claims, and pass it in the `Authorization` header.
+* **Asserting Zero Trust:** Always write negative assertions (e.g., verifying that data *does not* leak when a scope is missing).

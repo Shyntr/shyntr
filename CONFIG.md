@@ -4,14 +4,14 @@ Shyntr follows the **12-Factor App** methodology. All configurations are managed
 
 ## 1. Core Server Settings
 
-| Environment Variable | Default Value | Description |
-| :--- | :--- | :--- |
-| `PORT` | `7496` | The port number on which the **Public API** (SAML/OIDC endpoints) runs. |
-| `ADMIN_PORT` | `7497` | The port number on which the **Management/Admin API** (Dashboard and Auth Portal internal communication) runs. |
-| `ISSUER_URL` | `http://localhost:7496` | The base URL of the Identity Hub. This is used in `iss` claims in JWTs and as the base for SAML metadata endpoints. |
-| `LOG_LEVEL` | `info` | Defines the verbosity of the logger. Valid values: `debug`, `info`, `warn`, `error`, `fatal`. |
-| `GO_ENV` | `development` | Setting this to `production` switches the logger output to JSON format and disables human-readable console colors. |
-| `GIN_MODE` | `debug` | Set to `release` in production to disable Gin framework's route debugging output and optimize routing performance. |
+| Environment Variable | Default Value | Description                                                                                                                                                                                                                    |
+| :--- | :--- |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `PORT` | `7496` | The port number on which the **Public API** (SAML/OIDC endpoints) runs.                                                                                                                                                        |
+| `ADMIN_PORT` | `7497` | The port number on which the **Management/Admin API** (Dashboard and Auth Portal internal communication) runs.                                                                                                                 |
+| `ISSUER_URL` | `http://localhost:7496` | The authoritative base URL of the Identity Hub. **CRITICAL:** This value is embedded into the `iss` claim of all JWT Access and ID Tokens. Downstream resource servers will reject tokens if this does not match exactly, and as the base for SAML metadata endpoints. |
+| `LOG_LEVEL` | `info` | Defines the verbosity of the logger. Valid values: `debug`, `info`, `warn`, `error`, `fatal`.                                                                                                                                  |
+| `GO_ENV` | `development` | Setting this to `production` switches the logger output to JSON format and disables human-readable console colors.                                                                                                             |
+| `GIN_MODE` | `debug` | Set to `release` in production to disable Gin framework's route debugging output and optimize routing performance.                                                                                                             |
 
 ## 2. Database Configuration
 
@@ -46,6 +46,8 @@ These URLs tell Shyntr where your custom front-end application (Auth Portal) is 
 | `ACCESS_TOKEN_LIFESPAN` | `1h` | Global default lifespan for Access Tokens (e.g., `15m`, `1h`). |
 | `ID_TOKEN_LIFESPAN` | `1h` | Global default lifespan for OIDC ID Tokens. |
 | `REFRESH_TOKEN_LIFESPAN`| `720h` (30 Days) | Global default lifespan for Refresh Tokens. |
+
+> **Security Note:** Access Tokens are stateless JWTs. To minimize the risk window of compromised tokens in a Zero Trust architecture, keep `ACCESS_TOKEN_LIFESPAN` short (e.g., `15m` to `1h`) and rely on Opaque Refresh Tokens for session continuation.
 
 ## 6. Cross-Origin Resource Sharing (CORS)
 

@@ -12,6 +12,16 @@ can focus on building your product. Whether you need to expose your custom user 
 legacy SAML services with a modern OAuth2 provider, Shyntr is the missing link.
 
 ---
+## 🛡️ Zero Trust & Token Architecture
+
+Shyntr implements a rigorous, high-assurance token architecture designed for Zero Trust environments:
+
+* **JWT Access Tokens (RFC 9068):** Access tokens are issued as stateless JSON Web Tokens. They include strict claims (`iss`, `sub`, `aud`, `client_id`, `amr`) allowing your downstream microservices to authorize requests independently and securely.
+* **Opaque Refresh Tokens:** To prevent replay attacks and ensure immediate revocation capabilities, refresh tokens are strictly opaque (stateful).
+* **Token Rotation & Grace Period:** Every use of a refresh token rotates the token family. A strict 15-second grace period is enforced to handle network latency while neutralizing token cloning attempts.
+* **Strict OIDC Enforcement:** Exact redirect URI matching, PKCE enforcement for public clients, and explicit response mode whitelisting are mandatory.
+
+---
 
 ## 🚀 Quickstart
 

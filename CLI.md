@@ -91,6 +91,9 @@ Registers a new OIDC client.
 | `--secret` | No | *Auto-generated 16-byte hex* | The Client Secret (ignored if `--public` is true). |
 | `--redirect-uris` | No | `http://localhost:8080/callback` | Comma-separated list of allowed callback URLs. |
 | `--public` | No | `false` | Set to true for SPA/Mobile apps (disables secret and sets auth method to `none`). |
+| `--response-modes` | No | `query, fragment, form_post` | Explicitly allowed response modes. Must contain `query` for the standard authorization code flow. |
+| `--grant-types` | No | `authorization_code, refresh_token` | Strict list of allowed flows. `refresh_token` must be explicitly granted here to receive one. |
+| `--post-logout-uris` | No | - | Comma-separated list of exact URIs allowed for redirection after a successful logout to prevent Open Redirect attacks. |
 
 ### `get-client`
 
@@ -201,6 +204,9 @@ Registers a new external OIDC Provider.
 | `--client-secret` | **Yes** | - | The Client Secret provided by the external IdP. |
 | `--tenant-id` | No | `default` | The ID of the tenant this connection belongs to. |
 | `--name` | No | `OIDC Provider` | The descriptive name of the Identity Provider. |
+| `--response-modes` | No | `query, fragment, form_post` | Explicitly allowed response modes. Must contain `query` for the standard authorization code flow. |
+| `--grant-types` | No | `authorization_code, refresh_token` | Strict list of allowed flows. `refresh_token` must be explicitly granted here to receive one. |
+| `--post-logout-uris` | No | - | Comma-separated list of exact URIs allowed for redirection after a successful logout to prevent Open Redirect attacks. |
 
 ### `get-oidc-connection`
 

@@ -27,9 +27,9 @@ services:
   shyntr-backend:
     image: shyntr/shyntr:dev
     container_name: shyntr-backend
-#    ports:
-#      - "7496:7496" # Public Port (SHYN)
-#      - "7497:7497" # Admin Port (ADMN)
+    ports:
+      - "7496:7496" # Public Port (SHYN)
+      - "7497:7497" # Admin Port (ADMN)
     environment:
       - GIN_MODE=release
       - GO_ENV=production
