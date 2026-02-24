@@ -54,29 +54,30 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
-	if err := db.Exec(`
+	if db.Migrator().HasTable("o_auth2_sessions") {
+		if err := db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS oauth2_sessions_one_active_refresh_per_request
-		ON oauth2_sessions (request_id)
+		ON o_auth2_sessions (request_id)
 		WHERE type = 'refresh_token' AND active = TRUE;
 	`).Error; err != nil {
-		return err
-	}
+			return err
+		}
 
-	if err := db.Exec(`
+		if err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS oauth2_sessions_family_lookup
-		ON oauth2_sessions (token_family_id, type);
+		ON o_auth2_sessions (token_family_id, type);
 	`).Error; err != nil {
-		return err
-	}
+			return err
+		}
 
-	if err := db.Exec(`
+		if err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS oauth2_sessions_refresh_grace_lookup
-		ON oauth2_sessions (request_id, signature, grace_expires_at, grace_used_at)
+		ON o_auth2_sessions (request_id, signature, grace_expires_at, grace_used_at)
 		WHERE type = 'refresh_token';
 	`).Error; err != nil {
-		return err
+			return err
+		}
 	}
-
 	return nil
 }
 
