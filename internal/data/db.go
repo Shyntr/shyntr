@@ -38,7 +38,7 @@ func ConnectDB(cfg *config.Config) (*gorm.DB, error) {
 
 // MigrateDB runs the schema migration.
 func MigrateDB(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&models.Tenant{},
 		&models.OAuth2Client{},
 		&models.SAMLConnection{},
@@ -50,7 +50,34 @@ func MigrateDB(db *gorm.DB) error {
 		&models.LoginRequest{},
 		&models.ConsentRequest{},
 		&models.BlacklistedJTI{},
-	)
+	); err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS oauth2_sessions_one_active_refresh_per_request
+		ON oauth2_sessions (request_id)
+		WHERE type = 'refresh_token' AND active = TRUE;
+	`).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS oauth2_sessions_family_lookup
+		ON oauth2_sessions (token_family_id, type);
+	`).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS oauth2_sessions_refresh_grace_lookup
+		ON oauth2_sessions (request_id, signature, grace_expires_at, grace_used_at)
+		WHERE type = 'refresh_token';
+	`).Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func SeedDefaultTenant(db *gorm.DB, cfg *config.Config) {

@@ -19,9 +19,10 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/core/worker"
 	"github.com/nevzatcirak/shyntr/internal/data"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
+	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/nevzatcirak/shyntr/pkg/utils"
+	"github.com/ory/fosite"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -213,7 +214,8 @@ func main() {
 
 			hashedSecret := ""
 			if clientSecret != "" {
-				hashedSecret, _ = crypto.HashPassword(clientSecret)
+				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
+				hashedSecret, _ = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 			}
 
 			authMethod := "client_secret_basic"
@@ -290,7 +292,8 @@ func main() {
 				updates["redirect_uris"] = redirectURIs
 			}
 			if clientSecret != "" {
-				hashed, _ := crypto.HashPassword(clientSecret)
+				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
+				hashed, _ := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 				updates["secret"] = hashed
 			}
 
