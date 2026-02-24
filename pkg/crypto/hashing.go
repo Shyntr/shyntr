@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -8,19 +9,19 @@ import (
 	"errors"
 	"io"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/ory/fosite"
 )
 
-// HashPassword generates a bcrypt hash of the password.
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	return string(bytes), err
-}
-
-// CheckPasswordHash compares a password with a hash.
-func CheckPasswordHash(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
+func HashSecret(ctx context.Context, cfg *fosite.Config, secret string) (string, error) {
+	if secret == "" {
+		return "", nil
+	}
+	hasher := cfg.GetSecretsHasher(ctx)
+	b, err := hasher.Hash(ctx, []byte(secret))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // EncryptAES encrypts text using AES-GCM with the given key (must be 32 bytes).

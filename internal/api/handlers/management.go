@@ -11,16 +11,18 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"github.com/ory/fosite"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type ManagementHandler struct {
-	DB *gorm.DB
+	DB           *gorm.DB
+	FositeConfig *fosite.Config
 }
 
-func NewManagementHandler(db *gorm.DB) *ManagementHandler {
-	return &ManagementHandler{DB: db}
+func NewManagementHandler(db *gorm.DB, fositeCfg *fosite.Config) *ManagementHandler {
+	return &ManagementHandler{DB: db, FositeConfig: fositeCfg}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -213,13 +215,14 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 	}
 	client.TenantID = realTenantID
 
-	if client.Secret != "" {
-		hashed, err := crypto.HashPassword(client.Secret)
+	clientSecret := client.Secret
+	if clientSecret != "" {
+		hashedSecret, err := crypto.HashSecret(c.Request.Context(), h.FositeConfig, clientSecret)
 		if err != nil {
-			c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to hash secret", err))
+			c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to hash client secret", err))
 			return
 		}
-		client.Secret = hashed
+		client.Secret = hashedSecret
 	}
 
 	if err := h.DB.Create(&client).Error; err != nil {
@@ -303,7 +306,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 	}
 
 	if req.Secret != "" && req.Secret != "*****" {
-		hashed, _ := crypto.HashPassword(req.Secret)
+		hashed, _ := crypto.HashSecret(c.Request.Context(), h.FositeConfig, req.Secret)
 		updates["secret"] = hashed
 	}
 

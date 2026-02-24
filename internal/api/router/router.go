@@ -32,7 +32,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	loginHandler := handlers.NewLoginHandler(db)
 	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
-	mgmtHandler := handlers.NewManagementHandler(db)
+	mgmtHandler := handlers.NewManagementHandler(db, authProvider.Config)
 
 	samlHandler := handlers.NewSAMLHandler(samlService, attrMapper, db)
 	oidcHandler := handlers.NewOIDCHandler(oidcService, attrMapper, db)

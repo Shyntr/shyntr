@@ -12,6 +12,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/api/middleware"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 )
@@ -30,7 +31,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	db.Create(&models.OAuth2Client{ID: "client-a1", TenantID: "tenant-a", Name: "A1"})
 	db.Create(&models.OAuth2Client{ID: "client-b1", TenantID: "tenant-b", Name: "B1"})
 
-	handler := handlers.NewManagementHandler(db)
+	handler := handlers.NewManagementHandler(db, &fosite.Config{})
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
