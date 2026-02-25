@@ -115,6 +115,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
 			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 			samlGroup.POST("/idp/sso", samlHandler.IDPSSO)
+			samlGroup.GET("/resume", samlHandler.ResumeSAML)
 		}
 
 		oidcGroup := tenantGroup.Group("/oidc")

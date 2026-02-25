@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -114,18 +115,49 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 		finalAttributes["sub"] = subject
 	}
 
-	contextBytes, _ := json.Marshal(finalAttributes)
 	loginReq.Authenticated = true
 	loginReq.Subject = subject
-	loginReq.Context = contextBytes
 	loginReq.UpdatedAt = time.Now()
 
+	var existingCtx map[string]interface{}
+	if len(loginReq.Context) > 0 {
+		_ = json.Unmarshal(loginReq.Context, &existingCtx)
+	} else {
+		existingCtx = make(map[string]interface{})
+	}
+
+	existingCtx["login_claims"] = finalAttributes
+	mergedBytes, _ := json.Marshal(existingCtx)
+	loginReq.Context = mergedBytes
 	if err := h.DB.Save(&loginReq).Error; err != nil {
+		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	redirectURL := fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID)
-	logger.FromGin(c).Info("OIDC SSO callback processed successfully", zap.String("user_sub", subject), zap.String("protocol", "oidc"))
-	c.Redirect(http.StatusFound, redirectURL)
+	var redirectTo string
+
+	if loginReq.Protocol == "saml" {
+		redirectTo = fmt.Sprintf("%s/t/%s/saml/resume?login_challenge=%s",
+			strings.TrimSuffix(h.Service.Config.BaseIssuerURL, "/"),
+			tenantID,
+			loginReq.ID,
+		)
+	} else {
+		redirectPath := loginReq.RequestURL
+		if !strings.HasPrefix(redirectPath, "http") {
+			base := strings.TrimSuffix(h.Service.Config.BaseIssuerURL, "/")
+			if !strings.HasPrefix(redirectPath, "/") {
+				redirectPath = "/" + redirectPath
+			}
+			redirectPath = base + redirectPath
+		}
+		if strings.Contains(redirectPath, "?") {
+			redirectTo = fmt.Sprintf("%s&login_verifier=%s", redirectPath, loginReq.ID)
+		} else {
+			redirectTo = fmt.Sprintf("%s?login_verifier=%s", redirectPath, loginReq.ID)
+		}
+	}
+
+	c.Redirect(http.StatusFound, redirectTo)
 }

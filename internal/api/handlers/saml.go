@@ -5,10 +5,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
+	crewjamsaml "github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
@@ -147,20 +147,51 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	finalAttributes["source"] = "saml"
 	finalAttributes["issuer"] = issuer
 
-	contextBytes, _ := json.Marshal(finalAttributes)
 	loginReq.Authenticated = true
 	loginReq.Subject = subject
-	loginReq.Context = contextBytes
 	loginReq.UpdatedAt = time.Now()
 
+	var existingCtx map[string]interface{}
+	if len(loginReq.Context) > 0 {
+		_ = json.Unmarshal(loginReq.Context, &existingCtx)
+	} else {
+		existingCtx = make(map[string]interface{})
+	}
+
+	existingCtx["login_claims"] = finalAttributes
+	mergedBytes, _ := json.Marshal(existingCtx)
+	loginReq.Context = mergedBytes
 	if err := h.DB.Save(&loginReq).Error; err != nil {
 		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "saml"))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	redirectURL := fmt.Sprintf("%s&login_verifier=%s", loginReq.RequestURL, loginReq.ID)
-	c.Redirect(http.StatusFound, redirectURL)
+	var redirectTo string
+
+	if loginReq.Protocol == "saml" {
+		redirectTo = fmt.Sprintf("%s/t/%s/saml/resume?login_challenge=%s",
+			strings.TrimSuffix(h.Service.Config.BaseIssuerURL, "/"),
+			tenantID,
+			loginReq.ID,
+		)
+	} else {
+		redirectPath := loginReq.RequestURL
+		if !strings.HasPrefix(redirectPath, "http") {
+			base := strings.TrimSuffix(h.Service.Config.BaseIssuerURL, "/")
+			if !strings.HasPrefix(redirectPath, "/") {
+				redirectPath = "/" + redirectPath
+			}
+			redirectPath = base + redirectPath
+		}
+		if strings.Contains(redirectPath, "?") {
+			redirectTo = fmt.Sprintf("%s&login_verifier=%s", redirectPath, loginReq.ID)
+		} else {
+			redirectTo = fmt.Sprintf("%s?login_verifier=%s", redirectPath, loginReq.ID)
+		}
+	}
+
+	c.Redirect(http.StatusFound, redirectTo)
 }
 
 func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
@@ -190,11 +221,6 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		tenantID = h.Service.Config.DefaultTenantID
 	}
 
-	if loginVerifier := c.Query("login_verifier"); loginVerifier != "" {
-		h.handleIDPPostLogin(c, tenantID, loginVerifier)
-		return
-	}
-
 	authReq, err := h.Service.ParseAuthnRequest(c.Request.Context(), tenantID, c.Request)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(err), zap.String("protocol", "saml"))
@@ -214,14 +240,19 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		rawSAMLRequest = c.PostForm("SAMLRequest")
 	}
 
+	relayState := c.Query("RelayState")
+	if relayState == "" {
+		relayState = c.PostForm("RelayState")
+	}
+
 	ctxData := map[string]interface{}{
 		"saml_request":    rawSAMLRequest,
-		"relay_state_raw": c.Query("RelayState"),
+		"relay_state_raw": relayState,
 		"sp_entity_id":    spClient.EntityID,
 		"protocol":        "saml",
-	}
-	if ctxData["relay_state_raw"] == "" {
-		ctxData["relay_state_raw"] = c.PostForm("RelayState")
+		"request_id":      authReq.ID,
+		"acs_url":         authReq.AssertionConsumerServiceURL,
+		"issuer":          authReq.Issuer.Value,
 	}
 
 	ctxBytes, _ := json.Marshal(ctxData)
@@ -232,6 +263,7 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		RequestURL: fmt.Sprintf("%s/t/%s/saml/idp/sso", h.Service.Config.BaseIssuerURL, tenantID),
 		ClientID:   spClient.ID,
 		ClientIP:   c.ClientIP(),
+		Protocol:   "saml",
 		Context:    ctxBytes,
 		Active:     true,
 		CreatedAt:  time.Now(),
@@ -242,19 +274,35 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		return
 	}
 
-	redirectURL := fmt.Sprintf("/auth/login?login_challenge=%s", loginReq.ID)
+	redirectURL := fmt.Sprintf("%s?login_challenge=%s", h.Service.Config.ExternalLoginURL, loginReq.ID)
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
-func (h *SAMLHandler) handleIDPPostLogin(c *gin.Context, tenantID, verifier string) {
+func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		tenantID = h.Service.Config.DefaultTenantID
+	}
+
+	loginChallenge := c.Query("login_challenge")
+	if loginChallenge == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_login_challenge"})
+		return
+	}
+
 	var loginReq models.LoginRequest
-	if err := h.DB.First(&loginReq, "id = ?", verifier).Error; err != nil {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_verifier"})
+	if err := h.DB.First(&loginReq, "id = ?", loginChallenge).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "login_request_not_found"})
 		return
 	}
 
 	if !loginReq.Authenticated {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication_pending"})
+		return
+	}
+
+	if loginReq.Protocol != "saml" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_protocol"})
 		return
 	}
 
@@ -264,37 +312,45 @@ func (h *SAMLHandler) handleIDPPostLogin(c *gin.Context, tenantID, verifier stri
 		return
 	}
 
-	rawSAML := ctxData["saml_request"].(string)
 	relayState, _ := ctxData["relay_state_raw"].(string)
+	requestID, _ := ctxData["request_id"].(string)
+	acsURL, _ := ctxData["acs_url"].(string)
+	issuer, _ := ctxData["issuer"].(string)
 
-	mockURL, _ := http.NewRequest("GET", fmt.Sprintf("?SAMLRequest=%s", url.QueryEscape(rawSAML)), nil)
-
-	authReq, err := h.Service.ParseAuthnRequest(c.Request.Context(), tenantID, mockURL)
-	if err != nil {
-		logger.FromGin(c).Error("Failed to re-parse SAML Request", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_original_request"})
-		return
+	authReq := &crewjamsaml.AuthnRequest{
+		ID:                          requestID,
+		AssertionConsumerServiceURL: acsURL,
+		Issuer: &crewjamsaml.Issuer{
+			Value: issuer,
+		},
 	}
 
 	var spClient models.SAMLClient
-	if err := h.DB.Where("entity_id = ?", authReq.Issuer.Value).First(&spClient).Error; err != nil {
+	if err := h.DB.Where("entity_id = ? AND tenant_id = ?", issuer, tenantID).First(&spClient).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "sp_not_found"})
 		return
 	}
 
 	userAttrs := make(map[string]interface{})
 	for k, v := range ctxData {
-		if k != "saml_request" && k != "relay_state_raw" && k != "protocol" && k != "sp_entity_id" {
+		if k != "saml_request" && k != "relay_state_raw" && k != "protocol" && k != "sp_entity_id" && k != "login_claims" && k != "request_id" && k != "acs_url" && k != "issuer" {
 			userAttrs[k] = v
 		}
 	}
+
+	if claimsRaw, ok := ctxData["login_claims"]; ok {
+		if claimsMap, ok := claimsRaw.(map[string]interface{}); ok {
+			for k, v := range claimsMap {
+				userAttrs[k] = v
+			}
+		}
+	}
+
 	userAttrs["sub"] = loginReq.Subject
 	if _, ok := userAttrs["email"]; !ok {
 		userAttrs["email"] = loginReq.Subject
 	}
 
-	// Mapping Uygula (Outbound: İç Veri -> SP Verisi)
-	// Kural: {"hedef_sp_key": "bizim_key"}
 	finalAttrs, err := h.Mapper.Map(userAttrs, spClient.AttributeMapping)
 	if err != nil {
 		logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))

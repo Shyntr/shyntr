@@ -17,6 +17,7 @@ type LoginRequest struct {
 	Context           []byte         `gorm:"type:jsonb"`
 	ClientID          string         `gorm:"index;not null"`
 	RequestURL        string         `gorm:"not null"`
+	Protocol          string         `gorm:"type:varchar(50);default:'oidc';index"`
 	Authenticated     bool           `gorm:"default:false"`
 	Active            bool           `gorm:"default:true"`
 	SessionID         string

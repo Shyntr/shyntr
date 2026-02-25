@@ -185,6 +185,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			RequestedScope:    pq.StringArray(ar.GetRequestedScopes()),
 			RequestedAudience: pq.StringArray(ar.GetRequestedAudience()),
 			RequestURL:        c.Request.RequestURI,
+			Protocol:          "oidc",
 			ClientIP:          c.ClientIP(),
 			Active:            true,
 			Authenticated:     false,

@@ -101,8 +101,15 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	req.RememberFor = body.RememberFor
 
 	if body.Context != nil {
-		contextBytes, _ := json.Marshal(body.Context)
-		req.Context = contextBytes
+		var existingCtx map[string]interface{}
+		if len(req.Context) > 0 {
+			_ = json.Unmarshal(req.Context, &existingCtx)
+		} else {
+			existingCtx = make(map[string]interface{})
+		}
+		existingCtx["login_claims"] = body.Context
+		mergedBytes, _ := json.Marshal(existingCtx)
+		req.Context = mergedBytes
 	}
 
 	if err := h.DB.Save(&req).Error; err != nil {
@@ -110,12 +117,29 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		return
 	}
 
-	redirectPath := req.RequestURL
-	if !strings.HasPrefix(redirectPath, "http") {
-		redirectPath = fmt.Sprintf("%s%s", h.Config.BaseIssuerURL, req.RequestURL)
-	}
+	var redirectTo string
 
-	redirectTo := fmt.Sprintf("%s&login_verifier=%s", redirectPath, req.ID)
+	if req.Protocol == "saml" {
+		redirectTo = fmt.Sprintf("%s/t/%s/saml/resume?login_challenge=%s",
+			strings.TrimSuffix(h.Config.BaseIssuerURL, "/"),
+			req.TenantID,
+			req.ID,
+		)
+	} else {
+		redirectPath := req.RequestURL
+		if !strings.HasPrefix(redirectPath, "http") {
+			base := strings.TrimSuffix(h.Config.BaseIssuerURL, "/")
+			if !strings.HasPrefix(redirectPath, "/") {
+				redirectPath = "/" + redirectPath
+			}
+			redirectPath = base + redirectPath
+		}
+		if strings.Contains(redirectPath, "?") {
+			redirectTo = fmt.Sprintf("%s&login_verifier=%s", redirectPath, req.ID)
+		} else {
+			redirectTo = fmt.Sprintf("%s?login_verifier=%s", redirectPath, req.ID)
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": redirectTo,
