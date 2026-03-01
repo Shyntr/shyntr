@@ -21,6 +21,7 @@ type SAMLConnection struct {
 	ForceAuthn               bool                            `gorm:"default:false" json:"force_authn"`
 	SignRequest              bool                            `gorm:"default:true" json:"sign_request"`
 	SPPrivateKey             string                          `gorm:"type:text" json:"sp_private_key"`
+	SPCertificate            string                          `gorm:"type:text" json:"sp_certificate"`
 	IdpCertificate           string                          `gorm:"type:text" json:"idp_certificate"`
 	IdpEncryptionCertificate string                          `gorm:"type:text" json:"idp_encryption_certificate"`
 	Active                   bool                            `gorm:"default:true" json:"active"`

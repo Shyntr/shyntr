@@ -694,6 +694,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		SPPrivateKey:             req.SPPrivateKey,
 		IdpCertificate:           req.IdpCertificate,
 		IdpEncryptionCertificate: req.IdpEncryptionCertificate,
+		MetadataURL:              req.MetadataURL,
 	}
 
 	if req.MetadataURL != "" {

@@ -69,25 +69,32 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 
 	var privKey *rsa.PrivateKey
 	var cert *x509.Certificate
-	var err error
 
 	if conn != nil && conn.SPPrivateKey != "" {
 		block, _ := pem.Decode([]byte(conn.SPPrivateKey))
-		if block == nil {
-			return nil, errors.New("failed to decode connection private key PEM")
+		privKey, _ = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if conn.SPCertificate != "" {
+			certBlock, _ := pem.Decode([]byte(conn.SPCertificate))
+			cert, _ = x509.ParseCertificate(certBlock.Bytes)
+		} else {
+			template := x509.Certificate{
+				SerialNumber: big.NewInt(time.Now().Unix()), Subject: pkix.Name{CommonName: "Shyntr Custom SP"},
+				NotBefore: time.Now().Add(-1 * time.Minute), NotAfter: time.Now().Add(365 * 24 * time.Hour * 10),
+				KeyUsage: x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+			}
+			certBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
+			cert, _ = x509.ParseCertificate(certBytes)
+
+			pemCert := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes}))
+			conn.SPCertificate = pemCert
+			s.Repo.DB.Model(conn).Update("sp_certificate", pemCert)
 		}
-		privKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse connection private key: %w", err)
-		}
-		cert, err = s.generateSelfSignedCert(privKey)
 	} else {
-		privKey = s.KeyMgr.GetActivePrivateKey()
-		cert, err = s.generateSelfSignedCert(privKey)
+		privKey, cert = s.KeyMgr.GetActiveKeys()
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare certs: %w", err)
+	if cert == nil || privKey == nil {
+		return nil, errors.New("failed to load static SP keys")
 	}
 
 	sp := &crewjamsaml.ServiceProvider{
@@ -179,7 +186,7 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 		return "", "", fmt.Errorf("no SSO URL found for HTTP-Redirect or HTTP-POST bindings")
 	}
 
-	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, relayState)
+	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, crewjamsaml.HTTPPostBinding)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)
 	}
@@ -936,67 +943,6 @@ func (s *Service) GenerateLogoutResponse(ctx context.Context, tenantID string, r
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(sp.SLOURL, b64Resp, relayState), nil
-}
-
-func (s *Service) BuildSPLogoutRedirectURL(sp *crewjamsaml.EntityDescriptor, nameIDValue string, relayState string) (string, error) {
-	var sloURL string
-	if sp != nil && len(sp.IDPSSODescriptors) > 0 {
-		for _, slo := range sp.IDPSSODescriptors[0].SingleLogoutServices {
-			if slo.Binding == crewjamsaml.HTTPRedirectBinding {
-				sloURL = slo.Location
-				break
-			}
-		}
-	}
-
-	if sloURL == "" {
-		return "", errors.New("IdP metadata does not contain an HTTP-Redirect SingleLogoutService endpoint")
-	}
-
-	if nameIDValue == "" {
-		nameIDValue = "unknown"
-	}
-
-	now := time.Now().UTC()
-	req := &crewjamsaml.LogoutRequest{
-		ID:           "id-" + uuid.New().String(),
-		IssueInstant: now,
-		Version:      "2.0",
-		Destination:  sloURL,
-		Issuer: &crewjamsaml.Issuer{
-			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  sp.EntityID,
-		},
-		NameID: &crewjamsaml.NameID{
-			Format: "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
-			Value:  nameIDValue,
-		},
-	}
-
-	reqBytes, err := xml.Marshal(req)
-	if err != nil {
-		return "", err
-	}
-
-	var b bytes.Buffer
-	w, _ := flate.NewWriter(&b, flate.DefaultCompression)
-	w.Write(reqBytes)
-	w.Close()
-	encodedReq := base64.StdEncoding.EncodeToString(b.Bytes())
-
-	parsedURL, err := url.Parse(sloURL)
-	if err != nil {
-		return "", err
-	}
-
-	q := parsedURL.Query()
-	q.Set("SAMLRequest", encodedReq)
-	if relayState != "" {
-		q.Set("RelayState", relayState)
-	}
-	parsedURL.RawQuery = q.Encode()
-
-	return parsedURL.String(), nil
 }
 
 func (s *Service) generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error) {

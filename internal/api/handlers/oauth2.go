@@ -480,7 +480,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 					tID = h.Config.DefaultTenantID
 				}
 
-				redirectURL := fmt.Sprintf("%s/t/%s/saml/sp/slo/initiate?connection_id=%s%s",
+				redirectURL := fmt.Sprintf("%s/t/%s/saml/sp/slo?connection_id=%s%s",
 					h.Config.BaseIssuerURL, tID, connectionID, relayParam)
 				c.Redirect(http.StatusFound, redirectURL)
 				return

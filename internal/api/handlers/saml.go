@@ -1,10 +1,15 @@
 package handlers
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -465,7 +470,7 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 		return
 	}
 
-	sp, err := h.Service.GetServiceProvider(c.Request, conn.IdpEntityID)
+	sp, err := h.Service.BuildServiceProvider(c.Request.Context(), tenantID, &conn)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to build SP for SLO", zap.Error(err))
 		if relayState != "" {
@@ -480,15 +485,53 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 		subject = sessionCookie
 	}
 
-	redirectURL, err := h.Service.BuildSPLogoutRedirectURL(sp, subject, relayState)
+	sloURL := conn.IdpSloUrl
+	if sloURL == "" {
+		sloURL = conn.IdpSingleSignOn
+	}
+
+	logoutReq, err := sp.MakeLogoutRequest(sloURL, subject)
 	if err != nil {
-		logger.FromGin(c).Warn("Failed to build SP Logout Request, falling back to basic relay", zap.Error(err))
+		logger.FromGin(c).Warn("Failed to build SP Logout Request", zap.Error(err))
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
-		} else {
-			c.JSON(http.StatusOK, gin.H{"message": "Logged out locally. Upstream logout not supported by IdP."})
 		}
 		return
 	}
-	c.Redirect(http.StatusFound, redirectURL)
+	redirectURL := logoutReq.Redirect(relayState)
+	query := redirectURL.Query()
+	if conn.SignRequest && sp.Key != nil {
+		rsaKey, ok := sp.Key.(*rsa.PrivateKey)
+		if !ok {
+			logger.FromGin(c).Error("SAML SP Key is not an RSA private key, cannot sign")
+		} else {
+			sigAlg := "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+			if sp.SignatureMethod != "" {
+				sigAlg = sp.SignatureMethod
+			}
+
+			query.Set("SigAlg", sigAlg)
+			signString := "SAMLRequest=" + url.QueryEscape(query.Get("SAMLRequest"))
+			if rs := query.Get("RelayState"); rs != "" {
+				signString += "&RelayState=" + url.QueryEscape(rs)
+			}
+			signString += "&SigAlg=" + url.QueryEscape(sigAlg)
+
+			hasher := crypto.SHA256.New()
+			hasher.Write([]byte(signString))
+			hashed := hasher.Sum(nil)
+
+			signature, err := rsa.SignPKCS1v15(rand.Reader, rsaKey, crypto.SHA256, hashed)
+			if err != nil {
+				logger.FromGin(c).Error("Failed to sign logout request URL", zap.Error(err))
+			} else {
+				query.Set("Signature", base64.StdEncoding.EncodeToString(signature))
+			}
+		}
+
+		rawQuery := query.Encode()
+		rawQuery = strings.ReplaceAll(rawQuery, "+", "%20")
+		redirectURL.RawQuery = rawQuery
+		c.Redirect(http.StatusFound, redirectURL.String())
+	}
 }

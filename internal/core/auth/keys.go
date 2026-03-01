@@ -4,10 +4,14 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
+	"sync"
+	"time"
 
 	"github.com/go-jose/go-jose/v3"
 	"github.com/nevzatcirak/shyntr/config"
@@ -15,13 +19,16 @@ import (
 	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type KeyManager struct {
 	DB     *gorm.DB
 	Config *config.Config
+
+	mu         sync.RWMutex
+	cachedKey  *rsa.PrivateKey
+	cachedCert *x509.Certificate
 }
 
 func NewKeyManager(db *gorm.DB, cfg *config.Config) *KeyManager {
@@ -29,54 +36,88 @@ func NewKeyManager(db *gorm.DB, cfg *config.Config) *KeyManager {
 }
 
 func (km *KeyManager) GetActivePrivateKey() *rsa.PrivateKey {
-	if km.Config.RSAPrivateKeyBase64 != "" {
-		key, err := parseBase64PEM(km.Config.RSAPrivateKeyBase64)
-		if err == nil {
-			logger.Log.Info("Loaded signing key from Environment Variable")
-			return key
-		}
-		logger.Log.Error("Failed to parse key from ENV", zap.Error(err))
+	key, _ := km.GetActiveKeys()
+	return key
+}
+
+func (km *KeyManager) GetActiveKeys() (*rsa.PrivateKey, *x509.Certificate) {
+	km.mu.RLock()
+	if km.cachedKey != nil && km.cachedCert != nil {
+		km.mu.RUnlock()
+		return km.cachedKey, km.cachedCert
+	}
+	km.mu.RUnlock()
+
+	km.mu.Lock()
+	defer km.mu.Unlock()
+
+	if km.cachedKey != nil {
+		return km.cachedKey, km.cachedCert
 	}
 
 	var keyModel models.SigningKey
 	if err := km.DB.First(&keyModel, "id = ?", consts.SigningKeyID).Error; err == nil {
-		decryptedBytes, err := crypto.DecryptAES(keyModel.KeyData, []byte(km.Config.AppSecret))
-		if err != nil {
-			logger.Log.Fatal("Failed to decrypt signing key from DB. Check APP_SECRET.", zap.Error(err))
+		decryptedBytes, _ := crypto.DecryptAES(keyModel.KeyData, []byte(km.Config.AppSecret))
+		key, _ := x509.ParsePKCS1PrivateKey(decryptedBytes)
+
+		var cert *x509.Certificate
+		if keyModel.CertData != "" {
+			block, _ := pem.Decode([]byte(keyModel.CertData))
+			if block != nil {
+				cert, _ = x509.ParseCertificate(block.Bytes)
+			}
 		}
 
-		key, err := x509.ParsePKCS1PrivateKey(decryptedBytes)
-		if err != nil {
-			logger.Log.Fatal("Failed to parse decrypted key", zap.Error(err))
+		if cert == nil && key != nil {
+			logger.Log.Info("Found existing private key but no certificate. Generating missing certificate...")
+
+			template := x509.Certificate{
+				SerialNumber:          big.NewInt(time.Now().Unix()),
+				Subject:               pkix.Name{CommonName: "Shyntr Global Identity"},
+				NotBefore:             time.Now().Add(-1 * time.Minute),
+				NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10),
+				KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+				BasicConstraintsValid: true,
+			}
+
+			certBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+			cert, _ = x509.ParseCertificate(certBytes)
+			pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
+			km.DB.Model(&keyModel).Update("cert_data", string(pemCert))
 		}
-		logger.Log.Info("Loaded signing key from Database")
-		return key
+		logger.Log.Info("Loaded signing key and certificate from Database into Memory")
+		km.cachedKey = key
+		km.cachedCert = cert
+		return key, cert
 	}
 
-	logger.Log.Info("No signing key found. Generating new one...")
-	newKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		logger.Log.Fatal("Failed to generate RSA key", zap.Error(err))
-	}
+	logger.Log.Info("No signing key found. Generating and caching a new stable key pair...")
+	newKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	keyBytes := x509.MarshalPKCS1PrivateKey(newKey)
-	encryptedData, err := crypto.EncryptAES(keyBytes, []byte(km.Config.AppSecret))
-	if err != nil {
-		logger.Log.Fatal("Failed to encrypt new key", zap.Error(err))
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Shyntr Global Identity"},
+		NotBefore: time.Now().Add(-1 * time.Minute), NotAfter: time.Now().Add(365 * 24 * time.Hour * 10),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true,
 	}
+	certBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &newKey.PublicKey, newKey)
+	newCert, _ := x509.ParseCertificate(certBytes)
+	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
 
+	encryptedData, _ := crypto.EncryptAES(x509.MarshalPKCS1PrivateKey(newKey), []byte(km.Config.AppSecret))
 	newModel := models.SigningKey{
 		ID:        consts.SigningKeyID,
 		Algorithm: "RS256",
 		KeyData:   encryptedData,
+		CertData:  string(pemCert),
 		Active:    true,
 	}
+	km.DB.Create(&newModel)
 
-	if err := km.DB.Create(&newModel).Error; err != nil {
-		logger.Log.Fatal("Failed to save new key to DB", zap.Error(err))
-	}
-
-	return newKey
+	km.cachedKey = newKey
+	km.cachedCert = newCert
+	return newKey, newCert
 }
 
 func parseBase64PEM(b64 string) (*rsa.PrivateKey, error) {
