@@ -44,5 +44,10 @@ func cleanupExpiredData(db *gorm.DB) {
 		logger.Log.Error("Cleanup failed: ConsentRequest", zap.Error(err))
 	}
 
+	webhookRetention := now.Add(-7 * 24 * time.Hour)
+	if err := db.Where("created_at < ?", webhookRetention).Delete(&models.WebhookEvent{}).Error; err != nil {
+		logger.Log.Error("Cleanup failed: WebhookEvent", zap.Error(err))
+	}
+
 	logger.Log.Debug("Cleanup cycle completed")
 }

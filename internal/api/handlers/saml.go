@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
+	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
@@ -19,13 +20,14 @@ import (
 )
 
 type SAMLHandler struct {
-	Service *saml.Service
-	Mapper  *mapper.Mapper
-	DB      *gorm.DB
+	Service        *saml.Service
+	Mapper         *mapper.Mapper
+	DB             *gorm.DB
+	WebhookService *webhook.Service
 }
 
-func NewSAMLHandler(s *saml.Service, m *mapper.Mapper, db *gorm.DB) *SAMLHandler {
-	return &SAMLHandler{Service: s, Mapper: m, DB: db}
+func NewSAMLHandler(s *saml.Service, m *mapper.Mapper, db *gorm.DB, wh *webhook.Service) *SAMLHandler {
+	return &SAMLHandler{Service: s, Mapper: m, DB: db, WebhookService: wh}
 }
 
 func (h *SAMLHandler) SPMetadata(c *gin.Context) {
@@ -134,7 +136,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	issuer := assertion.Issuer.Value
 	var conn models.SAMLConnection
-	if err := h.DB.Select("attribute_mapping").Where("tenant_id = ? AND idp_entity_id = ?", tenantID, issuer).First(&conn).Error; err != nil {
+	if err := h.DB.Select("id", "attribute_mapping").Where("tenant_id = ? AND idp_entity_id = ?", tenantID, issuer).First(&conn).Error; err != nil {
 		logger.FromGin(c).Warn("Connection not found for mapping, using raw attributes", zap.String("issuer", issuer), zap.String("protocol", "saml"))
 	}
 
@@ -148,6 +150,14 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	finalAttributes["sub"] = subject
 	finalAttributes["source"] = "saml"
 	finalAttributes["issuer"] = issuer
+
+	if conn.ID != "" {
+		finalAttributes["idp"] = fmt.Sprintf("saml:%s", conn.ID)
+	} else {
+		finalAttributes["idp"] = "saml:unknown"
+	}
+	finalAttributes["amr"] = []string{"ext"}
+	h.WebhookService.FireEvent(tenantID, "user.login.ext", finalAttributes)
 
 	loginReq.Authenticated = true
 	loginReq.Subject = subject

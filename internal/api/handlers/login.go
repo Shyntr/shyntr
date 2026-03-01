@@ -67,7 +67,14 @@ func (h *LoginHandler) SubmitLogin(c *gin.Context) {
 		loginReq.Subject = "user-admin-123"
 		loginReq.UpdatedAt = time.Now()
 
-		userCtx := map[string]string{"username": "admin", "role": "admin"}
+		userCtx := map[string]interface{}{
+			"login_claims": map[string]interface{}{
+				"username": "admin",
+				"role":     "admin",
+				"idp":      "local",
+				"amr":      []string{"pwd"},
+			},
+		}
 		ctxBytes, _ := json.Marshal(userCtx)
 		loginReq.Context = ctxBytes
 

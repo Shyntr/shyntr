@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
+	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
@@ -17,13 +18,14 @@ import (
 )
 
 type OIDCHandler struct {
-	Service *oidc.ClientService
-	Mapper  *mapper.Mapper
-	DB      *gorm.DB
+	Service        *oidc.ClientService
+	Mapper         *mapper.Mapper
+	DB             *gorm.DB
+	WebhookService *webhook.Service
 }
 
-func NewOIDCHandler(s *oidc.ClientService, m *mapper.Mapper, db *gorm.DB) *OIDCHandler {
-	return &OIDCHandler{Service: s, Mapper: m, DB: db}
+func NewOIDCHandler(s *oidc.ClientService, m *mapper.Mapper, db *gorm.DB, wh *webhook.Service) *OIDCHandler {
+	return &OIDCHandler{Service: s, Mapper: m, DB: db, WebhookService: wh}
 }
 
 func (h *OIDCHandler) Login(c *gin.Context) {
@@ -111,9 +113,12 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	finalAttributes["source"] = "oidc"
 	finalAttributes["connection_id"] = connectionID
+	finalAttributes["idp"] = fmt.Sprintf("oidc:%s", connectionID)
+	finalAttributes["amr"] = []string{"ext"}
 	if _, ok := finalAttributes["sub"]; !ok {
 		finalAttributes["sub"] = subject
 	}
+	h.WebhookService.FireEvent(tenantID, "user.login.ext", finalAttributes)
 
 	loginReq.Authenticated = true
 	loginReq.Subject = subject

@@ -441,6 +441,16 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 			},
 		}
 
+		authnContextClass := "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" // Varsayılan: Şifre
+		if amrList, ok := userAttributes["amr"].([]interface{}); ok {
+			for _, m := range amrList {
+				if m == "ext" || m == "mfa" {
+					// Dış sağlayıcı (Federated) veya MFA ile girildiyse
+					authnContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PreviousSession"
+				}
+			}
+		}
+
 		assertion = &saml.Assertion{
 			ID:           fmt.Sprintf("id-%d", now.UnixNano()),
 			IssueInstant: now,
@@ -479,7 +489,7 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 					SessionIndex: fmt.Sprintf("id-%d", now.UnixNano()),
 					AuthnContext: saml.AuthnContext{
 						AuthnContextClassRef: &saml.AuthnContextClassRef{
-							Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+							Value: authnContextClass,
 						},
 					},
 				},

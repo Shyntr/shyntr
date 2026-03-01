@@ -11,6 +11,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
+	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/stretchr/testify/assert"
@@ -31,8 +32,9 @@ func setupOIDCAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 	repo := repository.NewOIDCRepository(db)
 	service := oidc.NewClientService(repo, cfg)
+	webhookService := webhook.NewService(db)
 	attrMapper := mapper.New()
-	handler := handlers.NewOIDCHandler(service, attrMapper, db)
+	handler := handlers.NewOIDCHandler(service, attrMapper, db, webhookService)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

@@ -16,6 +16,8 @@ func MapClaims(subject string, contextMap map[string]interface{}, scopes []strin
 	allowedKeys := make(map[string]bool)
 
 	allowedKeys["tenant_id"] = true
+	allowedKeys["idp"] = true
+	allowedKeys["amr"] = true
 
 	for _, scope := range scopes {
 		if keys, ok := scopeToClaims[scope]; ok {

@@ -12,6 +12,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
+	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"gorm.io/gorm"
@@ -23,6 +24,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 
 	samlService := saml.NewService(samlRepo, km, cfg)
 	oidcService := oidc.NewClientService(oidcRepo, cfg)
+	webhookService := webhook.NewService(db)
 
 	attrMapper := mapper.New()
 
@@ -34,8 +36,8 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 	mgmtHandler := handlers.NewManagementHandler(db, authProvider.Config)
 
-	samlHandler := handlers.NewSAMLHandler(samlService, attrMapper, db)
-	oidcHandler := handlers.NewOIDCHandler(oidcService, attrMapper, db)
+	samlHandler := handlers.NewSAMLHandler(samlService, attrMapper, db, webhookService)
+	oidcHandler := handlers.NewOIDCHandler(oidcService, attrMapper, db, webhookService)
 
 	public := gin.New()
 	public.Use(gin.Recovery())
