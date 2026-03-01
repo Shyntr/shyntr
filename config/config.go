@@ -49,7 +49,7 @@ func LoadConfig() *Config {
 	viper.SetDefault("ISSUER_URL", "http://localhost:7496")
 
 	viper.SetDefault("COOKIE_SECURE", false)
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3010", "http://localhost:3000", "http://localhost:3274"})
+	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"*"})
 	viper.SetDefault("ADMIN_CORS_ALLOWED_ORIGINS", []string{"http://localhost:3010", "http://localhost:3000", "http://localhost:3274", "http://localhost:7497"})
 
 	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:3000/login")

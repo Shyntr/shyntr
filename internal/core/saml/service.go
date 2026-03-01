@@ -17,6 +17,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"math/big"
 	"net/http"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/beevik/etree"
 	"github.com/crewjam/saml"
+	crewjamsaml "github.com/crewjam/saml"
+	"github.com/google/uuid"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
@@ -34,6 +37,10 @@ import (
 
 type SingleCertStore struct {
 	Cert *x509.Certificate
+}
+
+type PersistentAssertionMaker struct {
+	crewjamsaml.DefaultAssertionMaker
 }
 
 func (s *SingleCertStore) Certificates() ([]*x509.Certificate, error) {
@@ -93,7 +100,7 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 	}
 
 	sp := &saml.ServiceProvider{
-		EntityID:          metadataURL.String(),
+		EntityID:          baseURLStr,
 		Key:               privKey,
 		Certificate:       cert,
 		MetadataURL:       *metadataURL,
@@ -237,6 +244,7 @@ func (s *Service) GetIdentityProvider(ctx context.Context, tenantID string) (*sa
 		SSOURL:                  *ssoURL,
 		SignatureMethod:         "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
 		ServiceProviderProvider: s,
+		AssertionMaker:          &PersistentAssertionMaker{},
 	}
 
 	return idp, nil
@@ -391,99 +399,168 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		subject = v
 	}
 
-	assertion := saml.Assertion{
-		ID:           fmt.Sprintf("id-%d", now.UnixNano()),
-		IssueInstant: now,
-		Version:      "2.0",
-		Issuer: saml.Issuer{
-			Value: idp.MetadataURL.String(),
-		},
-		Subject: &saml.Subject{
-			NameID: &saml.NameID{
-				Format: string(saml.EmailAddressNameIDFormat),
-				Value:  subject,
-			},
-			SubjectConfirmations: []saml.SubjectConfirmation{
-				{
-					Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
-					SubjectConfirmationData: &saml.SubjectConfirmationData{
-						InResponseTo: authReq.ID,
-						NotOnOrAfter: now.Add(5 * time.Minute),
-						Recipient:    authReq.AssertionConsumerServiceURL,
-					},
-				},
-			},
-		},
-		Conditions: &saml.Conditions{
-			NotBefore:    now.Add(-5 * time.Minute),
-			NotOnOrAfter: now.Add(5 * time.Minute),
-			AudienceRestrictions: []saml.AudienceRestriction{
-				{
-					Audience: saml.Audience{Value: authReq.Issuer.Value},
-				},
-			},
-		},
-		AuthnStatements: []saml.AuthnStatement{
-			{
-				AuthnInstant: now,
-				SessionIndex: fmt.Sprintf("id-%d", now.UnixNano()),
-				AuthnContext: saml.AuthnContext{
-					AuthnContextClassRef: &saml.AuthnContextClassRef{
-						Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
-					},
-				},
-			},
-		},
-		AttributeStatements: []saml.AttributeStatement{
-			{
-				Attributes: []saml.Attribute{},
-			},
-		},
-	}
-
-	for k, v := range userAttributes {
-		assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, saml.Attribute{
-			Name:       k,
-			NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
-			Values: []saml.AttributeValue{{
-				Type:  "xs:string",
-				Value: fmt.Sprintf("%v", v),
-			}},
-		})
-	}
-
-	assertBytes, err := xml.Marshal(assertion)
-	if err != nil {
-		return "", err
-	}
-	docAssert := etree.NewDocument()
-	docAssert.ReadFromBytes(assertBytes)
-	rootAssert := docAssert.Root()
-
-	// Eğer SignAssertion true ise, Assertion'ı imzala
-	if sp.SignAssertion {
-		signedAssertBytes, err := s.signElementXML(assertBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
-		if err != nil {
-			return "", fmt.Errorf("failed to sign assertion: %w", err)
+	nameIDFormat := string(saml.PersistentNameIDFormat)
+	if authReq.NameIDPolicy != nil && authReq.NameIDPolicy.Format != nil {
+		requestedFormat := *authReq.NameIDPolicy.Format
+		if requestedFormat != "" {
+			nameIDFormat = requestedFormat
 		}
-		docAssert = etree.NewDocument()
-		docAssert.ReadFromBytes(signedAssertBytes)
-		rootAssert = docAssert.Root()
 	}
 
-	var finalAssertionElement *etree.Element = rootAssert
+	var samlStatus saml.Status
+	var assertion *saml.Assertion
+	nameIDValue := subject
 
-	if sp.EncryptAssertion && sp.SPCertificate != "" {
-		block, _ := pem.Decode([]byte(sp.SPCertificate))
-		if block != nil {
-			spCert, err := x509.ParseCertificate(block.Bytes)
-			if err == nil {
-				assertBytesToEncrypt, _ := docAssert.WriteToBytes()
-				encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
-				if err != nil {
-					return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+	switch nameIDFormat {
+	case string(saml.EmailAddressNameIDFormat):
+		email, ok := userAttributes["email"].(string)
+		if !ok || email == "" {
+			samlStatus = saml.Status{
+				StatusCode: saml.StatusCode{
+					Value: saml.StatusRequester,
+					StatusCode: &saml.StatusCode{
+						Value: "urn:oasis:names:tc:SAML:2.0:status:InvalidNameIDPolicy",
+					},
+				},
+				StatusMessage: &saml.StatusMessage{
+					Value: "Required email address is missing for the user",
+				},
+			}
+		} else {
+			nameIDValue = email
+		}
+
+	case string(saml.TransientNameIDFormat):
+		nameIDValue = uuid.New().String()
+	}
+
+	if samlStatus.StatusCode.Value == "" {
+		samlStatus = saml.Status{
+			StatusCode: saml.StatusCode{
+				Value: saml.StatusSuccess,
+			},
+		}
+
+		assertion = &saml.Assertion{
+			ID:           fmt.Sprintf("id-%d", now.UnixNano()),
+			IssueInstant: now,
+			Version:      "2.0",
+			Issuer: saml.Issuer{
+				Value: idp.MetadataURL.String(),
+			},
+			Subject: &saml.Subject{
+				NameID: &saml.NameID{
+					Format: nameIDFormat,
+					Value:  nameIDValue,
+				},
+				SubjectConfirmations: []saml.SubjectConfirmation{
+					{
+						Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+						SubjectConfirmationData: &saml.SubjectConfirmationData{
+							InResponseTo: authReq.ID,
+							NotOnOrAfter: now.Add(5 * time.Minute),
+							Recipient:    authReq.AssertionConsumerServiceURL,
+						},
+					},
+				},
+			},
+			Conditions: &saml.Conditions{
+				NotBefore:    now.Add(-5 * time.Minute),
+				NotOnOrAfter: now.Add(5 * time.Minute),
+				AudienceRestrictions: []saml.AudienceRestriction{
+					{
+						Audience: saml.Audience{Value: authReq.Issuer.Value},
+					},
+				},
+			},
+			AuthnStatements: []saml.AuthnStatement{
+				{
+					AuthnInstant: now,
+					SessionIndex: fmt.Sprintf("id-%d", now.UnixNano()),
+					AuthnContext: saml.AuthnContext{
+						AuthnContextClassRef: &saml.AuthnContextClassRef{
+							Value: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+						},
+					},
+				},
+			},
+			AttributeStatements: []saml.AttributeStatement{
+				{
+					Attributes: []saml.Attribute{},
+				},
+			},
+		}
+
+		for k, v := range userAttributes {
+			var attrValues []saml.AttributeValue
+
+			switch val := v.(type) {
+			case []string:
+				for _, item := range val {
+					attrValues = append(attrValues, saml.AttributeValue{
+						Type:  "xs:string",
+						Value: item,
+					})
 				}
-				finalAssertionElement = encryptedElem
+			case []interface{}:
+				for _, item := range val {
+					attrValues = append(attrValues, saml.AttributeValue{
+						Type:  "xs:string",
+						Value: fmt.Sprintf("%v", item),
+					})
+				}
+			default:
+				attrValues = append(attrValues, saml.AttributeValue{
+					Type:  "xs:string",
+					Value: fmt.Sprintf("%v", val),
+				})
+			}
+
+			assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, saml.Attribute{
+				Name:       k,
+				NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
+				Values:     attrValues,
+			})
+		}
+	}
+
+	var finalAssertionElement *etree.Element
+
+	if assertion != nil {
+		assertBytes, err := xml.Marshal(assertion)
+		if err != nil {
+			return "", err
+		}
+		docAssert := etree.NewDocument()
+		if err := docAssert.ReadFromBytes(assertBytes); err != nil {
+			return "", fmt.Errorf("failed to parse assertion xml: %w", err)
+		}
+		rootAssert := docAssert.Root()
+
+		if sp.SignAssertion {
+			signedAssertBytes, err := s.signElementXML(assertBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+			if err != nil {
+				return "", fmt.Errorf("failed to sign assertion: %w", err)
+			}
+			docAssert = etree.NewDocument()
+			docAssert.ReadFromBytes(signedAssertBytes)
+			rootAssert = docAssert.Root()
+		}
+
+		finalAssertionElement = rootAssert
+
+		if sp.EncryptAssertion && sp.SPCertificate != "" {
+			block, _ := pem.Decode([]byte(sp.SPCertificate))
+			if block != nil {
+				spCert, err := x509.ParseCertificate(block.Bytes)
+				if err == nil {
+					assertBytesToEncrypt, _ := docAssert.WriteToBytes()
+					encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
+					if err != nil {
+						return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+					}
+					finalAssertionElement = encryptedElem
+				}
 			}
 		}
 	}
@@ -497,24 +574,23 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		Issuer: &saml.Issuer{
 			Value: idp.MetadataURL.String(),
 		},
-		Status: saml.Status{
-			StatusCode: saml.StatusCode{
-				Value: saml.StatusSuccess,
-			},
-		},
+		Status: samlStatus,
 	}
 
-	response.Assertion = nil
 	respBytes, err := xml.Marshal(response)
 	if err != nil {
 		return "", err
 	}
 
 	docResp := etree.NewDocument()
-	docResp.ReadFromBytes(respBytes)
+	if err := docResp.ReadFromBytes(respBytes); err != nil {
+		return "", fmt.Errorf("failed to parse response xml: %w", err)
+	}
 	rootResp := docResp.Root()
 
-	rootResp.AddChild(finalAssertionElement)
+	if finalAssertionElement != nil {
+		rootResp.AddChild(finalAssertionElement)
+	}
 
 	finalXMLBytes, err := docResp.WriteToBytes()
 	if err != nil {
@@ -533,7 +609,10 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 }
 
 func buildHTMLForm(acsURL, b64Resp, relayState string) string {
-	return fmt.Sprintf(`<!DOCTYPE html><html><body onload="document.forms[0].submit()"><form method="post" action="%s"><input type="hidden" name="SAMLResponse" value="%s" /><input type="hidden" name="RelayState" value="%s" /><noscript><input type="submit" value="Continue" /></noscript></form></body></html>`, acsURL, b64Resp, relayState)
+	return fmt.Sprintf(`<!DOCTYPE html><html><body onload="document.forms[0].submit()"><form method="post" action="%s"><input type="hidden" name="SAMLResponse" value="%s" /><input type="hidden" name="RelayState" value="%s" /><noscript><input type="submit" value="Continue" /></noscript></form></body></html>`,
+		html.EscapeString(acsURL),
+		b64Resp,
+		html.EscapeString(relayState))
 }
 
 func encryptAssertionBytes(assertionXML []byte, cert *x509.Certificate) (*etree.Element, error) {
@@ -671,6 +750,19 @@ func (s *Service) RegisterConnection(ctx context.Context, tenantID, name, metada
 		TenantID: tenantID, Name: name, IdpMetadataXML: metadataXML, IdpEntityID: meta.EntityID, Active: true,
 	}
 	return conn, s.Repo.CreateConnection(ctx, conn)
+}
+
+func (m *PersistentAssertionMaker) MakeAssertion(req *crewjamsaml.IdpAuthnRequest, session *crewjamsaml.Session) error {
+	err := m.DefaultAssertionMaker.MakeAssertion(req, session)
+	if err != nil {
+		return err
+	}
+
+	if req.Assertion != nil && req.Assertion.Subject != nil && req.Assertion.Subject.NameID != nil {
+		req.Assertion.Subject.NameID.Format = string(crewjamsaml.PersistentNameIDFormat)
+	}
+
+	return nil
 }
 
 func (s *Service) generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error) {

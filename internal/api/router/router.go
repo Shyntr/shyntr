@@ -29,7 +29,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(db)
 	oauthHandler := handlers.NewOAuth2Handler(authProvider, db, km, cfg)
-	loginHandler := handlers.NewLoginHandler(db)
+	loginHandler := handlers.NewLoginHandler(cfg, db)
 	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 	mgmtHandler := handlers.NewManagementHandler(db, authProvider.Config)
@@ -78,6 +78,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
 		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 		rootSamlGroup.POST("/idp/sso", samlHandler.IDPSSO)
+		rootSamlGroup.GET("/resume", samlHandler.ResumeSAML)
 	}
 
 	// OAuth2 Routes

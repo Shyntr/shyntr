@@ -1,0 +1,23 @@
+services:
+  keycloak:
+    image: keycloak/keycloak:26.4.6
+    command:
+      start-dev
+    ports:
+      - "8282:8080"
+    extra_hosts:
+      - "dev.net:192.168.65.2"
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      - KC_HTTP_ENABLED=true
+      - KC_HOSTNAME_STRICT=false
+      - KC_LOG_LEVEL_ORG_KEYCLOAK=trace
+    networks:
+      shyntr-net:
+        aliases:
+          - keycloak
+
+networks:
+  shyntr-net:
+    driver: bridge

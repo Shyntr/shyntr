@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"gorm.io/gorm"
 )
 
 type LoginHandler struct {
-	DB *gorm.DB
+	Config *config.Config
+	DB     *gorm.DB
 }
 
-func NewLoginHandler(db *gorm.DB) *LoginHandler {
-	return &LoginHandler{DB: db}
+func NewLoginHandler(cfg *config.Config, db *gorm.DB) *LoginHandler {
+	return &LoginHandler{Config: cfg, DB: db}
 }
 
 func (h *LoginHandler) ShowLogin(c *gin.Context) {
@@ -59,6 +61,7 @@ func (h *LoginHandler) SubmitLogin(c *gin.Context) {
 		return
 	}
 
+	//TODO This will used to test before the first release will be removed.
 	if req.Username == "admin" && req.Password == "password" {
 		loginReq.Authenticated = true
 		loginReq.Subject = "user-admin-123"
@@ -129,7 +132,7 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 			ID:       conn.ID,
 			Type:     "saml",
 			Name:     conn.Name,
-			LoginURL: "/saml/login/" + conn.ID + "?login_challenge=" + challenge,
+			LoginURL: h.Config.BaseIssuerURL + "/t/" + tenantID + "/saml/login/" + conn.ID + "?login_challenge=" + challenge,
 		})
 	}
 
@@ -138,7 +141,7 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 			ID:       conn.ID,
 			Type:     "oidc",
 			Name:     conn.Name,
-			LoginURL: "/t/" + tenantID + "/oidc/login/" + conn.ID + "?login_challenge=" + challenge,
+			LoginURL: h.Config.BaseIssuerURL + "/t/" + tenantID + "/oidc/login/" + conn.ID + "?login_challenge=" + challenge,
 		})
 	}
 

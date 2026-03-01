@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/handlers"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,8 @@ func setupLoginAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		Active:   true,
 	})
 
-	handler := handlers.NewLoginHandler(db)
+	cfg := &config.Config{CookieSecure: false}
+	handler := handlers.NewLoginHandler(cfg, db)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

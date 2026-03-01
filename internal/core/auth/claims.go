@@ -28,6 +28,16 @@ func MapClaims(subject string, contextMap map[string]interface{}, scopes []strin
 	}
 
 	for key, value := range contextMap {
+		if key == "login_claims" {
+			if loginClaims, ok := value.(map[string]interface{}); ok {
+				for lcKey, lcVal := range loginClaims {
+					if allowedKeys[lcKey] {
+						finalClaims[lcKey] = lcVal
+					}
+				}
+			}
+			continue
+		}
 		if allowedKeys[key] {
 			finalClaims[key] = value
 		}

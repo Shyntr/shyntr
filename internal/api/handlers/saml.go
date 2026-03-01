@@ -115,17 +115,20 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 
 	rawAttributes := make(map[string]interface{})
+	tempAttributes := make(map[string][]string)
+
 	for _, statement := range assertion.AttributeStatements {
 		for _, attr := range statement.Attributes {
-			if len(attr.Values) > 1 {
-				vals := make([]string, len(attr.Values))
-				for i, v := range attr.Values {
-					vals[i] = v.Value
-				}
-				rawAttributes[attr.Name] = vals
-			} else if len(attr.Values) == 1 {
-				rawAttributes[attr.Name] = attr.Values[0].Value
+			for _, val := range attr.Values {
+				tempAttributes[attr.Name] = append(tempAttributes[attr.Name], val.Value)
 			}
+		}
+	}
+	for name, values := range tempAttributes {
+		if len(values) == 1 {
+			rawAttributes[name] = values[0]
+		} else if len(values) > 1 {
+			rawAttributes[name] = values
 		}
 	}
 
@@ -142,7 +145,6 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 
 	subject := assertion.Subject.NameID.Value
-	finalAttributes["email"] = subject
 	finalAttributes["sub"] = subject
 	finalAttributes["source"] = "saml"
 	finalAttributes["issuer"] = issuer
@@ -208,6 +210,15 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 	}
 
 	metaDesc := idp.Metadata()
+
+	if len(metaDesc.IDPSSODescriptors) > 0 {
+		metaDesc.IDPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
+			crewjamsaml.PersistentNameIDFormat,
+			crewjamsaml.EmailAddressNameIDFormat,
+			crewjamsaml.UnspecifiedNameIDFormat,
+			crewjamsaml.TransientNameIDFormat,
+		}
+	}
 
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
