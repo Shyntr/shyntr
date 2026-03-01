@@ -52,6 +52,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.BlacklistedJTI{},
 		&models.Webhook{},
 		&models.WebhookEvent{},
+		&models.AuditLog{},
 	); err != nil {
 		return err
 	}

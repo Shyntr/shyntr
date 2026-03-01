@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -374,29 +375,77 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) Logout(c *gin.Context) {
-	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
-
 	postLogoutRedirectURI := c.Query("post_logout_redirect_uri")
 	idTokenHint := c.Query("id_token_hint")
 	state := c.Query("state")
 
-	if postLogoutRedirectURI == "" {
-		c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out."})
-		return
-	}
+	var subject string
+	var idTokenAudience string
 
-	isValidRedirect := false
 	if idTokenHint != "" {
 		token, err := jwt.ParseSigned(idTokenHint)
 		if err == nil {
 			claims := &jwt.Claims{}
-			if err := token.UnsafeClaimsWithoutVerification(claims); err == nil && len(claims.Audience) > 0 {
-				var client models.OAuth2Client
-				if err := h.DB.First(&client, "id = ?", claims.Audience[0]).Error; err == nil {
-					for _, uri := range client.PostLogoutRedirectURIs {
-						if uri == postLogoutRedirectURI {
-							isValidRedirect = true
-							break
+			if err := token.UnsafeClaimsWithoutVerification(claims); err == nil {
+				subject = claims.Subject
+				if len(claims.Audience) > 0 {
+					idTokenAudience = claims.Audience[0]
+				}
+			}
+		}
+	}
+	if subject == "" {
+		sessionCookie, _ := c.Cookie(consts.SessionCookieName)
+		subject = sessionCookie
+	}
+
+	// 3. Open Redirect (Zararlı Yönlendirme) Koruması
+	isValidRedirect := false
+	if postLogoutRedirectURI != "" {
+		if idTokenAudience != "" {
+			var client models.OAuth2Client
+			if err := h.DB.First(&client, "id = ?", idTokenAudience).Error; err == nil {
+				for _, uri := range client.PostLogoutRedirectURIs {
+					if uri == postLogoutRedirectURI {
+						isValidRedirect = true
+						break
+					}
+				}
+			}
+		}
+	} else {
+		isValidRedirect = true
+	}
+
+	finalRedirect := postLogoutRedirectURI
+	if isValidRedirect && finalRedirect != "" && state != "" {
+		sep := "?"
+		if strings.Contains(finalRedirect, "?") {
+			sep = "&"
+		}
+		finalRedirect += sep + "state=" + state
+	}
+
+	if !isValidRedirect && postLogoutRedirectURI != "" {
+		c.JSON(http.StatusOK, gin.H{"message": "Logged out locally (Redirect blocked due to validation failure)"})
+		return
+	}
+
+	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
+	if subject != "" {
+		h.DB.Where("subject = ?", subject).Delete(&models.OAuth2Session{})
+	}
+
+	var idpSource string
+	if subject != "" {
+		var lastLogin models.LoginRequest
+		if err := h.DB.Order("updated_at desc").Where("subject = ? AND authenticated = ?", subject, true).First(&lastLogin).Error; err == nil {
+			if len(lastLogin.Context) > 0 {
+				var ctxData map[string]interface{}
+				if err := json.Unmarshal(lastLogin.Context, &ctxData); err == nil {
+					if loginClaims, ok := ctxData["login_claims"].(map[string]interface{}); ok {
+						if idp, ok := loginClaims["idp"].(string); ok {
+							idpSource = idp
 						}
 					}
 				}
@@ -404,17 +453,45 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 		}
 	}
 
-	if isValidRedirect {
-		if state != "" {
-			sep := "?"
-			if strings.Contains(postLogoutRedirectURI, "?") {
-				sep = "&"
+	if idpSource != "" && idpSource != "local" {
+		parts := strings.Split(idpSource, ":")
+		if len(parts) == 2 {
+			protocol := parts[0]
+			connectionID := parts[1]
+
+			if protocol == "oidc" {
+				var conn models.OIDCConnection
+				if err := h.DB.First(&conn, "id = ?", connectionID).Error; err == nil && conn.EndSessionEndpoint != "" {
+					logoutURL := conn.EndSessionEndpoint
+					if finalRedirect != "" {
+						logoutURL = fmt.Sprintf("%s?post_logout_redirect_uri=%s", conn.EndSessionEndpoint, url.QueryEscape(finalRedirect))
+					}
+					c.Redirect(http.StatusFound, logoutURL)
+					return
+				}
+			} else if protocol == "saml" {
+				relayParam := ""
+				if finalRedirect != "" {
+					relayParam = "&RelayState=" + url.QueryEscape(finalRedirect)
+				}
+
+				tID := c.Param("tenant_id")
+				if tID == "" {
+					tID = h.Config.DefaultTenantID
+				}
+
+				redirectURL := fmt.Sprintf("%s/t/%s/saml/sp/slo/initiate?connection_id=%s%s",
+					h.Config.BaseIssuerURL, tID, connectionID, relayParam)
+				c.Redirect(http.StatusFound, redirectURL)
+				return
 			}
-			postLogoutRedirectURI += sep + "state=" + state
 		}
-		c.Redirect(http.StatusFound, postLogoutRedirectURI)
+	}
+
+	if finalRedirect != "" {
+		c.Redirect(http.StatusFound, finalRedirect)
 	} else {
-		c.JSON(http.StatusOK, gin.H{"message": "Logged out (Redirect blocked due to validation failure)"})
+		c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out."})
 	}
 }
 

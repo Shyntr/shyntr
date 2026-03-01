@@ -14,6 +14,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -299,6 +300,67 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
+func (h *SAMLHandler) IDPSLO(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		tenantID = h.Service.Config.DefaultTenantID
+	}
+
+	logoutReq, err := h.Service.ParseLogoutRequest(c.Request)
+	if err != nil {
+		logger.FromGin(c).Error("Invalid SLO Request", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_logout_request"})
+		return
+	}
+
+	var spClient models.SAMLClient
+	if err := h.DB.Where("entity_id = ? AND tenant_id = ?", logoutReq.Issuer.Value, tenantID).First(&spClient).Error; err != nil {
+		logger.FromGin(c).Warn("Unknown SP in SLO", zap.String("entity_id", logoutReq.Issuer.Value))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "unknown_sp"})
+		return
+	}
+
+	if spClient.SLOURL == "" {
+		logger.FromGin(c).Warn("SP does not have SLO URL configured", zap.String("entity_id", spClient.EntityID))
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "sp_slo_not_configured"})
+		return
+	}
+
+	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Service.Config.CookieSecure, true)
+
+	if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
+		subject := logoutReq.NameID.Value
+
+		err := h.DB.Where("subject = ? AND tenant_id = ?", subject, tenantID).
+			Delete(&models.OAuth2Session{}).Error
+
+		if err != nil {
+			logger.FromGin(c).Warn("Failed to delete user Fosite sessions during SLO",
+				zap.String("subject", subject),
+				zap.Error(err))
+		} else {
+			logger.FromGin(c).Info("Successfully revoked OAuth2 sessions during SAML SLO",
+				zap.String("subject", subject))
+		}
+	} else {
+		logger.FromGin(c).Warn("No NameID found in LogoutRequest, skipping OAuth2 session revocation")
+	}
+
+	relayState := c.Query("RelayState")
+	if relayState == "" {
+		relayState = c.PostForm("RelayState")
+	}
+
+	htmlForm, err := h.Service.GenerateLogoutResponse(c.Request.Context(), tenantID, logoutReq, &spClient, relayState)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed_to_generate_response"})
+		return
+	}
+
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, htmlForm)
+}
+
 func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
@@ -387,4 +449,46 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 
 	c.Header("Content-Type", "text/html")
 	c.String(http.StatusOK, htmlResponse)
+}
+
+func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	connectionID := c.Query("connection_id")
+	relayState := c.Query("RelayState")
+
+	var conn models.SAMLConnection
+	if err := h.DB.First(&conn, "id = ? AND tenant_id = ?", connectionID, tenantID).Error; err != nil {
+		logger.FromGin(c).Error("SAML Connection not found for SLO", zap.Error(err))
+		if relayState != "" {
+			c.Redirect(http.StatusFound, relayState)
+		}
+		return
+	}
+
+	sp, err := h.Service.GetServiceProvider(c.Request, conn.IdpEntityID)
+	if err != nil {
+		logger.FromGin(c).Error("Failed to build SP for SLO", zap.Error(err))
+		if relayState != "" {
+			c.Redirect(http.StatusFound, relayState)
+		}
+		return
+	}
+
+	subject := "unknown-user"
+	sessionCookie, _ := c.Cookie(consts.SessionCookieName)
+	if sessionCookie != "" {
+		subject = sessionCookie
+	}
+
+	redirectURL, err := h.Service.BuildSPLogoutRedirectURL(sp, subject, relayState)
+	if err != nil {
+		logger.FromGin(c).Warn("Failed to build SP Logout Request, falling back to basic relay", zap.Error(err))
+		if relayState != "" {
+			c.Redirect(http.StatusFound, relayState)
+		} else {
+			c.JSON(http.StatusOK, gin.H{"message": "Logged out locally. Upstream logout not supported by IdP."})
+		}
+		return
+	}
+	c.Redirect(http.StatusFound, redirectURL)
 }

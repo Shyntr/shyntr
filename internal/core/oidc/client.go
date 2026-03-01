@@ -49,6 +49,7 @@ func (s *ClientService) InitiateAuth(ctx context.Context, tenantID, connectionID
 		conn.TokenEndpoint = discovered.TokenEndpoint
 		conn.UserInfoEndpoint = discovered.UserInfoEndpoint
 		conn.JWKSURI = discovered.JWKSURI
+		conn.EndSessionEndpoint = discovered.EndSessionEndpoint
 	}
 
 	redirectURL := fmt.Sprintf("%s/t/%s/oidc/callback", s.Config.BaseIssuerURL, tenantID)
@@ -154,6 +155,7 @@ func (s *ClientService) ExchangeAndUserInfo(ctx context.Context, tenantID, code,
 
 type oidcDiscovery struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	EndSessionEndpoint    string `json:"end_session_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
 	JWKSURI               string `json:"jwks_uri"`

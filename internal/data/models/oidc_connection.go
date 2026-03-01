@@ -18,6 +18,7 @@ type OIDCConnection struct {
 	ClientID              string                          `gorm:"not null" json:"client_id"`
 	ClientSecret          string                          `gorm:"not null" json:"client_secret"`
 	AuthorizationEndpoint string                          `json:"authorization_endpoint"`
+	EndSessionEndpoint    string                          `json:"end_session_endpoint"`
 	TokenEndpoint         string                          `json:"token_endpoint"`
 	UserInfoEndpoint      string                          `json:"user_info_endpoint"`
 	JWKSURI               string                          `json:"jwks_uri"`

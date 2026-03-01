@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/crewjam/saml"
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/google/uuid"
 	"github.com/nevzatcirak/shyntr/config"
@@ -61,7 +60,7 @@ func NewService(repo *repository.SAMLRepository, km *auth.KeyManager, cfg *confi
 	}
 }
 
-func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, conn *models.SAMLConnection) (*saml.ServiceProvider, error) {
+func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, conn *models.SAMLConnection) (*crewjamsaml.ServiceProvider, error) {
 	baseURLStr := fmt.Sprintf("%s/t/%s/saml", s.Config.BaseIssuerURL, tenantID)
 
 	metadataURL, _ := url.Parse(baseURLStr + "/sp/metadata")
@@ -81,15 +80,7 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse connection private key: %w", err)
 		}
-		if conn.SPCertificate == "" {
-			cert, err = s.generateSelfSignedCert(privKey)
-		} else {
-			block, _ := pem.Decode([]byte(conn.SPCertificate))
-			if block == nil {
-				return nil, errors.New("failed to decode connection cert PEM")
-			}
-			cert, err = x509.ParseCertificate(block.Bytes)
-		}
+		cert, err = s.generateSelfSignedCert(privKey)
 	} else {
 		privKey = s.KeyMgr.GetActivePrivateKey()
 		cert, err = s.generateSelfSignedCert(privKey)
@@ -99,14 +90,14 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 		return nil, fmt.Errorf("failed to prepare certs: %w", err)
 	}
 
-	sp := &saml.ServiceProvider{
+	sp := &crewjamsaml.ServiceProvider{
 		EntityID:          baseURLStr,
 		Key:               privKey,
 		Certificate:       cert,
 		MetadataURL:       *metadataURL,
 		AcsURL:            *acsURL,
 		SloURL:            *sloURL,
-		IDPMetadata:       &saml.EntityDescriptor{},
+		IDPMetadata:       &crewjamsaml.EntityDescriptor{},
 		AllowIDPInitiated: true,
 		SignatureMethod:   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
 	}
@@ -133,16 +124,54 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 		return "", "", err
 	}
 
-	idpMetadata := &saml.EntityDescriptor{}
-	if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), idpMetadata); err != nil {
-		return "", "", fmt.Errorf("invalid idp metadata xml: %w", err)
-	}
-	sp.IDPMetadata = idpMetadata
+	if conn.IdpMetadataXML != "" {
+		idpMetadata := &crewjamsaml.EntityDescriptor{}
+		if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), idpMetadata); err == nil {
+			sp.IDPMetadata = idpMetadata
+		}
+	} else if conn.IdpCertificate != "" {
+		idpDescriptor := &crewjamsaml.EntityDescriptor{
+			EntityID: conn.IdpEntityID,
+			IDPSSODescriptors: []crewjamsaml.IDPSSODescriptor{
+				{
+					SingleSignOnServices: []crewjamsaml.Endpoint{
+						{Binding: crewjamsaml.HTTPRedirectBinding, Location: conn.IdpSingleSignOn},
+					},
+				},
+			},
+		}
 
-	binding := saml.HTTPRedirectBinding
+		if block, _ := pem.Decode([]byte(conn.IdpCertificate)); block != nil {
+			idpDescriptor.IDPSSODescriptors[0].KeyDescriptors = append(
+				idpDescriptor.IDPSSODescriptors[0].KeyDescriptors,
+				crewjamsaml.KeyDescriptor{
+					Use: "signing",
+					KeyInfo: crewjamsaml.KeyInfo{
+						X509Data: crewjamsaml.X509Data{X509Certificates: []crewjamsaml.X509Certificate{{Data: base64.StdEncoding.EncodeToString(block.Bytes)}}},
+					},
+				},
+			)
+		}
+
+		if block, _ := pem.Decode([]byte(conn.IdpEncryptionCertificate)); block != nil {
+			idpDescriptor.IDPSSODescriptors[0].KeyDescriptors = append(
+				idpDescriptor.IDPSSODescriptors[0].KeyDescriptors,
+				crewjamsaml.KeyDescriptor{
+					Use: "encryption",
+					KeyInfo: crewjamsaml.KeyInfo{
+						X509Data: crewjamsaml.X509Data{X509Certificates: []crewjamsaml.X509Certificate{{Data: base64.StdEncoding.EncodeToString(block.Bytes)}}},
+					},
+				},
+			)
+		}
+
+		sp.IDPMetadata = idpDescriptor
+	}
+
+	binding := crewjamsaml.HTTPRedirectBinding
 	ssoURL := sp.GetSSOBindingLocation(binding)
 	if ssoURL == "" {
-		binding = saml.HTTPPostBinding
+		binding = crewjamsaml.HTTPPostBinding
 		ssoURL = sp.GetSSOBindingLocation(binding)
 	}
 
@@ -155,7 +184,7 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	if binding == saml.HTTPRedirectBinding {
+	if binding == crewjamsaml.HTTPRedirectBinding {
 		redirectURL, err := req.Redirect(relayState, sp)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to generate redirect url: %w", err)
@@ -166,7 +195,7 @@ func (s *Service) InitiateSSO(ctx context.Context, tenantID, connectionID, relay
 	return string(req.Post(relayState)), req.ID, nil
 }
 
-func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Request, possibleRequestID string) (*saml.Assertion, string, error) {
+func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Request, possibleRequestID string) (*crewjamsaml.Assertion, string, error) {
 	sp, err := s.BuildServiceProvider(ctx, tenantID, nil)
 	if err != nil {
 		return nil, "", err
@@ -201,11 +230,49 @@ func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Requ
 		return nil, "", fmt.Errorf("unknown idp issuer '%s': %w", issuer, err)
 	}
 
-	idpMetadata := &saml.EntityDescriptor{}
-	if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), idpMetadata); err != nil {
-		return nil, "", fmt.Errorf("invalid stored metadata: %w", err)
+	if conn.IdpMetadataXML != "" {
+		idpMetadata := &crewjamsaml.EntityDescriptor{}
+		if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), idpMetadata); err == nil {
+			sp.IDPMetadata = idpMetadata
+		}
+	} else if conn.IdpCertificate != "" {
+		idpDescriptor := &crewjamsaml.EntityDescriptor{
+			EntityID: conn.IdpEntityID,
+			IDPSSODescriptors: []crewjamsaml.IDPSSODescriptor{
+				{
+					SingleSignOnServices: []crewjamsaml.Endpoint{
+						{Binding: crewjamsaml.HTTPRedirectBinding, Location: conn.IdpSingleSignOn},
+					},
+				},
+			},
+		}
+
+		if block, _ := pem.Decode([]byte(conn.IdpCertificate)); block != nil {
+			idpDescriptor.IDPSSODescriptors[0].KeyDescriptors = append(
+				idpDescriptor.IDPSSODescriptors[0].KeyDescriptors,
+				crewjamsaml.KeyDescriptor{
+					Use: "signing",
+					KeyInfo: crewjamsaml.KeyInfo{
+						X509Data: crewjamsaml.X509Data{X509Certificates: []crewjamsaml.X509Certificate{{Data: base64.StdEncoding.EncodeToString(block.Bytes)}}},
+					},
+				},
+			)
+		}
+
+		if block, _ := pem.Decode([]byte(conn.IdpEncryptionCertificate)); block != nil {
+			idpDescriptor.IDPSSODescriptors[0].KeyDescriptors = append(
+				idpDescriptor.IDPSSODescriptors[0].KeyDescriptors,
+				crewjamsaml.KeyDescriptor{
+					Use: "encryption",
+					KeyInfo: crewjamsaml.KeyInfo{
+						X509Data: crewjamsaml.X509Data{X509Certificates: []crewjamsaml.X509Certificate{{Data: base64.StdEncoding.EncodeToString(block.Bytes)}}},
+					},
+				},
+			)
+		}
+
+		sp.IDPMetadata = idpDescriptor
 	}
-	sp.IDPMetadata = idpMetadata
 
 	knownIDs := []string{}
 	if possibleRequestID != "" {
@@ -225,11 +292,12 @@ func (s *Service) HandleACS(ctx context.Context, tenantID string, req *http.Requ
 	return assertion, relayState, nil
 }
 
-func (s *Service) GetIdentityProvider(ctx context.Context, tenantID string) (*saml.IdentityProvider, error) {
+func (s *Service) GetIdentityProvider(ctx context.Context, tenantID string) (*crewjamsaml.IdentityProvider, error) {
 	baseURLStr := fmt.Sprintf("%s/t/%s/saml", s.Config.BaseIssuerURL, tenantID)
 
 	metadataURL, _ := url.Parse(baseURLStr + "/idp/metadata")
 	ssoURL, _ := url.Parse(baseURLStr + "/idp/sso")
+	logoutURL, _ := url.Parse(baseURLStr + "/idp/slo")
 
 	privKey := s.KeyMgr.GetActivePrivateKey()
 	cert, err := s.generateSelfSignedCert(privKey)
@@ -237,11 +305,12 @@ func (s *Service) GetIdentityProvider(ctx context.Context, tenantID string) (*sa
 		return nil, fmt.Errorf("failed to generate idp cert: %w", err)
 	}
 
-	idp := &saml.IdentityProvider{
+	idp := &crewjamsaml.IdentityProvider{
 		Key:                     privKey,
 		Certificate:             cert,
 		MetadataURL:             *metadataURL,
 		SSOURL:                  *ssoURL,
+		LogoutURL:               *logoutURL,
 		SignatureMethod:         "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
 		ServiceProviderProvider: s,
 		AssertionMaker:          &PersistentAssertionMaker{},
@@ -250,25 +319,25 @@ func (s *Service) GetIdentityProvider(ctx context.Context, tenantID string) (*sa
 	return idp, nil
 }
 
-func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) (*saml.EntityDescriptor, error) {
+func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) (*crewjamsaml.EntityDescriptor, error) {
 	var samlClient models.SAMLClient
 	if err := s.Repo.DB.Where("entity_id = ?", serviceProviderID).First(&samlClient).Error; err != nil {
 		return nil, fmt.Errorf("service provider not found: %s", serviceProviderID)
 	}
 
-	spMetadata := &saml.EntityDescriptor{
+	spMetadata := &crewjamsaml.EntityDescriptor{
 		EntityID: serviceProviderID,
-		SPSSODescriptors: []saml.SPSSODescriptor{
+		SPSSODescriptors: []crewjamsaml.SPSSODescriptor{
 			{
-				SSODescriptor: saml.SSODescriptor{
-					RoleDescriptor: saml.RoleDescriptor{
+				SSODescriptor: crewjamsaml.SSODescriptor{
+					RoleDescriptor: crewjamsaml.RoleDescriptor{
 						ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
-						KeyDescriptors:             []saml.KeyDescriptor{},
+						KeyDescriptors:             []crewjamsaml.KeyDescriptor{},
 					},
 				},
-				AssertionConsumerServices: []saml.IndexedEndpoint{
+				AssertionConsumerServices: []crewjamsaml.IndexedEndpoint{
 					{
-						Binding:  saml.HTTPPostBinding,
+						Binding:  crewjamsaml.HTTPPostBinding,
 						Location: samlClient.ACSURL,
 						Index:    1,
 					},
@@ -277,32 +346,47 @@ func (s *Service) GetServiceProvider(r *http.Request, serviceProviderID string) 
 		},
 	}
 
+	encCert := samlClient.SPEncryptionCertificate
+	if encCert == "" {
+		encCert = samlClient.SPCertificate
+	}
+	if encCert != "" {
+		block, _ := pem.Decode([]byte(encCert))
+		if block != nil {
+			certStr := base64.StdEncoding.EncodeToString(block.Bytes)
+			keyDescriptor := crewjamsaml.KeyDescriptor{
+				Use: "encryption",
+				KeyInfo: crewjamsaml.KeyInfo{
+					X509Data: crewjamsaml.X509Data{
+						X509Certificates: []crewjamsaml.X509Certificate{{Data: certStr}},
+					},
+				},
+			}
+			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, keyDescriptor)
+		}
+	}
+
 	if samlClient.SPCertificate != "" {
 		block, _ := pem.Decode([]byte(samlClient.SPCertificate))
 		if block != nil {
 			certStr := base64.StdEncoding.EncodeToString(block.Bytes)
-			keyDescriptor := saml.KeyDescriptor{
-				Use: "encryption",
-				KeyInfo: saml.KeyInfo{
-					X509Data: saml.X509Data{
-						X509Certificates: []saml.X509Certificate{
-							{Data: certStr},
-						},
+			keyDescriptor := crewjamsaml.KeyDescriptor{
+				Use: "signing",
+				KeyInfo: crewjamsaml.KeyInfo{
+					X509Data: crewjamsaml.X509Data{
+						X509Certificates: []crewjamsaml.X509Certificate{{Data: certStr}},
 					},
 				},
 			}
 			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, keyDescriptor)
 
-			signingKey := keyDescriptor
-			signingKey.Use = "signing"
-			spMetadata.SPSSODescriptors[0].KeyDescriptors = append(spMetadata.SPSSODescriptors[0].KeyDescriptors, signingKey)
 		}
 	}
 
 	return spMetadata, nil
 }
 
-func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*saml.AuthnRequest, error) {
+func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*crewjamsaml.AuthnRequest, error) {
 	encodedReq := req.URL.Query().Get("SAMLRequest")
 	isRedirectBinding := encodedReq != ""
 
@@ -340,7 +424,7 @@ func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *h
 		xmlBytes = decoded
 	}
 
-	var authReq saml.AuthnRequest
+	var authReq crewjamsaml.AuthnRequest
 	if err := xml.Unmarshal(xmlBytes, &authReq); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal auth request: %w", err)
 	}
@@ -385,7 +469,7 @@ func (s *Service) ParseAuthnRequest(ctx context.Context, tenantID string, req *h
 	return &authReq, nil
 }
 
-func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *saml.AuthnRequest, sp *models.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error) {
+func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *models.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error) {
 	idp, err := s.GetIdentityProvider(ctx, tenantID)
 	if err != nil {
 		return "", err
@@ -399,7 +483,7 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		subject = v
 	}
 
-	nameIDFormat := string(saml.PersistentNameIDFormat)
+	nameIDFormat := string(crewjamsaml.PersistentNameIDFormat)
 	if authReq.NameIDPolicy != nil && authReq.NameIDPolicy.Format != nil {
 		requestedFormat := *authReq.NameIDPolicy.Format
 		if requestedFormat != "" {
@@ -407,22 +491,22 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 		}
 	}
 
-	var samlStatus saml.Status
-	var assertion *saml.Assertion
+	var samlStatus crewjamsaml.Status
+	var assertion *crewjamsaml.Assertion
 	nameIDValue := subject
 
 	switch nameIDFormat {
-	case string(saml.EmailAddressNameIDFormat):
+	case string(crewjamsaml.EmailAddressNameIDFormat):
 		email, ok := userAttributes["email"].(string)
 		if !ok || email == "" {
-			samlStatus = saml.Status{
-				StatusCode: saml.StatusCode{
-					Value: saml.StatusRequester,
-					StatusCode: &saml.StatusCode{
+			samlStatus = crewjamsaml.Status{
+				StatusCode: crewjamsaml.StatusCode{
+					Value: crewjamsaml.StatusRequester,
+					StatusCode: &crewjamsaml.StatusCode{
 						Value: "urn:oasis:names:tc:SAML:2.0:status:InvalidNameIDPolicy",
 					},
 				},
-				StatusMessage: &saml.StatusMessage{
+				StatusMessage: &crewjamsaml.StatusMessage{
 					Value: "Required email address is missing for the user",
 				},
 			}
@@ -430,14 +514,14 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 			nameIDValue = email
 		}
 
-	case string(saml.TransientNameIDFormat):
+	case string(crewjamsaml.TransientNameIDFormat):
 		nameIDValue = uuid.New().String()
 	}
 
 	if samlStatus.StatusCode.Value == "" {
-		samlStatus = saml.Status{
-			StatusCode: saml.StatusCode{
-				Value: saml.StatusSuccess,
+		samlStatus = crewjamsaml.Status{
+			StatusCode: crewjamsaml.StatusCode{
+				Value: crewjamsaml.StatusSuccess,
 			},
 		}
 
@@ -451,22 +535,22 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 			}
 		}
 
-		assertion = &saml.Assertion{
+		assertion = &crewjamsaml.Assertion{
 			ID:           fmt.Sprintf("id-%d", now.UnixNano()),
 			IssueInstant: now,
 			Version:      "2.0",
-			Issuer: saml.Issuer{
+			Issuer: crewjamsaml.Issuer{
 				Value: idp.MetadataURL.String(),
 			},
-			Subject: &saml.Subject{
-				NameID: &saml.NameID{
+			Subject: &crewjamsaml.Subject{
+				NameID: &crewjamsaml.NameID{
 					Format: nameIDFormat,
 					Value:  nameIDValue,
 				},
-				SubjectConfirmations: []saml.SubjectConfirmation{
+				SubjectConfirmations: []crewjamsaml.SubjectConfirmation{
 					{
 						Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
-						SubjectConfirmationData: &saml.SubjectConfirmationData{
+						SubjectConfirmationData: &crewjamsaml.SubjectConfirmationData{
 							InResponseTo: authReq.ID,
 							NotOnOrAfter: now.Add(5 * time.Minute),
 							Recipient:    authReq.AssertionConsumerServiceURL,
@@ -474,59 +558,59 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 					},
 				},
 			},
-			Conditions: &saml.Conditions{
+			Conditions: &crewjamsaml.Conditions{
 				NotBefore:    now.Add(-5 * time.Minute),
 				NotOnOrAfter: now.Add(5 * time.Minute),
-				AudienceRestrictions: []saml.AudienceRestriction{
+				AudienceRestrictions: []crewjamsaml.AudienceRestriction{
 					{
-						Audience: saml.Audience{Value: authReq.Issuer.Value},
+						Audience: crewjamsaml.Audience{Value: authReq.Issuer.Value},
 					},
 				},
 			},
-			AuthnStatements: []saml.AuthnStatement{
+			AuthnStatements: []crewjamsaml.AuthnStatement{
 				{
 					AuthnInstant: now,
 					SessionIndex: fmt.Sprintf("id-%d", now.UnixNano()),
-					AuthnContext: saml.AuthnContext{
-						AuthnContextClassRef: &saml.AuthnContextClassRef{
+					AuthnContext: crewjamsaml.AuthnContext{
+						AuthnContextClassRef: &crewjamsaml.AuthnContextClassRef{
 							Value: authnContextClass,
 						},
 					},
 				},
 			},
-			AttributeStatements: []saml.AttributeStatement{
+			AttributeStatements: []crewjamsaml.AttributeStatement{
 				{
-					Attributes: []saml.Attribute{},
+					Attributes: []crewjamsaml.Attribute{},
 				},
 			},
 		}
 
 		for k, v := range userAttributes {
-			var attrValues []saml.AttributeValue
+			var attrValues []crewjamsaml.AttributeValue
 
 			switch val := v.(type) {
 			case []string:
 				for _, item := range val {
-					attrValues = append(attrValues, saml.AttributeValue{
+					attrValues = append(attrValues, crewjamsaml.AttributeValue{
 						Type:  "xs:string",
 						Value: item,
 					})
 				}
 			case []interface{}:
 				for _, item := range val {
-					attrValues = append(attrValues, saml.AttributeValue{
+					attrValues = append(attrValues, crewjamsaml.AttributeValue{
 						Type:  "xs:string",
 						Value: fmt.Sprintf("%v", item),
 					})
 				}
 			default:
-				attrValues = append(attrValues, saml.AttributeValue{
+				attrValues = append(attrValues, crewjamsaml.AttributeValue{
 					Type:  "xs:string",
 					Value: fmt.Sprintf("%v", val),
 				})
 			}
 
-			assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, saml.Attribute{
+			assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, crewjamsaml.Attribute{
 				Name:       k,
 				NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
 				Values:     attrValues,
@@ -559,29 +643,36 @@ func (s *Service) GenerateSAMLResponse(ctx context.Context, tenantID string, aut
 
 		finalAssertionElement = rootAssert
 
-		if sp.EncryptAssertion && sp.SPCertificate != "" {
-			block, _ := pem.Decode([]byte(sp.SPCertificate))
-			if block != nil {
-				spCert, err := x509.ParseCertificate(block.Bytes)
-				if err == nil {
-					assertBytesToEncrypt, _ := docAssert.WriteToBytes()
-					encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
-					if err != nil {
-						return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+		if sp.EncryptAssertion {
+			targetCert := sp.SPEncryptionCertificate
+			if targetCert == "" {
+				targetCert = sp.SPCertificate
+			}
+
+			if targetCert != "" {
+				block, _ := pem.Decode([]byte(targetCert))
+				if block != nil {
+					spCert, err := x509.ParseCertificate(block.Bytes)
+					if err == nil {
+						assertBytesToEncrypt, _ := docAssert.WriteToBytes()
+						encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
+						if err != nil {
+							return "", fmt.Errorf("failed to encrypt assertion: %w", err)
+						}
+						finalAssertionElement = encryptedElem
 					}
-					finalAssertionElement = encryptedElem
 				}
 			}
 		}
 	}
 
-	response := &saml.Response{
+	response := &crewjamsaml.Response{
 		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
 		InResponseTo: authReq.ID,
 		IssueInstant: now,
 		Version:      "2.0",
 		Destination:  authReq.AssertionConsumerServiceURL,
-		Issuer: &saml.Issuer{
+		Issuer: &crewjamsaml.Issuer{
 			Value: idp.MetadataURL.String(),
 		},
 		Status: samlStatus,
@@ -752,7 +843,7 @@ func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {
 }
 
 func (s *Service) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*models.SAMLConnection, error) {
-	meta := &saml.EntityDescriptor{}
+	meta := &crewjamsaml.EntityDescriptor{}
 	if err := xml.Unmarshal([]byte(metadataXML), meta); err != nil {
 		return nil, err
 	}
@@ -773,6 +864,139 @@ func (m *PersistentAssertionMaker) MakeAssertion(req *crewjamsaml.IdpAuthnReques
 	}
 
 	return nil
+}
+
+func (s *Service) ParseLogoutRequest(req *http.Request) (*crewjamsaml.LogoutRequest, error) {
+	encoded := req.URL.Query().Get("SAMLRequest")
+	isRedirect := true
+	if encoded == "" {
+		encoded = req.PostFormValue("SAMLRequest")
+		isRedirect = false
+	}
+	if encoded == "" {
+		return nil, errors.New("missing SAMLRequest parameter for SLO")
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		unescaped, _ := url.QueryUnescape(encoded)
+		decoded, _ = base64.StdEncoding.DecodeString(unescaped)
+	}
+
+	var xmlBytes []byte
+	if isRedirect {
+		flater := flate.NewReader(bytes.NewReader(decoded))
+		xmlBytes, _ = io.ReadAll(flater)
+		err := flater.Close()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		xmlBytes = decoded
+	}
+
+	var logoutReq crewjamsaml.LogoutRequest
+	if err := xml.Unmarshal(xmlBytes, &logoutReq); err != nil {
+		return nil, err
+	}
+	return &logoutReq, nil
+}
+
+func (s *Service) GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *models.SAMLClient, relayState string) (string, error) {
+	idp, _ := s.GetIdentityProvider(ctx, tenantID)
+	now := time.Now()
+
+	resp := &crewjamsaml.LogoutResponse{
+		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
+		InResponseTo: req.ID,
+		IssueInstant: now,
+		Version:      "2.0",
+		Destination:  sp.SLOURL,
+		Issuer: &crewjamsaml.Issuer{
+			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
+			Value:  idp.MetadataURL.String(),
+		},
+		Status: crewjamsaml.Status{
+			StatusCode: crewjamsaml.StatusCode{
+				Value: crewjamsaml.StatusSuccess,
+			},
+		},
+	}
+
+	respBytes, _ := xml.Marshal(resp)
+	docResp := etree.NewDocument()
+	if err := docResp.ReadFromBytes(respBytes); err != nil {
+		return "", err
+	}
+	finalXMLBytes, _ := docResp.WriteToBytes()
+
+	if sp.SignResponse {
+		finalXMLBytes, _ = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+	}
+
+	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
+	return buildHTMLForm(sp.SLOURL, b64Resp, relayState), nil
+}
+
+func (s *Service) BuildSPLogoutRedirectURL(sp *crewjamsaml.EntityDescriptor, nameIDValue string, relayState string) (string, error) {
+	var sloURL string
+	if sp != nil && len(sp.IDPSSODescriptors) > 0 {
+		for _, slo := range sp.IDPSSODescriptors[0].SingleLogoutServices {
+			if slo.Binding == crewjamsaml.HTTPRedirectBinding {
+				sloURL = slo.Location
+				break
+			}
+		}
+	}
+
+	if sloURL == "" {
+		return "", errors.New("IdP metadata does not contain an HTTP-Redirect SingleLogoutService endpoint")
+	}
+
+	if nameIDValue == "" {
+		nameIDValue = "unknown"
+	}
+
+	now := time.Now().UTC()
+	req := &crewjamsaml.LogoutRequest{
+		ID:           "id-" + uuid.New().String(),
+		IssueInstant: now,
+		Version:      "2.0",
+		Destination:  sloURL,
+		Issuer: &crewjamsaml.Issuer{
+			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
+			Value:  sp.EntityID,
+		},
+		NameID: &crewjamsaml.NameID{
+			Format: "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+			Value:  nameIDValue,
+		},
+	}
+
+	reqBytes, err := xml.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+
+	var b bytes.Buffer
+	w, _ := flate.NewWriter(&b, flate.DefaultCompression)
+	w.Write(reqBytes)
+	w.Close()
+	encodedReq := base64.StdEncoding.EncodeToString(b.Bytes())
+
+	parsedURL, err := url.Parse(sloURL)
+	if err != nil {
+		return "", err
+	}
+
+	q := parsedURL.Query()
+	q.Set("SAMLRequest", encodedReq)
+	if relayState != "" {
+		q.Set("RelayState", relayState)
+	}
+	parsedURL.RawQuery = q.Encode()
+
+	return parsedURL.String(), nil
 }
 
 func (s *Service) generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error) {

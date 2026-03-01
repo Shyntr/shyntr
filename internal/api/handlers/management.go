@@ -8,6 +8,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/api/response"
+	shyntrsaml "github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
@@ -376,6 +377,63 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 	}
 	client.TenantID = realTenantID
 
+	if client.MetadataURL != "" {
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
+			return
+		}
+
+		if descriptor != nil {
+			if client.EntityID == "" {
+				client.EntityID = descriptor.EntityID
+			}
+
+			if len(descriptor.SPSSODescriptors) > 0 {
+				sp := descriptor.SPSSODescriptors[0]
+				if client.ACSURL == "" {
+					for _, acs := range sp.AssertionConsumerServices {
+						client.ACSURL = acs.Location
+						if acs.Binding == saml.HTTPPostBinding {
+							break
+						}
+					}
+				}
+				if client.SLOURL == "" {
+					for _, slo := range sp.SingleLogoutServices {
+						client.SLOURL = slo.Location
+						if slo.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				for _, kd := range sp.KeyDescriptors {
+					if len(kd.KeyInfo.X509Data.X509Certificates) > 0 {
+						certData := shyntrsaml.FormatCertificate(kd.KeyInfo.X509Data.X509Certificates[0].Data)
+
+						if kd.Use == "signing" || kd.Use == "" {
+							if client.SPCertificate == "" {
+								client.SPCertificate = certData
+							}
+						}
+
+						if kd.Use == "encryption" || kd.Use == "" {
+							if client.SPEncryptionCertificate == "" {
+								client.SPEncryptionCertificate = certData
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if client.EntityID == "" || client.ACSURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "entity_id and acs_url are required if metadata_url is not provided"})
+		return
+	}
+
 	if err := h.DB.Create(&client).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create SAML client", err))
 		return
@@ -392,26 +450,85 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 		return
 	}
 
+	client := models.SAMLClient{
+		Name:             req.Name,
+		EntityID:         req.EntityID,
+		TenantID:         req.TenantID,
+		ACSURL:           req.ACSURL,
+		SPCertificate:    req.SPCertificate,
+		AttributeMapping: req.AttributeMapping,
+		ForceAuthn:       req.ForceAuthn,
+		SignResponse:     req.SignResponse,
+		SignAssertion:    req.SignAssertion,
+		EncryptAssertion: req.EncryptAssertion,
+		Active:           req.Active,
+	}
+
+	if client.MetadataURL != "" {
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
+			return
+		}
+
+		if descriptor != nil {
+			if client.EntityID == "" {
+				client.EntityID = descriptor.EntityID
+			}
+
+			if len(descriptor.SPSSODescriptors) > 0 {
+				sp := descriptor.SPSSODescriptors[0]
+				if client.ACSURL == "" {
+					for _, acs := range sp.AssertionConsumerServices {
+						client.ACSURL = acs.Location
+						if acs.Binding == saml.HTTPPostBinding {
+							break
+						}
+					}
+				}
+				if client.SLOURL == "" {
+					for _, slo := range sp.SingleLogoutServices {
+						client.SLOURL = slo.Location
+						if slo.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				for _, kd := range sp.KeyDescriptors {
+					if len(kd.KeyInfo.X509Data.X509Certificates) > 0 {
+						certData := shyntrsaml.FormatCertificate(kd.KeyInfo.X509Data.X509Certificates[0].Data)
+
+						if kd.Use == "signing" || kd.Use == "" {
+							if client.SPCertificate == "" {
+								client.SPCertificate = certData
+							}
+						}
+
+						if kd.Use == "encryption" || kd.Use == "" {
+							if client.SPEncryptionCertificate == "" {
+								client.SPEncryptionCertificate = certData
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if client.EntityID == "" || client.ACSURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "entity_id and acs_url are required if metadata_url is not provided"})
+		return
+	}
+
 	result := h.DB.Model(&models.SAMLClient{}).
 		Where("id = ?", id).
 		Select(
-			"Name", "EntityID", "ACSURL", "SPCertificate",
+			"Name", "EntityID", "ACSURL", "IdpCertificate",
 			"AttributeMapping", "ForceAuthn", "SignResponse",
 			"SignAssertion", "EncryptAssertion", "Active", "TenantID",
 		).
-		Updates(models.SAMLClient{
-			Name:             req.Name,
-			EntityID:         req.EntityID,
-			TenantID:         req.TenantID,
-			ACSURL:           req.ACSURL,
-			SPCertificate:    req.SPCertificate,
-			AttributeMapping: req.AttributeMapping,
-			ForceAuthn:       req.ForceAuthn,
-			SignResponse:     req.SignResponse,
-			SignAssertion:    req.SignAssertion,
-			EncryptAssertion: req.EncryptAssertion,
-			Active:           req.Active,
-		})
+		Updates(client)
 
 	if result.Error != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update SAML client", result.Error))
@@ -446,7 +563,61 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 	}
 	conn.TenantID = realTenantID
 
-	if conn.IdpMetadataXML != "" {
+	if conn.MetadataURL != "" {
+		descriptor, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
+			return
+		}
+
+		if conn.IdpMetadataXML == "" {
+			conn.IdpMetadataXML = rawXML
+		}
+
+		if descriptor != nil {
+			if conn.IdpEntityID == "" {
+				conn.IdpEntityID = descriptor.EntityID
+			}
+			if len(descriptor.IDPSSODescriptors) > 0 {
+				idp := descriptor.IDPSSODescriptors[0]
+
+				if conn.IdpSingleSignOn == "" {
+					for _, sso := range idp.SingleSignOnServices {
+						conn.IdpSingleSignOn = sso.Location
+						if sso.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				if conn.IdpSloUrl == "" {
+					for _, slo := range idp.SingleLogoutServices {
+						conn.IdpSloUrl = slo.Location
+						if slo.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				for _, kd := range idp.KeyDescriptors {
+					if len(kd.KeyInfo.X509Data.X509Certificates) > 0 {
+						certData := shyntrsaml.FormatCertificate(kd.KeyInfo.X509Data.X509Certificates[0].Data)
+						if kd.Use == "signing" || kd.Use == "" {
+							if conn.IdpCertificate == "" {
+								conn.IdpCertificate = certData
+							}
+						}
+
+						if kd.Use == "encryption" || kd.Use == "" {
+							if conn.IdpEncryptionCertificate == "" {
+								conn.IdpEncryptionCertificate = certData
+							}
+						}
+					}
+				}
+			}
+		}
+	} else if conn.IdpMetadataXML != "" {
 		meta := &saml.EntityDescriptor{}
 		if err := xml.Unmarshal([]byte(conn.IdpMetadataXML), meta); err != nil {
 			c.Error(response.NewAppError(http.StatusBadRequest, "Invalid SAML IdP metadata XML", err))
@@ -455,6 +626,11 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		conn.IdpEntityID = meta.EntityID
 	} else {
 		c.Error(response.NewAppError(http.StatusBadRequest, "idp_metadata_xml is required", nil))
+		return
+	}
+
+	if conn.IdpEntityID == "" || conn.IdpSingleSignOn == "" || conn.IdpCertificate == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "idp_entity_id, idp_sso_url and idp_certificate are required if metadata_url is not provided"})
 		return
 	}
 
@@ -509,17 +685,72 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 	}
 
 	updateData := models.SAMLConnection{
-		Name:             req.Name,
-		TenantID:         req.TenantID,
-		AttributeMapping: req.AttributeMapping,
-		ForceAuthn:       req.ForceAuthn,
-		SignRequest:      req.SignRequest,
-		Active:           req.Active,
-		SPPrivateKey:     req.SPPrivateKey,
-		SPCertificate:    req.SPCertificate,
+		Name:                     req.Name,
+		TenantID:                 req.TenantID,
+		AttributeMapping:         req.AttributeMapping,
+		ForceAuthn:               req.ForceAuthn,
+		SignRequest:              req.SignRequest,
+		Active:                   req.Active,
+		SPPrivateKey:             req.SPPrivateKey,
+		IdpCertificate:           req.IdpCertificate,
+		IdpEncryptionCertificate: req.IdpEncryptionCertificate,
 	}
 
-	if req.IdpMetadataXML != "" {
+	if req.MetadataURL != "" {
+		descriptor, rawXML, err := shyntrsaml.FetchAndParseMetadata(req.MetadataURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
+			return
+		}
+
+		if updateData.IdpMetadataXML == "" {
+			updateData.IdpMetadataXML = rawXML
+		}
+
+		if descriptor != nil {
+			if updateData.IdpEntityID == "" {
+				updateData.IdpEntityID = descriptor.EntityID
+			}
+			if len(descriptor.IDPSSODescriptors) > 0 {
+				idp := descriptor.IDPSSODescriptors[0]
+
+				if updateData.IdpSingleSignOn == "" {
+					for _, sso := range idp.SingleSignOnServices {
+						updateData.IdpSingleSignOn = sso.Location
+						if sso.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				if updateData.IdpSloUrl == "" {
+					for _, slo := range idp.SingleLogoutServices {
+						updateData.IdpSloUrl = slo.Location
+						if slo.Binding == saml.HTTPRedirectBinding {
+							break
+						}
+					}
+				}
+
+				for _, kd := range idp.KeyDescriptors {
+					if len(kd.KeyInfo.X509Data.X509Certificates) > 0 {
+						certData := shyntrsaml.FormatCertificate(kd.KeyInfo.X509Data.X509Certificates[0].Data)
+						if kd.Use == "signing" || kd.Use == "" {
+							if updateData.IdpCertificate == "" {
+								updateData.IdpCertificate = certData
+							}
+						}
+
+						if kd.Use == "encryption" || kd.Use == "" {
+							if updateData.IdpEncryptionCertificate == "" {
+								updateData.IdpEncryptionCertificate = certData
+							}
+						}
+					}
+				}
+			}
+		}
+	} else if req.IdpMetadataXML != "" {
 		meta := &saml.EntityDescriptor{}
 		if err := xml.Unmarshal([]byte(req.IdpMetadataXML), meta); err != nil {
 			c.Error(response.NewAppError(http.StatusBadRequest, "Invalid SAML IdP metadata XML", err))
@@ -630,6 +861,7 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		Scopes:                req.Scopes,
 		AttributeMapping:      req.AttributeMapping,
 		Active:                req.Active,
+		EndSessionEndpoint:    req.EndSessionEndpoint,
 	}
 
 	result := h.DB.Model(&models.OIDCConnection{}).Where("id = ?", id).Updates(updateData)

@@ -80,7 +80,10 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
 		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 		rootSamlGroup.POST("/idp/sso", samlHandler.IDPSSO)
+		rootSamlGroup.GET("/idp/slo", samlHandler.IDPSLO)
+		rootSamlGroup.POST("/idp/slo", samlHandler.IDPSLO)
 		rootSamlGroup.GET("/resume", samlHandler.ResumeSAML)
+		rootSamlGroup.GET("/sp/slo/initiate", samlHandler.SPSLOInitiate)
 	}
 
 	// OAuth2 Routes
@@ -118,7 +121,10 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
 			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)
 			samlGroup.POST("/idp/sso", samlHandler.IDPSSO)
+			samlGroup.GET("/idp/slo", samlHandler.IDPSLO)
+			samlGroup.POST("/idp/slo", samlHandler.IDPSLO)
 			samlGroup.GET("/resume", samlHandler.ResumeSAML)
+			samlGroup.GET("/sp/slo/initiate", samlHandler.SPSLOInitiate)
 		}
 
 		oidcGroup := tenantGroup.Group("/oidc")
