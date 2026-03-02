@@ -1,16 +1,22 @@
 package oidc
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/google/uuid"
 	"github.com/nevzatcirak/shyntr/config"
+	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/repository"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
@@ -21,12 +27,23 @@ import (
 
 type ClientService struct {
 	Repo   *repository.OIDCRepository
+	KeyMgr *auth.KeyManager
 	Config *config.Config
 }
 
-func NewClientService(repo *repository.OIDCRepository, cfg *config.Config) *ClientService {
+type oidcDiscovery struct {
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	EndSessionEndpoint    string `json:"end_session_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
+	Issuer                string `json:"issuer"`
+}
+
+func NewClientService(repo *repository.OIDCRepository, km *auth.KeyManager, cfg *config.Config) *ClientService {
 	return &ClientService{
 		Repo:   repo,
+		KeyMgr: km,
 		Config: cfg,
 	}
 }
@@ -153,13 +170,62 @@ func (s *ClientService) ExchangeAndUserInfo(ctx context.Context, tenantID, code,
 	return userInfo, nil
 }
 
-type oidcDiscovery struct {
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	EndSessionEndpoint    string `json:"end_session_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	UserInfoEndpoint      string `json:"userinfo_endpoint"`
-	JWKSURI               string `json:"jwks_uri"`
-	Issuer                string `json:"issuer"`
+func (s *ClientService) SendBackchannelLogout(clientID, logoutURI, subject, issuer string) {
+	if logoutURI == "" {
+		return
+	}
+
+	privKey, _ := s.KeyMgr.GetActiveKeys()
+	if privKey == nil {
+		logger.Log.Error("No active private key for backchannel logout")
+		return
+	}
+
+	claims := map[string]interface{}{
+		"iss": issuer,
+		"sub": subject,
+		"aud": clientID,
+		"iat": time.Now().Unix(),
+		"jti": uuid.New().String(),
+		"events": map[string]interface{}{
+			"http://schemas.openid.net/event/backchannel-logout": map[string]interface{}{},
+		},
+	}
+
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: privKey}, nil)
+	if err != nil {
+		logger.Log.Error("Failed to create signer for backchannel logout", zap.Error(err))
+		return
+	}
+
+	builder := jwt.Signed(signer).Claims(claims)
+	logoutToken, err := builder.CompactSerialize()
+	if err != nil {
+		logger.Log.Error("Failed to serialize logout token", zap.Error(err))
+		return
+	}
+
+	data := url.Values{}
+	data.Set("logout_token", logoutToken)
+
+	go func() {
+		req, _ := http.NewRequest("POST", logoutURI, bytes.NewBufferString(data.Encode()))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Log.Warn("Backchannel logout failed", zap.String("client", clientID), zap.Error(err))
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			logger.Log.Info("Backchannel logout successful", zap.String("client", clientID))
+		} else {
+			logger.Log.Warn("Backchannel logout returned non-OK status", zap.String("client", clientID), zap.Int("status", resp.StatusCode))
+		}
+	}()
 }
 
 func (s *ClientService) discoverEndpoints(ctx context.Context, issuer string) (*oidcDiscovery, error) {

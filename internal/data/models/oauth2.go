@@ -36,6 +36,7 @@ type OAuth2Client struct {
 	JSONWebKeys            *jose.JSONWebKeySet `gorm:"type:jsonb" json:"jwks,omitempty"`
 	SkipConsent            bool                `gorm:"default:false" json:"skip_consent"`
 	SubjectType            string              `gorm:"default:'public'" json:"subject_type"`
+	BackchannelLogoutURI   string              `gorm:"type:text" json:"backchannel_logout_uri"`
 
 	// --- Lifespans ---
 	AccessTokenLifespan  string `gorm:"default:''" json:"access_token_lifespan,omitempty"`

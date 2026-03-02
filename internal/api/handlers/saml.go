@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
+	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/core/webhook"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
@@ -31,13 +32,14 @@ import (
 
 type SAMLHandler struct {
 	Service        *saml.Service
+	OpenidService  *oidc.ClientService
 	Mapper         *mapper.Mapper
 	DB             *gorm.DB
 	WebhookService *webhook.Service
 }
 
-func NewSAMLHandler(s *saml.Service, m *mapper.Mapper, db *gorm.DB, wh *webhook.Service) *SAMLHandler {
-	return &SAMLHandler{Service: s, Mapper: m, DB: db, WebhookService: wh}
+func NewSAMLHandler(s *saml.Service, os *oidc.ClientService, m *mapper.Mapper, db *gorm.DB, wh *webhook.Service) *SAMLHandler {
+	return &SAMLHandler{Service: s, OpenidService: os, Mapper: m, DB: db, WebhookService: wh}
 }
 
 func (h *SAMLHandler) SPMetadata(c *gin.Context) {
@@ -322,6 +324,12 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		return
 	}
 
+	if logoutReq.Issuer == nil || logoutReq.Issuer.Value == "" {
+		logger.FromGin(c).Error("Missing Issuer in SLO Request")
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_issuer"})
+		return
+	}
+
 	var spClient models.SAMLClient
 	if err := h.DB.Where("entity_id = ? AND tenant_id = ?", logoutReq.Issuer.Value, tenantID).First(&spClient).Error; err != nil {
 		logger.FromGin(c).Warn("Unknown SP in SLO", zap.String("entity_id", logoutReq.Issuer.Value))
@@ -336,18 +344,33 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	}
 
 	if spClient.SPCertificate != "" && c.Request.Method == http.MethodGet {
-		if err := verifyRedirectLogoutSignature(c.Request, spClient.SPCertificate); err != nil {
-			logger.FromGin(c).Error("SAML SLO Signature Verification Failed. Possible session riding attempt!",
+		if err := verifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
+			logger.FromGin(c).Error("SAML SLO Signature Verification Failed! Possible session riding attempt.",
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_signature"})
 			return
 		}
+		logger.FromGin(c).Info("SAML SLO request signature verified successfully", zap.String("sp", spClient.EntityID))
 	}
 
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Service.Config.CookieSecure, true)
 
 	if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 		subject := logoutReq.NameID.Value
+
+		var activeSessions []models.OAuth2Session
+		h.DB.Where("subject = ? AND tenant_id = ?", subject, tenantID).Find(&activeSessions)
+
+		issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Service.Config.BaseIssuerURL, tenantID)
+
+		for _, sess := range activeSessions {
+			var oidcClient models.OAuth2Client
+			if err := h.DB.Where("id = ? AND tenant_id = ?", sess.ClientID, tenantID).First(&oidcClient).Error; err == nil {
+				if oidcClient.BackchannelLogoutURI != "" {
+					h.OpenidService.SendBackchannelLogout(oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
+				}
+			}
+		}
 
 		err := h.DB.Where("subject = ? AND tenant_id = ?", subject, tenantID).
 			Delete(&models.OAuth2Session{}).Error
@@ -357,7 +380,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 				zap.String("subject", subject),
 				zap.Error(err))
 		} else {
-			logger.FromGin(c).Info("Successfully revoked OAuth2 sessions during SAML SLO",
+			logger.FromGin(c).Info("Successfully revoked OAuth2 sessions and dispatched Back-Channel logouts during SAML SLO",
 				zap.String("subject", subject))
 		}
 	}
@@ -365,6 +388,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	relayState := c.Query("RelayState")
 	htmlForm, err := h.Service.GenerateLogoutResponse(c.Request.Context(), tenantID, logoutReq, &spClient, relayState)
 	if err != nil {
+		logger.FromGin(c).Error("Failed to generate SLO response", zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed_to_generate_response"})
 		return
 	}
@@ -568,7 +592,7 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 	}
 }
 
-func verifyRedirectLogoutSignature(req *http.Request, certPEM string) error {
+func verifyRedirectSignature(req *http.Request, certPEM string) error {
 	query := req.URL.Query()
 	sig := query.Get("Signature")
 	sigAlg := query.Get("SigAlg")
@@ -603,6 +627,8 @@ func verifyRedirectLogoutSignature(req *http.Request, certPEM string) error {
 	var parts []string
 	if samlReq := query.Get("SAMLRequest"); samlReq != "" {
 		parts = append(parts, "SAMLRequest="+escape(samlReq))
+	} else if samlRes := query.Get("SAMLResponse"); samlRes != "" {
+		parts = append(parts, "SAMLResponse="+escape(samlRes))
 	}
 	if rs := query.Get("RelayState"); rs != "" {
 		parts = append(parts, "RelayState="+escape(rs))

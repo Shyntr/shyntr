@@ -23,7 +23,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	oidcRepo := repository.NewOIDCRepository(db)
 
 	samlService := saml.NewService(samlRepo, km, cfg)
-	oidcService := oidc.NewClientService(oidcRepo, cfg)
+	oidcService := oidc.NewClientService(oidcRepo, km, cfg)
 	webhookService := webhook.NewService(db)
 
 	attrMapper := mapper.New()
@@ -36,7 +36,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 	mgmtHandler := handlers.NewManagementHandler(db, authProvider.Config)
 
-	samlHandler := handlers.NewSAMLHandler(samlService, attrMapper, db, webhookService)
+	samlHandler := handlers.NewSAMLHandler(samlService, oidcService, attrMapper, db, webhookService)
 	oidcHandler := handlers.NewOIDCHandler(oidcService, attrMapper, db, webhookService)
 
 	public := gin.New()
