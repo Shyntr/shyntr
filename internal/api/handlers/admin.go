@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/response"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -117,6 +118,12 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		return
 	}
 
+	audit.LogAsync(h.DB, req.TenantID, req.Subject, "admin.login.accept", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"challenge": challenge,
+		"client_id": req.ClientID,
+		"protocol":  req.Protocol,
+	})
+
 	var redirectTo string
 
 	if req.Protocol == "saml" {
@@ -154,6 +161,13 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
 		return
 	}
+
+	var req models.LoginRequest
+	h.DB.Select("tenant_id", "subject", "client_id").First(&req, "id = ?", challenge)
+	audit.LogAsync(h.DB, req.TenantID, req.Subject, "admin.login.reject", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"challenge": challenge,
+		"client_id": req.ClientID,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+rejected+login",
@@ -232,6 +246,13 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		return
 	}
 
+	audit.LogAsync(h.DB, "", req.Subject, "admin.consent.accept", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"challenge":        challenge,
+		"client_id":        req.ClientID,
+		"granted_scopes":   req.GrantedScope,
+		"granted_audience": req.GrantedAudience,
+	})
+
 	redirectPath := req.RequestURL
 	if !strings.HasPrefix(redirectPath, "http") {
 		redirectPath = fmt.Sprintf("%s%s", h.Config.BaseIssuerURL, req.RequestURL)
@@ -253,6 +274,14 @@ func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
 		return
 	}
+
+	var req models.ConsentRequest
+	h.DB.Select("subject", "client_id").First(&req, "id = ?", challenge)
+
+	audit.LogAsync(h.DB, "", req.Subject, "admin.consent.reject", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"challenge": challenge,
+		"client_id": req.ClientID,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+denied+access",

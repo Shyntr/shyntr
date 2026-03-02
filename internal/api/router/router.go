@@ -32,7 +32,6 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	healthHandler := handlers.NewHealthHandler(db)
 	oauthHandler := handlers.NewOAuth2Handler(authProvider, db, km, cfg)
 	loginHandler := handlers.NewLoginHandler(cfg, db)
-	consentHandler := handlers.NewConsentHandler()
 	adminHandler := handlers.NewAdminHandler(db, cfg)
 	mgmtHandler := handlers.NewManagementHandler(db, authProvider.Config)
 
@@ -43,6 +42,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	public.Use(gin.Recovery())
 	public.Use(middleware.SecurityHeaders())
 	public.Use(otelgin.Middleware("shyntr-public-api"))
+	public.Use(middleware.StructuredLogger())
 
 	public.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -64,11 +64,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	// Authentication UI Redirects (User facing)
 	uiGroup := public.Group("/auth")
 	{
-		uiGroup.GET("/login", loginHandler.ShowLogin)
-		uiGroup.POST("/login", loginHandler.SubmitLogin)
 		uiGroup.GET("/methods", loginHandler.GetLoginMethods)
-		uiGroup.GET("/consent", consentHandler.ShowConsent)
-		uiGroup.POST("/consent", consentHandler.SubmitConsent)
 	}
 
 	// SAML Routes
@@ -137,6 +133,7 @@ func SetupRouters(db *gorm.DB, authProvider *auth.Provider, cfg *config.Config, 
 	admin := gin.New()
 	admin.Use(gin.Recovery())
 	admin.Use(otelgin.Middleware("shyntr-admin-api"))
+	admin.Use(middleware.StructuredLogger())
 	admin.Use(middleware.ErrorHandlerMiddleware())
 	admin.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AdminAllowedOrigins,

@@ -32,12 +32,13 @@ func InitLogger(level string) {
 			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 		} else {
 			config = zap.NewDevelopmentConfig()
+			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 			config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		}
 
 		config.Level = zap.NewAtomicLevelAt(logLevel)
 
-		Log, err = config.Build()
+		Log, err = config.Build(zap.AddStacktrace(zap.ErrorLevel))
 		if err != nil {
 			panic("Failed to initialize logger: " + err.Error())
 		}

@@ -12,6 +12,7 @@ import (
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/lib/pq"
 	"github.com/nevzatcirak/shyntr/config"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
@@ -337,6 +338,10 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
+	audit.LogAsync(h.DB, tenantID, userID, "auth.authorize.success", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id":      clientID,
+		"granted_scopes": grantedScopes,
+	})
 	h.Provider.Fosite.WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
@@ -370,7 +375,17 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
-
+	subject := ""
+	if sess := ar.GetSession(); sess != nil {
+		subject = sess.GetSubject()
+	}
+	if subject == "" {
+		subject = "client:" + ar.GetClient().GetID()
+	}
+	audit.LogAsync(h.DB, urlTenantID, subject, "auth.token.issued", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id":      ar.GetClient().GetID(),
+		"granted_scopes": ar.GetGrantedScopes(),
+	})
 	h.Provider.Fosite.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
@@ -434,6 +449,9 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
 	if subject != "" {
 		h.DB.Where("subject = ?", subject).Delete(&models.OAuth2Session{})
+		audit.LogAsync(h.DB, "default", subject, "auth.logout", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+			"id_token_hint_provided": idTokenHint != "",
+		})
 	}
 
 	var idpSource string
@@ -571,6 +589,9 @@ func (h *OAuth2Handler) Introspect(c *gin.Context) {
 
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	err := h.Provider.Fosite.NewRevocationRequest(c.Request.Context(), c.Request)
+	audit.LogAsync(h.DB, "default", "unknown", "auth.token.revoke", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"status": err == nil,
+	})
 	h.Provider.Fosite.WriteRevocationResponse(c.Request.Context(), c.Writer, err)
 }
 

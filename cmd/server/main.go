@@ -15,6 +15,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/api/router"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/core/auth"
 	"github.com/nevzatcirak/shyntr/internal/core/worker"
 	"github.com/nevzatcirak/shyntr/internal/data"
@@ -96,6 +97,9 @@ func main() {
 			if err := db.Create(&tenant).Error; err != nil {
 				log.Fatalf("Failed: %v", err)
 			}
+			audit.LogAsync(db, tenant.ID, "system_cli", "cli.tenant.create", "127.0.0.1", "shyntr-cli", map[string]interface{}{
+				"tenant_name": tenant.Name,
+			})
 			log.Printf("Tenant created: %s (%s)", tenant.Name, tenant.ID)
 		},
 	}
@@ -149,6 +153,7 @@ func main() {
 			if err := db.Model(&models.Tenant{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
+			audit.LogAsync(db, args[0], "system_cli", "cli.tenant.update", "127.0.0.1", "shyntr-cli", updates)
 			log.Println("Tenant updated.")
 		},
 	}
@@ -171,6 +176,9 @@ func main() {
 			if err := db.Delete(&models.Tenant{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete failed: %v", err)
 			}
+			audit.LogAsync(db, args[0], "system_cli", "cli.tenant.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{
+				"tenant_id": args[0],
+			})
 			log.Println("Tenant deleted.")
 		},
 	}
@@ -297,10 +305,12 @@ func main() {
 				hashed, _ := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 				updates["secret"] = hashed
 			}
-
+			var client models.OAuth2Client
+			db.Select("tenant_id").First(&client, "id = ?", args[0])
 			if err := db.Model(&models.OAuth2Client{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
+			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.oidc.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client updated.")
 		},
 	}
@@ -318,9 +328,12 @@ func main() {
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
+			var client models.OAuth2Client
+			db.Select("tenant_id").First(&client, "id = ?", args[0])
 			if err := db.Delete(&models.OAuth2Client{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete failed: %v", err)
 			}
+			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client deleted.")
 		},
 	}
@@ -414,10 +427,12 @@ func main() {
 				log.Println("No changes detected.")
 				return
 			}
-
+			var client models.SAMLClient
+			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
 			if err := db.Model(&models.SAMLClient{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
+			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.saml.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client updated.")
 		},
 	}
@@ -434,9 +449,12 @@ func main() {
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
+			var client models.SAMLClient
+			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClient{}).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
+			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client deleted.")
 		},
 	}
@@ -519,9 +537,12 @@ func main() {
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
+			var conn models.SAMLConnection
+			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.SAMLConnection{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
+			audit.LogAsync(db, conn.TenantID, "system_cli", "cli.connection.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("SAML Connection deleted.")
 		},
 	}
@@ -601,9 +622,12 @@ func main() {
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
+			var conn models.OIDCConnection
+			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.OIDCConnection{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
+			audit.LogAsync(db, conn.TenantID, "system_cli", "cli.connection.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("OIDC Connection deleted.")
 		},
 	}

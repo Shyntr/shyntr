@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/api/response"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.uber.org/zap"
 )
 
 func ErrorHandlerMiddleware() gin.HandlerFunc {
@@ -19,11 +21,24 @@ func ErrorHandlerMiddleware() gin.HandlerFunc {
 		ginErr := c.Errors.Last()
 		actualErr := ginErr.Err
 
+		log := logger.FromGin(c).With(zap.Error(actualErr))
 		var appErr *response.AppError
 		if errors.As(actualErr, &appErr) {
+			if appErr.StatusCode >= 500 {
+				log.Error("Internal API Error",
+					zap.Int("status_code", appErr.StatusCode),
+					zap.String("user_message", appErr.UserMessage),
+				)
+			} else {
+				log.Warn("Client API Error",
+					zap.Int("status_code", appErr.StatusCode),
+					zap.String("user_message", appErr.UserMessage),
+				)
+			}
 			response.HandleManagementError(c, appErr.StatusCode, appErr.UserMessage, appErr.Err)
 			return
 		}
+		log.Error("Unhandled Internal Server Error")
 		response.HandleManagementError(c, http.StatusInternalServerError, "An unexpected internal error occurred", actualErr)
 	}
 }

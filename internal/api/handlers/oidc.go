@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/webhook"
@@ -119,6 +120,10 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 		finalAttributes["sub"] = subject
 	}
 	h.WebhookService.FireEvent(tenantID, "user.login.ext", finalAttributes)
+	audit.LogAsync(h.DB, tenantID, subject, "auth.federated.oidc.success", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": connectionID,
+		"email":         finalAttributes["email"],
+	})
 
 	loginReq.Authenticated = true
 	loginReq.Subject = subject

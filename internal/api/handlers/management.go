@@ -8,6 +8,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/internal/api/response"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	shyntrsaml "github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"github.com/nevzatcirak/shyntr/pkg/crypto"
@@ -136,6 +137,9 @@ func (h *ManagementHandler) CreateTenant(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create tenant", err))
 		return
 	}
+	audit.LogAsync(h.DB, tenant.ID, "admin_api", "management.tenant.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"tenant_name": tenant.Name,
+	})
 	logger.FromGin(c).Info("Tenant created successfully", zap.String("target_tenant_id", tenant.ID), zap.String("tenant_name", tenant.Name))
 	c.JSON(http.StatusCreated, tenant)
 }
@@ -159,6 +163,9 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update tenant", err))
 		return
 	}
+	audit.LogAsync(h.DB, id, "admin_api", "management.tenant.update", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"tenant_id": id,
+	})
 	logger.FromGin(c).Info("Tenant updated successfully", zap.String("target_tenant_id", id))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
@@ -170,7 +177,6 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusBadRequest, "Cannot delete the default tenant", nil))
 		return
 	}
-
 	err := h.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.OAuth2Client{}).Error; err != nil {
 			return fmt.Errorf("failed to delete oidc clients: %w", err)
@@ -197,6 +203,10 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to cascade delete tenant", err))
 		return
 	}
+
+	audit.LogAsync(h.DB, tenantID, "admin_api", "management.tenant.delete", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"tenant_id": tenantID,
+	})
 	logger.FromGin(c).Info("Tenant deleted successfully", zap.String("target_tenant_id", tenantID))
 	c.JSON(http.StatusOK, gin.H{"message": "Tenant and all associated resources deleted successfully"})
 }
@@ -231,6 +241,10 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create OIDC client", err))
 		return
 	}
+	audit.LogAsync(h.DB, client.TenantID, "admin_api", "management.client.oidc.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": client.ID,
+		"public":    client.Public,
+	})
 	logger.FromGin(c).Info("OIDC client created successfully", zap.String("client_id", client.ID), zap.String("target_tenant_id", client.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusCreated, client)
 }
@@ -290,6 +304,10 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		return
 	}
 
+	audit.LogAsync(h.DB, client.TenantID, "admin_api", "management.client.oidc.update", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": id,
+	})
+
 	updates := map[string]interface{}{
 		"name":                       req.Name,
 		"redirect_uris":              req.RedirectURIs,
@@ -305,6 +323,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		"access_token_lifespan":      req.AccessTokenLifespan,
 		"id_token_lifespan":          req.IDTokenLifespan,
 		"refresh_token_lifespan":     req.RefreshTokenLifespan,
+		"backchannel_logout_uri":     req.BackchannelLogoutURI,
 	}
 
 	if req.Secret != "" && req.Secret != "*****" {
@@ -322,10 +341,17 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 
 func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 	id := c.Param("id")
+	var client models.OAuth2Client
+	h.DB.Select("tenant_id").First(&client, "id = ?", id)
+
 	if err := h.DB.Delete(&models.OAuth2Client{}, "id = ?", id).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC client", err))
 		return
 	}
+
+	audit.LogAsync(h.DB, client.TenantID, "admin_api", "management.client.oidc.delete", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": id,
+	})
 	logger.FromGin(c).Info("OIDC client deleted successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusNoContent, nil)
 }
@@ -438,6 +464,10 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create SAML client", err))
 		return
 	}
+	audit.LogAsync(h.DB, client.TenantID, "admin_api", "management.client.saml.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": client.ID,
+		"entity_id": client.EntityID,
+	})
 	logger.FromGin(c).Info("SAML client created successfully", zap.String("client_id", client.ID), zap.String("target_tenant_id", client.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusCreated, client)
 }
@@ -534,16 +564,25 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update SAML client", result.Error))
 		return
 	}
+	audit.LogAsync(h.DB, req.TenantID, "admin_api", "management.client.saml.update", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": id,
+		"entity_id": req.EntityID,
+	})
 	logger.FromGin(c).Info("SAML client created successfully", zap.String("entity_id", req.EntityID), zap.String("target_tenant_id", req.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
 func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
 	id := c.Param("id")
+	var client models.SAMLClient
+	h.DB.Select("tenant_id").First(&client, "id = ?", id)
 	if err := h.DB.Delete(&models.SAMLClient{}, "id = ?", id).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete SAML client", err))
 		return
 	}
+	audit.LogAsync(h.DB, client.TenantID, "admin_api", "management.client.saml.delete", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"client_id": id,
+	})
 	logger.FromGin(c).Info("SAML client deleted successfully", zap.String("client_id", id), zap.String("protocol", "saml"))
 	c.JSON(http.StatusNoContent, nil)
 }
@@ -638,6 +677,10 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create SAML connection", err))
 		return
 	}
+	audit.LogAsync(h.DB, conn.TenantID, "admin_api", "management.connection.saml.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": conn.ID,
+		"entity_id":     conn.IdpEntityID,
+	})
 	logger.FromGin(c).Info("SAML connection created successfully", zap.String("entity_id", conn.IdpEntityID), zap.String("target_tenant_id", conn.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusCreated, conn)
 }
@@ -771,16 +814,25 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusNotFound, "SAML Connection not found", nil))
 		return
 	}
+	audit.LogAsync(h.DB, updateData.TenantID, "admin_api", "management.connection.saml.update", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": id,
+		"entity_id":     updateData.IdpEntityID,
+	})
 	logger.FromGin(c).Info("SAML connection updated successfully", zap.String("entity_id", updateData.IdpEntityID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
 func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
 	id := c.Param("id")
+	var conn models.SAMLConnection
+	h.DB.Select("tenant_id").First(&conn, "id = ?", id)
 	if err := h.DB.Delete(&models.SAMLConnection{}, "id = ?", id).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete SAML connection", err))
 		return
 	}
+	audit.LogAsync(h.DB, conn.TenantID, "admin_api", "management.connection.saml.delete", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": id,
+	})
 	c.JSON(http.StatusNoContent, nil)
 }
 
@@ -803,6 +855,10 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create OIDC connection", err))
 		return
 	}
+	audit.LogAsync(h.DB, conn.TenantID, "admin_api", "management.connection.oidc.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": conn.ID,
+		"issuer_url":    conn.IssuerURL,
+	})
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", conn.ClientID), zap.String("target_tenant_id", conn.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusCreated, conn)
 }
@@ -875,16 +931,25 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		c.Error(response.NewAppError(http.StatusNotFound, "OIDC Connection not found", nil))
 		return
 	}
+	audit.LogAsync(h.DB, updateData.TenantID, "admin_api", "management.connection.oidc.update", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": id,
+		"issuer_url":    updateData.IssuerURL,
+	})
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", updateData.ClientID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
 func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
 	id := c.Param("id")
+	var conn models.OIDCConnection
+	h.DB.Select("tenant_id").First(&conn, "id = ?", id)
 	if err := h.DB.Delete(&models.OIDCConnection{}, "id = ?", id).Error; err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC connection", err))
 		return
 	}
+	audit.LogAsync(h.DB, conn.TenantID, "admin_api", "management.connection.oidc.delete", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"connection_id": id,
+	})
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusNoContent, nil)
 }

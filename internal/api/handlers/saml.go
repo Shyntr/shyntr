@@ -19,6 +19,7 @@ import (
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/oidc"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
@@ -170,6 +171,11 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 	finalAttributes["amr"] = []string{"ext"}
 	h.WebhookService.FireEvent(tenantID, "user.login.ext", finalAttributes)
+
+	audit.LogAsync(h.DB, tenantID, subject, "auth.federated.saml.success", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"issuer":        issuer,
+		"connection_id": conn.ID,
+	})
 
 	loginReq.Authenticated = true
 	loginReq.Subject = subject
@@ -374,6 +380,10 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 
 		err := h.DB.Where("subject = ? AND tenant_id = ?", subject, tenantID).
 			Delete(&models.OAuth2Session{}).Error
+		audit.LogAsync(h.DB, tenantID, subject, "auth.slo.saml.idp_initiated", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+			"issuer": logoutReq.Issuer.Value,
+			"status": err == nil,
+		})
 
 		if err != nil {
 			logger.FromGin(c).Warn("Failed to delete user Fosite sessions during SLO",
@@ -483,6 +493,10 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 		return
 	}
 
+	audit.LogAsync(h.DB, tenantID, loginReq.Subject, "auth.saml.assertion.issued", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"sp_entity_id": spClient.EntityID,
+		"acs_url":      authReq.AssertionConsumerServiceURL,
+	})
 	c.Header("Content-Type", "text/html")
 	c.String(http.StatusOK, htmlResponse)
 }
@@ -493,6 +507,13 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 	relayState := c.Query("RelayState")
 
 	var conn models.SAMLConnection
+	if connectionID == "" {
+		logger.FromGin(c).Warn("SAML Connection is empty.")
+		if relayState != "" {
+			c.Redirect(http.StatusFound, relayState)
+		}
+		return
+	}
 	if err := h.DB.First(&conn, "id = ? AND tenant_id = ?", connectionID, tenantID).Error; err != nil {
 		logger.FromGin(c).Error("SAML Connection not found for SLO", zap.Error(err))
 		if relayState != "" {
@@ -588,6 +609,11 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 		rawQuery := query.Encode()
 		rawQuery = strings.ReplaceAll(rawQuery, "+", "%20")
 		redirectURL.RawQuery = rawQuery
+
+		audit.LogAsync(h.DB, tenantID, subject, "auth.slo.saml.sp_initiated", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+			"connection_id": connectionID,
+			"slo_url":       sloURL,
+		})
 		c.Redirect(http.StatusFound, redirectURL.String())
 	}
 }

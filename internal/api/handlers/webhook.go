@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/nevzatcirak/shyntr/internal/core/audit"
 	"github.com/nevzatcirak/shyntr/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -48,6 +49,12 @@ func (h *WebhookHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create webhook"})
 		return
 	}
+
+	audit.LogAsync(h.DB, "system", "admin_api", "management.webhook.create", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+		"webhook_id": wh.ID,
+		"url":        wh.URL,
+		"events":     wh.Events,
+	})
 
 	c.JSON(http.StatusCreated, wh)
 }
