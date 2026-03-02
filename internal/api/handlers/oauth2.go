@@ -475,13 +475,18 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 					relayParam = "&RelayState=" + url.QueryEscape(finalRedirect)
 				}
 
+				tokenParam := ""
+				if idTokenHint != "" {
+					tokenParam = "&id_token_hint=" + idTokenHint
+				}
+
 				tID := c.Param("tenant_id")
 				if tID == "" {
 					tID = h.Config.DefaultTenantID
 				}
 
-				redirectURL := fmt.Sprintf("%s/t/%s/saml/sp/slo?connection_id=%s%s",
-					h.Config.BaseIssuerURL, tID, connectionID, relayParam)
+				redirectURL := fmt.Sprintf("%s/t/%s/saml/sp/slo?connection_id=%s%s%s",
+					h.Config.BaseIssuerURL, tID, connectionID, tokenParam, relayParam)
 				c.Redirect(http.StatusFound, redirectURL)
 				return
 			}

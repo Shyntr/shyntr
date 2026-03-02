@@ -98,12 +98,16 @@ func (s *Service) BuildServiceProvider(ctx context.Context, tenantID string, con
 	}
 
 	sp := &crewjamsaml.ServiceProvider{
-		EntityID:          baseURLStr,
-		Key:               privKey,
-		Certificate:       cert,
-		MetadataURL:       *metadataURL,
-		AcsURL:            *acsURL,
-		SloURL:            *sloURL,
+		EntityID:    baseURLStr,
+		Key:         privKey,
+		Certificate: cert,
+		MetadataURL: *metadataURL,
+		AcsURL:      *acsURL,
+		SloURL:      *sloURL,
+		LogoutBindings: []string{
+			crewjamsaml.HTTPRedirectBinding,
+			crewjamsaml.HTTPPostBinding,
+		},
 		IDPMetadata:       &crewjamsaml.EntityDescriptor{},
 		AllowIDPInitiated: true,
 		SignatureMethod:   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",

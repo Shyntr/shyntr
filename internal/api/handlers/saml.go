@@ -4,9 +4,12 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +18,7 @@ import (
 
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
+	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/nevzatcirak/shyntr/internal/core/mapper"
 	"github.com/nevzatcirak/shyntr/internal/core/saml"
 	"github.com/nevzatcirak/shyntr/internal/core/webhook"
@@ -331,6 +335,15 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		return
 	}
 
+	if spClient.SPCertificate != "" && c.Request.Method == http.MethodGet {
+		if err := verifyRedirectLogoutSignature(c.Request, spClient.SPCertificate); err != nil {
+			logger.FromGin(c).Error("SAML SLO Signature Verification Failed. Possible session riding attempt!",
+				zap.String("entity_id", spClient.EntityID), zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_signature"})
+			return
+		}
+	}
+
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Service.Config.CookieSecure, true)
 
 	if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
@@ -347,15 +360,9 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 			logger.FromGin(c).Info("Successfully revoked OAuth2 sessions during SAML SLO",
 				zap.String("subject", subject))
 		}
-	} else {
-		logger.FromGin(c).Warn("No NameID found in LogoutRequest, skipping OAuth2 session revocation")
 	}
 
 	relayState := c.Query("RelayState")
-	if relayState == "" {
-		relayState = c.PostForm("RelayState")
-	}
-
 	htmlForm, err := h.Service.GenerateLogoutResponse(c.Request.Context(), tenantID, logoutReq, &spClient, relayState)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed_to_generate_response"})
@@ -479,10 +486,35 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 		return
 	}
 
-	subject := "unknown-user"
-	sessionCookie, _ := c.Cookie(consts.SessionCookieName)
-	if sessionCookie != "" {
-		subject = sessionCookie
+	subject := ""
+
+	idTokenHint := c.Query("id_token_hint")
+	if idTokenHint != "" {
+		token, err := jwt.ParseSigned(idTokenHint)
+		if err == nil {
+			_, cert := h.Service.KeyMgr.GetActiveKeys()
+			if cert != nil {
+				claims := &jwt.Claims{}
+				if err := token.Claims(cert.PublicKey, claims); err == nil {
+					subject = claims.Subject
+				} else {
+					logger.FromGin(c).Warn("id_token_hint signature verification failed during SAML SLO")
+				}
+			}
+		}
+	}
+
+	if subject == "" {
+		sessionCookie, _ := c.Cookie(consts.SessionCookieName)
+		if sessionCookie != "" {
+			subject = sessionCookie
+		}
+	}
+
+	if subject == "" {
+		logger.FromGin(c).Error("No valid subject found for SLO (stateless token missing/invalid)")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "subject_required_for_slo"})
+		return
 	}
 
 	sloURL := conn.IdpSloUrl
@@ -534,4 +566,64 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 		redirectURL.RawQuery = rawQuery
 		c.Redirect(http.StatusFound, redirectURL.String())
 	}
+}
+
+func verifyRedirectLogoutSignature(req *http.Request, certPEM string) error {
+	query := req.URL.Query()
+	sig := query.Get("Signature")
+	sigAlg := query.Get("SigAlg")
+
+	if sig == "" || sigAlg == "" {
+		return errors.New("missing Signature or SigAlg in request")
+	}
+
+	sigBytes, err := base64.StdEncoding.DecodeString(sig)
+	if err != nil {
+		return errors.New("invalid signature base64 format")
+	}
+
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return errors.New("failed to parse SP certificate PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return errors.New("invalid SP X509 certificate")
+	}
+
+	rsaPub, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return errors.New("SP certificate is not an RSA public key")
+	}
+
+	escape := func(s string) string {
+		return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+	}
+
+	var parts []string
+	if samlReq := query.Get("SAMLRequest"); samlReq != "" {
+		parts = append(parts, "SAMLRequest="+escape(samlReq))
+	}
+	if rs := query.Get("RelayState"); rs != "" {
+		parts = append(parts, "RelayState="+escape(rs))
+	}
+	parts = append(parts, "SigAlg="+escape(sigAlg))
+	signString := strings.Join(parts, "&")
+
+	var hash crypto.Hash
+	if strings.HasSuffix(sigAlg, "rsa-sha256") {
+		hash = crypto.SHA256
+	} else if strings.HasSuffix(sigAlg, "rsa-sha1") {
+		hash = crypto.SHA1
+	} else if strings.HasSuffix(sigAlg, "rsa-sha512") {
+		hash = crypto.SHA512
+	} else {
+		return errors.New("unsupported signature algorithm: " + sigAlg)
+	}
+
+	hasher := hash.New()
+	hasher.Write([]byte(signString))
+	hashed := hasher.Sum(nil)
+
+	return rsa.VerifyPKCS1v15(rsaPub, hash, hashed, sigBytes)
 }
