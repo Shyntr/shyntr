@@ -14,12 +14,16 @@ import (
 
 	"github.com/crewjam/saml"
 	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/api/router"
-	"github.com/nevzatcirak/shyntr/internal/core/audit"
-	"github.com/nevzatcirak/shyntr/internal/core/auth"
-	"github.com/nevzatcirak/shyntr/internal/core/worker"
-	"github.com/nevzatcirak/shyntr/internal/data"
-	"github.com/nevzatcirak/shyntr/internal/data/models"
+	"github.com/nevzatcirak/shyntr/internal/adapters/audit"
+	router "github.com/nevzatcirak/shyntr/internal/adapters/http"
+	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
+	persistence "github.com/nevzatcirak/shyntr/internal/adapters/persistence"
+	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
+	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/repository"
+	"github.com/nevzatcirak/shyntr/internal/application/usecase"
+	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
+	"github.com/nevzatcirak/shyntr/internal/application/worker"
+	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/nevzatcirak/shyntr/pkg/utils"
@@ -49,11 +53,11 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			logger.InitLogger(cfg.LogLevel)
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			if err := data.MigrateDB(db); err != nil {
+			if err := persistence.MigrateDB(db); err != nil {
 				log.Fatalf("Migration failed: %v", err)
 			}
 			logger.Log.Info("Database migration completed successfully.")
@@ -73,11 +77,11 @@ func main() {
 		Short: "Create a new tenant",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-
+			auditLogger := audit.NewAuditLogger(db)
 			if tenantID == "" {
 				tenantID, _ = utils.GenerateRandomHex(4) // Random ID if empty
 			}
@@ -88,7 +92,7 @@ func main() {
 				tenantDisplay = tenantName
 			}
 
-			tenant := models.Tenant{
+			tenant := models.TenantGORM{
 				ID:          tenantID,
 				Name:        tenantName,
 				DisplayName: tenantDisplay,
@@ -97,7 +101,7 @@ func main() {
 			if err := db.Create(&tenant).Error; err != nil {
 				log.Fatalf("Failed: %v", err)
 			}
-			audit.LogAsync(db, tenant.ID, "system_cli", "cli.tenant.create", "127.0.0.1", "shyntr-cli", map[string]interface{}{
+			auditLogger.Log(tenant.ID, "system_cli", "cli.tenant.create", "127.0.0.1", "shyntr-cli", map[string]interface{}{
 				"tenant_name": tenant.Name,
 			})
 			log.Printf("Tenant created: %s (%s)", tenant.Name, tenant.ID)
@@ -114,11 +118,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			var tenant models.Tenant
+			var tenant models.TenantGORM
 			if err := db.First(&tenant, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Tenant not found: %v", err)
 			}
@@ -132,11 +136,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-
+			auditLogger := audit.NewAuditLogger(db)
 			updates := make(map[string]interface{})
 			if tenantName != "" {
 				updates["name"] = tenantName
@@ -150,10 +154,10 @@ func main() {
 				return
 			}
 
-			if err := db.Model(&models.Tenant{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
+			if err := db.Model(&models.TenantGORM{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
-			audit.LogAsync(db, args[0], "system_cli", "cli.tenant.update", "127.0.0.1", "shyntr-cli", updates)
+			auditLogger.Log(args[0], "system_cli", "cli.tenant.update", "127.0.0.1", "shyntr-cli", updates)
 			log.Println("Tenant updated.")
 		},
 	}
@@ -169,14 +173,15 @@ func main() {
 				log.Fatal("Cannot delete default tenant via CLI")
 			}
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			if err := db.Delete(&models.Tenant{}, "id = ?", args[0]).Error; err != nil {
+			auditLogger := audit.NewAuditLogger(db)
+			if err := db.Delete(&models.TenantGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete failed: %v", err)
 			}
-			audit.LogAsync(db, args[0], "system_cli", "cli.tenant.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{
+			auditLogger.Log(args[0], "system_cli", "cli.tenant.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{
 				"tenant_id": args[0],
 			})
 			log.Println("Tenant deleted.")
@@ -198,7 +203,7 @@ func main() {
 		Short: "Create OIDC Client (Use flags)",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -231,7 +236,7 @@ func main() {
 				authMethod = "none"
 			}
 
-			client := models.OAuth2Client{
+			client := models.OAuth2ClientGORM{
 				ID:                      clientID,
 				TenantID:                tenantID,
 				Name:                    clientName,
@@ -270,11 +275,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			var client models.OAuth2Client
+			var client models.OAuth2ClientGORM
 			if err := db.First(&client, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Client not found: %v", err)
 			}
@@ -288,11 +293,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-
+			auditLogger := audit.NewAuditLogger(db)
 			updates := make(map[string]interface{})
 			if clientName != "" {
 				updates["name"] = clientName
@@ -305,12 +310,12 @@ func main() {
 				hashed, _ := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 				updates["secret"] = hashed
 			}
-			var client models.OAuth2Client
+			var client models.OAuth2ClientGORM
 			db.Select("tenant_id").First(&client, "id = ?", args[0])
-			if err := db.Model(&models.OAuth2Client{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
+			if err := db.Model(&models.OAuth2ClientGORM{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
-			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.oidc.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
+			auditLogger.Log(client.TenantID, "system_cli", "cli.client.oidc.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client updated.")
 		},
 	}
@@ -324,16 +329,17 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-			var client models.OAuth2Client
+			auditLogger := audit.NewAuditLogger(db)
+			var client models.OAuth2ClientGORM
 			db.Select("tenant_id").First(&client, "id = ?", args[0])
-			if err := db.Delete(&models.OAuth2Client{}, "id = ?", args[0]).Error; err != nil {
+			if err := db.Delete(&models.OAuth2ClientGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete failed: %v", err)
 			}
-			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
+			auditLogger.Log(client.TenantID, "system_cli", "cli.client.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client deleted.")
 		},
 	}
@@ -350,7 +356,7 @@ func main() {
 		Short: "Create SAML Service Provider",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
@@ -365,7 +371,7 @@ func main() {
 				clientName = "SAML App"
 			}
 
-			client := models.SAMLClient{
+			client := models.SAMLClientGORM{
 				TenantID:      tenantID,
 				Name:          clientName,
 				EntityID:      samlEntityID,
@@ -392,11 +398,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var client models.SAMLClient
+			var client models.SAMLClientGORM
 			if err := db.First(&client, "entity_id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Not Found: %v", err)
 			}
@@ -410,11 +416,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("Database connection failed: %v", err)
 			}
-
+			auditLogger := audit.NewAuditLogger(db)
 			updates := make(map[string]interface{})
 			if samlACSURL != "" {
 				updates["acs_url"] = samlACSURL
@@ -427,12 +433,12 @@ func main() {
 				log.Println("No changes detected.")
 				return
 			}
-			var client models.SAMLClient
+			var client models.SAMLClientGORM
 			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
-			if err := db.Model(&models.SAMLClient{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
+			if err := db.Model(&models.SAMLClientGORM{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
-			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.saml.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
+			auditLogger.Log(client.TenantID, "system_cli", "cli.client.saml.update", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client updated.")
 		},
 	}
@@ -445,16 +451,17 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var client models.SAMLClient
+			auditLogger := audit.NewAuditLogger(db)
+			var client models.SAMLClientGORM
 			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
-			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClient{}).Error; err != nil {
+			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClientGORM{}).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
-			audit.LogAsync(db, client.TenantID, "system_cli", "cli.client.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
+			auditLogger.Log(client.TenantID, "system_cli", "cli.client.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client deleted.")
 		},
 	}
@@ -469,7 +476,7 @@ func main() {
 		Short: "Register SAML IDP Connection",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
@@ -491,7 +498,7 @@ func main() {
 
 			meta := &saml.EntityDescriptor{}
 			_ = xml.Unmarshal(xmlBytes, meta)
-			conn := models.SAMLConnection{
+			conn := models.SAMLConnectionGORM{
 				TenantID:       tenantID,
 				Name:           clientName,
 				IdpMetadataXML: string(xmlBytes),
@@ -515,11 +522,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var conn models.SAMLConnection
+			var conn models.SAMLConnectionGORM
 			if err := db.First(&conn, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Not Found: %v", err)
 			}
@@ -533,16 +540,17 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var conn models.SAMLConnection
+			auditLogger := audit.NewAuditLogger(db)
+			var conn models.SAMLConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
-			if err := db.Delete(&models.SAMLConnection{}, "id = ?", args[0]).Error; err != nil {
+			if err := db.Delete(&models.SAMLConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
-			audit.LogAsync(db, conn.TenantID, "system_cli", "cli.connection.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
+			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("SAML Connection deleted.")
 		},
 	}
@@ -557,7 +565,7 @@ func main() {
 		Short: "Register OIDC Provider",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
@@ -572,7 +580,7 @@ func main() {
 				clientName = "OIDC Provider"
 			}
 
-			conn := models.OIDCConnection{
+			conn := models.OIDCConnectionGORM{
 				TenantID:     tenantID,
 				Name:         clientName,
 				IssuerURL:    issuerURL,
@@ -600,11 +608,11 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var conn models.OIDCConnection
+			var conn models.OIDCConnectionGORM
 			if err := db.First(&conn, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Not Found: %v", err)
 			}
@@ -618,16 +626,17 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
-			db, err := data.ConnectDB(cfg)
+			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
 				log.Fatalf("DB Error: %v", err)
 			}
-			var conn models.OIDCConnection
+			auditLogger := audit.NewAuditLogger(db)
+			var conn models.OIDCConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
-			if err := db.Delete(&models.OIDCConnection{}, "id = ?", args[0]).Error; err != nil {
+			if err := db.Delete(&models.OIDCConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("Delete Failed: %v", err)
 			}
-			audit.LogAsync(db, conn.TenantID, "system_cli", "cli.connection.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
+			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("OIDC Connection deleted.")
 		},
 	}
@@ -663,24 +672,66 @@ func runServer() {
 	cfg := config.LoadConfig()
 	logger.InitLogger(cfg.LogLevel)
 
-	db, err := data.ConnectDB(cfg)
+	db, err := persistence.ConnectDB(cfg)
 	if err != nil {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
 	}
 
 	var count int64
-	if err := db.Model(&models.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
+	if err := db.Model(&entity.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
 		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
-		data.SeedDefaultTenant(db, cfg)
+		persistence.SeedDefaultTenant(db, cfg)
 	}
 	worker.StartCleanupJob(db)
 
-	keyMgr := auth.NewKeyManager(db, cfg)
+	keyMgr := utils2.NewKeyManager(db, cfg)
 	_ = keyMgr.GetActivePrivateKey()
 
-	provider := auth.NewProvider(db, []byte(cfg.AppSecret), cfg.BaseIssuerURL, keyMgr)
+	fositeConfig := &fosite.Config{
+		AccessTokenLifespan:        1 * time.Hour,
+		AuthorizeCodeLifespan:      10 * time.Minute,
+		IDTokenLifespan:            1 * time.Hour,
+		RefreshTokenLifespan:       30 * 24 * time.Hour, // 30 Days
+		GlobalSecret:               []byte(cfg.AppSecret),
+		IDTokenIssuer:              cfg.BaseIssuerURL,
+		SendDebugMessagesToClients: true,
+	}
 
-	publicRouter, adminRouter := router.SetupRouters(db, provider, cfg, keyMgr)
+	//Repository
+	requestRepository := repository.NewAuthRequestRepository(db)
+	logRepository := repository.NewAuditLogRepository(db)
+	jtiRepository := repository.NewBlacklistedJTIRepository(db)
+	tenantRepository := repository.NewTenantRepository(db)
+	webhookRepository := repository.NewWebhookRepository(db)
+	clientRepository := repository.NewOAuth2ClientRepository(db)
+	samlClientRepository := repository.NewSAMLClientRepository(db)
+	sessionRepository := repository.NewOAuth2SessionRepository(db)
+	connectionRepository := repository.NewOIDCConnectionRepository(db)
+	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
+	replayRepository := repository.NewSAMLReplayRepository(db)
+	eventRepository := repository.NewWebhookEventRepository(db)
+
+	auditLogger := audit.NewAuditLogger(db)
+
+	iam.NewFositeStore(db, clientRepository, jtiRepository)
+	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
+
+	//UseCase
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
+	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
+	auditUseCase := usecase.NewAuditUseCase(logRepository)
+	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger)
+	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
+	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
+	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger)
+	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg)
+	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
+
+	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
+		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, fositeConfig, auditLogger, db, cfg, provider, keyMgr)
 
 	publicSrv := &http.Server{
 		Addr:    ":" + cfg.Port,
