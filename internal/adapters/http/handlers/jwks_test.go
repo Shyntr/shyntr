@@ -57,7 +57,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	auditLogger := audit.NewAuditLogger(db)
 
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
-	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig.ClientSecretsHasher)
+	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	//UseCase
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
@@ -67,7 +67,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 
-	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, auditLogger, sessionUseCase,
+	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,
 		connectionUseCase, tenantUseCase)
 
 	gin.SetMode(gin.TestMode)

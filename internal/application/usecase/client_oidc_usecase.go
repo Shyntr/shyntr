@@ -3,7 +3,10 @@ package usecase
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/google/uuid"
@@ -29,9 +33,9 @@ import (
 )
 
 type OAuth2ClientUseCase interface {
-	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge string) (string, error)
-	VerifyState(encryptedState string) (loginChallenge, connectionID string, err error)
-	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID string) (map[string]interface{}, error)
+	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error)
+	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
+	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
 	SendBackchannelLogout(clientID, logoutURI, subject, issuer string)
 	CreateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
 	UpdateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
@@ -76,19 +80,19 @@ func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDC
 	}
 }
 
-func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge string) (string, error) {
+func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error) {
 	conn, err := u.connRepo.GetByTenantAndID(ctx, tenantID, connectionID)
 	if err != nil {
-		return "", fmt.Errorf("connection not found: %w", err)
+		return "", nil, fmt.Errorf("connection not found: %w", err)
 	}
 
 	if conn.AuthorizationEndpoint == "" || conn.TokenEndpoint == "" {
 		if conn.IssuerURL == "" {
-			return "", errors.New("neither endpoints nor issuer_url provided")
+			return "", nil, errors.New("neither endpoints nor issuer_url provided")
 		}
 		discovered, err := u.discoverEndpoints(ctx, conn.IssuerURL)
 		if err != nil {
-			return "", fmt.Errorf("oidc discovery failed: %w", err)
+			return "", nil, fmt.Errorf("oidc discovery failed: %w", err)
 		}
 		conn.AuthorizationEndpoint = discovered.AuthorizationEndpoint
 		conn.TokenEndpoint = discovered.TokenEndpoint
@@ -110,30 +114,57 @@ func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connec
 		Scopes:      conn.Scopes,
 	}
 
-	plainState := fmt.Sprintf("%s|%s", loginChallenge, connectionID)
+	nonce, _ := utils.GenerateRandomHex(16)
+	codeVerifier, _ := utils.GenerateRandomHex(32)
+
+	hashPkce := sha256.Sum256([]byte(codeVerifier))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(hashPkce[:])
+
+	hashCsrf := sha256.Sum256([]byte(csrfToken))
+	csrfHash := hex.EncodeToString(hashCsrf[:])
+
+	plainState := fmt.Sprintf("%s|%s|%s", loginChallenge, connectionID, csrfHash)
 	encryptedState, err := crypto.EncryptAES([]byte(plainState), []byte(u.Config.AppSecret))
 	if err != nil {
-		return "", fmt.Errorf("failed to encrypt state: %w", err)
+		return "", nil, fmt.Errorf("failed to encrypt state: %w", err)
 	}
 
-	return oauth2Config.AuthCodeURL(encryptedState), nil
+	opts := []oauth2.AuthCodeOption{
+		oauth2.SetAuthURLParam("nonce", nonce),
+		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+	}
+
+	providerContext := map[string]interface{}{
+		"nonce":         nonce,
+		"code_verifier": codeVerifier,
+	}
+
+	return oauth2Config.AuthCodeURL(encryptedState, opts...), providerContext, nil
 }
 
-func (u *oauth2ClientUseCase) VerifyState(encryptedState string) (loginChallenge, connectionID string, err error) {
+func (u *oauth2ClientUseCase) VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error) {
 	decryptedBytes, err := crypto.DecryptAES(encryptedState, []byte(u.Config.AppSecret))
 	if err != nil {
 		return "", "", fmt.Errorf("invalid state signature: %w", err)
 	}
 
 	parts := strings.Split(string(decryptedBytes), "|")
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return "", "", errors.New("malformed state payload")
 	}
 
+	expectedHash := parts[2]
+	hashCsrf := sha256.Sum256([]byte(csrfToken))
+	actualHash := hex.EncodeToString(hashCsrf[:])
+
+	if expectedHash != actualHash {
+		return "", "", errors.New("csrf token mismatch: potential login csrf attack blocked")
+	}
 	return parts[0], parts[1], nil
 }
 
-func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID string) (map[string]interface{}, error) {
+func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error) {
 	conn, err := u.connRepo.GetByTenantAndID(ctx, tenantID, connectionID)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
@@ -169,7 +200,11 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 		RedirectURL: redirectURL,
 	}
 
-	token, err := oauth2Config.Exchange(ctx, code)
+	opts := []oauth2.AuthCodeOption{}
+	if codeVerifier != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
+	}
+	token, err := oauth2Config.Exchange(ctx, code, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
@@ -178,11 +213,31 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 		return nil, errors.New("userinfo endpoint is missing")
 	}
 
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if ok && expectedNonce != "" {
+		provider, err := oidc.NewProvider(ctx, conn.IssuerURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize oidc provider for verification: %w", err)
+		}
+
+		oidcConfig := &oidc.Config{ClientID: conn.ClientID}
+		verifier := provider.Verifier(oidcConfig)
+
+		idToken, err := verifier.Verify(ctx, rawIDToken)
+		if err != nil {
+			return nil, fmt.Errorf("id_token verification failed: %w", err)
+		}
+
+		if idToken.Nonce != expectedNonce {
+			return nil, errors.New("nonce mismatch in ID Token: potential replay attack")
+		}
+	}
+
 	// UserInfo Fetch
 	client := oauth2Config.Client(ctx, token)
 	resp, err := client.Get(conn.UserInfoEndpoint)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch userinfo: %w", err)
+		return nil, fmt.Errorf("failed to fetch user info: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -194,7 +249,6 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode userinfo: %w", err)
 	}
-
 	return userInfo, nil
 }
 

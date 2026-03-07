@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,10 +13,10 @@ import (
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/lib/pq"
 	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/nevzatcirak/shyntr/pkg/constants"
 	"github.com/nevzatcirak/shyntr/pkg/consts"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/nevzatcirak/shyntr/pkg/utils"
@@ -34,14 +35,13 @@ type OAuth2Handler struct {
 	AuthReq          usecase.AuthUseCase
 	OIDCConnUse      usecase.OIDCConnectionUseCase
 	TenantUse        usecase.TenantUseCase
-	audit            port.AuditLogger
 }
 
 func NewOAuth2Handler(p *utils2.Provider, km *utils2.KeyManager, cfg *config.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase,
-	AuthReq usecase.AuthUseCase, audit port.AuditLogger, OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
+	AuthReq usecase.AuthUseCase, OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
 	TenantUse usecase.TenantUseCase) *OAuth2Handler {
 	return &OAuth2Handler{Provider: p, KeyMgr: km, Config: cfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
-		audit: audit, OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse}
+		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse}
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -59,7 +59,7 @@ func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) t
 }
 
 func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param(constants.ContextKeyTenantID)
 	if tenantID == "" {
 		return h.Config.DefaultTenantID
 	}
@@ -69,26 +69,28 @@ func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
 func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	tenantID := h.resolveTenantID(c)
 	base := strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
-	if c.Param("tenant_id") == "" {
+	if c.Param(constants.ContextKeyTenantID) == "" {
 		return base
 	}
 	return fmt.Sprintf("%s/t/%s", base, tenantID)
 }
 
 func (h *OAuth2Handler) Authorize(c *gin.Context) {
-	ctx := c.Request.Context()
+	tenantID := h.resolveTenantID(c)
+
+	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
+
 	ar, err := h.Provider.Fosite.NewAuthorizeRequest(ctx, c.Request)
 	if err != nil {
 		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, err)
 		return
 	}
 
-	tenantID := h.resolveTenantID(c)
 	clientID := ar.GetClient().GetID()
 
 	client, err := h.OAuth2ClientUse.GetClientByTenant(ctx, tenantID, clientID)
 	if err != nil {
-		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String("tenant_id", tenantID))
+		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String(constants.ContextKeyTenantID, tenantID))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
 		return
 	}
@@ -317,8 +319,8 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		session.ExpiresAt[fosite.RefreshToken] = now.Add(accessTokenLife)
 	}
 
-	session.Claims.Add("tenant_id", tenantID)
-	session.JWTClaims.Extra["tenant_id"] = tenantID
+	session.Claims.Add(constants.ContextKeyTenantID, tenantID)
+	session.JWTClaims.Extra[constants.ContextKeyTenantID] = tenantID
 
 	if consentContext != nil {
 		for k, v := range consentContext {
@@ -348,15 +350,14 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	h.audit.Log(tenantID, userID, "auth.authorize.success", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"client_id":      clientID,
-		"granted_scopes": grantedScopes,
-	})
+	h.OAuth2SessionUse.RecordAuthorization(ctx, ar.GetID(), clientID, c.ClientIP(), c.Request.UserAgent(), grantedScopes)
 	h.Provider.Fosite.WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
 func (h *OAuth2Handler) Token(c *gin.Context) {
-	ctx := c.Request.Context()
+	tenantID := h.resolveTenantID(c)
+
+	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 	emptySession := entity.NewJWTSession("")
 	ar, err := h.Provider.Fosite.NewAccessRequest(ctx, c.Request, emptySession)
 	if err != nil {
@@ -368,13 +369,13 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	urlTenantID := h.resolveTenantID(c)
 	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, ar.GetClient().GetID())
 	if dbClientErr != nil {
-		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
+		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
 	if dbClient.TenantID != urlTenantID {
-		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String("tenant_id", urlTenantID))
+		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
@@ -385,41 +386,44 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
-	subject := ""
-	if sess := ar.GetSession(); sess != nil {
-		subject = sess.GetSubject()
-	}
-	if subject == "" {
-		subject = "client:" + ar.GetClient().GetID()
-	}
-	h.audit.Log(urlTenantID, subject, "auth.token.issued", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"client_id":      ar.GetClient().GetID(),
-		"granted_scopes": ar.GetGrantedScopes(),
-	})
+	h.OAuth2SessionUse.RecordTokenIssuance(ctx, ar.GetID(), ar.GetClient().GetID(), c.ClientIP(), c.Request.UserAgent(), ar.GetGrantedScopes())
 	h.Provider.Fosite.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
 func (h *OAuth2Handler) Logout(c *gin.Context) {
+	tenantID := h.resolveTenantID(c)
 	postLogoutRedirectURI := c.Query("post_logout_redirect_uri")
 	idTokenHint := c.Query("id_token_hint")
 	state := c.Query("state")
 
 	var subject string
 	var idTokenAudience string
-	var tenantID string
 
 	if idTokenHint != "" {
 		token, err := jwt.ParseSigned(idTokenHint)
 		if err == nil {
-			claims := &jwt.Claims{}
-			if err := token.UnsafeClaimsWithoutVerification(claims); err == nil {
-				subject = claims.Subject
-				if len(claims.Audience) > 0 {
-					idTokenAudience = claims.Audience[0]
+			_, cert := h.KeyMgr.GetActiveKeys()
+			if cert != nil {
+				type CustomClaims struct {
+					jwt.Claims
+					TenantID string `json:"tenant_id"`
+				}
+				var claims CustomClaims
+				if err := token.Claims(cert.PublicKey, &claims); err == nil {
+					subject = claims.Subject
+					if len(claims.Audience) > 0 {
+						idTokenAudience = claims.Audience[0]
+					}
+					if claims.TenantID != "" {
+						tenantID = claims.TenantID
+					}
+				} else {
+					logger.FromGin(c).Warn("id_token_hint signature verification failed during logout attempt", zap.Error(err))
 				}
 			}
 		}
 	}
+	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 	if subject == "" {
 		sessionCookie, _ := c.Cookie(consts.SessionCookieName)
 		subject = sessionCookie
@@ -428,17 +432,20 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	isValidRedirect := false
 	if postLogoutRedirectURI != "" {
 		if idTokenAudience != "" {
-			client, err := h.OAuth2ClientUse.GetClient(c, idTokenAudience)
+			client, err := h.OAuth2ClientUse.GetClient(ctx, idTokenAudience)
 			if err == nil {
 				for _, uri := range client.PostLogoutRedirectURIs {
-					if uri == postLogoutRedirectURI {
+					if strings.TrimRight(uri, "/") == strings.TrimRight(postLogoutRedirectURI, "/") {
 						isValidRedirect = true
+						postLogoutRedirectURI = uri
 						break
 					}
 				}
-			}
-			if client != nil {
-				tenantID = client.TenantID
+				if !isValidRedirect {
+					logger.FromGin(c).Warn("Logout URI mismatch", zap.Strings("registered_uris", client.PostLogoutRedirectURIs), zap.String("requested_uri", postLogoutRedirectURI))
+				}
+			} else {
+				logger.FromGin(c).Error("Logout GetClient failed", zap.Error(err), zap.String("tenant_id", tenantID), zap.String("client_id", idTokenAudience))
 			}
 		}
 	} else {
@@ -455,24 +462,23 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	}
 
 	if !isValidRedirect && postLogoutRedirectURI != "" {
+		logger.FromGin(c).Warn("Logout redirect blocked", zap.String("requested_uri", postLogoutRedirectURI), zap.String("client_id", idTokenAudience))
 		c.JSON(http.StatusOK, gin.H{"message": "Logged out locally (Redirect blocked due to validation failure)"})
 		return
 	}
 
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
 	if subject != "" {
-		err := h.OAuth2SessionUse.DeleteBySubject(c, subject, idTokenAudience)
+		err := h.OAuth2SessionUse.DeleteBySubject(ctx, subject, idTokenAudience)
 		if err != nil {
 			logger.LogFositeError(c, err, "Failed to delete session in TokenEndpoint")
 		}
-		h.audit.Log("default", subject, "auth.logout", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-			"id_token_hint_provided": idTokenHint != "",
-		})
+		h.OAuth2SessionUse.RecordLogout(ctx, subject, c.ClientIP(), c.Request.UserAgent(), idTokenHint != "")
 	}
 
 	var idpSource string
 	if subject != "" {
-		lastLogin, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(c, subject)
+		lastLogin, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, subject)
 		if err == nil {
 			if len(lastLogin.Context) > 0 {
 				var ctxData map[string]interface{}
@@ -497,7 +503,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 			connectionID := parts[1]
 
 			if protocol == "oidc" {
-				conn, err := h.OIDCConnUse.GetConnection(c, tenantID, connectionID)
+				conn, err := h.OIDCConnUse.GetConnection(ctx, tenantID, connectionID)
 				if err == nil && conn.EndSessionEndpoint != "" {
 					logoutURL := conn.EndSessionEndpoint
 					if finalRedirect != "" {
@@ -517,7 +523,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 					tokenParam = "&id_token_hint=" + idTokenHint
 				}
 
-				tID := c.Param("tenant_id")
+				tID := c.Param(constants.ContextKeyTenantID)
 				if tID == "" {
 					tID = h.Config.DefaultTenantID
 				}
@@ -593,21 +599,24 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
+	tenantID := h.resolveTenantID(c)
+	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 	session := entity.NewJWTSession("")
-	ar, err := h.Provider.Fosite.NewIntrospectionRequest(c.Request.Context(), c.Request, session)
+	ar, err := h.Provider.Fosite.NewIntrospectionRequest(ctx, c.Request, session)
 	if err != nil {
-		h.Provider.Fosite.WriteIntrospectionError(c.Request.Context(), c.Writer, err)
+		h.Provider.Fosite.WriteIntrospectionError(ctx, c.Writer, err)
 		return
 	}
-	h.Provider.Fosite.WriteIntrospectionResponse(c.Request.Context(), c.Writer, ar)
+	h.Provider.Fosite.WriteIntrospectionResponse(ctx, c.Writer, ar)
 }
 
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
-	err := h.Provider.Fosite.NewRevocationRequest(c.Request.Context(), c.Request)
-	h.audit.Log("default", "unknown", "auth.token.revoke", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"status": err == nil,
-	})
-	h.Provider.Fosite.WriteRevocationResponse(c.Request.Context(), c.Writer, err)
+	tenantID := h.resolveTenantID(c)
+	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
+
+	err := h.Provider.Fosite.NewRevocationRequest(ctx, c.Request)
+	h.OAuth2SessionUse.RecordRevocation(ctx, c.ClientIP(), c.Request.UserAgent(), err == nil)
+	h.Provider.Fosite.WriteRevocationResponse(ctx, c.Writer, err)
 }
 
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
@@ -619,7 +628,7 @@ func (h *OAuth2Handler) Jwks(c *gin.Context) {
 func (h *OAuth2Handler) Discover(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
-	_, err := h.TenantUse.GetTenant(c, tenantID)
+	_, err := h.TenantUse.GetTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "tenant_not_found"})
 		return

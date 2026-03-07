@@ -14,6 +14,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
 	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/nevzatcirak/shyntr/pkg/constants"
 	"github.com/ory/fosite"
 	"gorm.io/gorm"
 )
@@ -35,7 +36,7 @@ func NewFositeStore(db *gorm.DB, clientRepo port.OAuth2ClientRepository, jtiRepo
 // --- CLIENT MANAGER IMPLEMENTATION ---
 
 func (s *FositeStore) GetClient(ctx context.Context, id string) (fosite.Client, error) {
-	tenantID, ok := ctx.Value("tenant_id").(string)
+	tenantID, ok := ctx.Value(constants.ContextKeyTenantID).(string)
 	if !ok || tenantID == "" {
 		return nil, errors.New("tenant context is missing in Fosite Store")
 	}
@@ -179,7 +180,7 @@ func (s *FositeStore) getOrCreateRefreshFamilyID(ctx context.Context, requestID 
 }
 
 func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, familyID string, req fosite.Requester) error {
-	tenantID, _ := ctx.Value("tenant_id").(string)
+	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
 	if tenantID == "" {
 		return errors.New("tenant context missing for session creation")
 	}
@@ -222,6 +223,7 @@ func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, f
 	sess := models.OAuth2SessionGORM{
 		Signature:     signature,
 		RequestID:     req.GetID(),
+		TenantID:      tenantID,
 		ClientID:      req.GetClient().GetID(),
 		Subject:       subject,
 		TokenType:     tokenType,
@@ -237,7 +239,7 @@ func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, f
 }
 
 func (s *FositeStore) getSession(ctx context.Context, signature, tokenType string, session fosite.Session) (fosite.Requester, error) {
-	tenantID, _ := ctx.Value("tenant_id").(string)
+	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
 	var sess models.OAuth2SessionGORM
 
 	query := s.db.WithContext(ctx).Where("signature = ? AND token_type = ?", signature, tokenType)
@@ -301,17 +303,16 @@ func (s *FositeStore) getSession(ctx context.Context, signature, tokenType strin
 	if err := json.Unmarshal(sess.SessionData, session); err != nil {
 		return nil, err
 	}
-	client, err := s.GetClient(ctx, sess.ClientID)
+	clientDomain, err := s.clientRepo.GetByTenantAndID(ctx, tenantID, sess.ClientID)
 	if err != nil {
 		return nil, err
 	}
-
-	req := &fosite.Request{
-		ID:          sess.RequestID,
-		Client:      client,
-		Session:     session,
-		RequestedAt: sess.CreatedAt,
-	}
+	fositeClient := ToFositeClient(clientDomain)
+	req := fosite.NewAccessRequest(session)
+	req.SetID(sess.RequestID)
+	req.Client = fositeClient
+	req.Session = session
+	req.RequestedAt = sess.CreatedAt
 
 	if len(sess.RequestData) > 0 {
 		var pr persistedRequest
@@ -398,7 +399,10 @@ func (s *FositeStore) CreateRefreshTokenSession(ctx context.Context, signature s
 }
 
 func (s *FositeStore) GetRefreshTokenSession(ctx context.Context, signature string, session fosite.Session) (fosite.Requester, error) {
-	tenantID, _ := ctx.Value("tenant_id").(string)
+	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
+	if tenantID == "" {
+		return nil, errors.New("tenant context missing")
+	}
 	var dbModel models.OAuth2SessionGORM
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -426,16 +430,37 @@ func (s *FositeStore) GetRefreshTokenSession(ctx context.Context, signature stri
 		return nil
 	})
 
-	if err != nil {
+	if err != nil && !errors.Is(err, fosite.ErrInactiveToken) {
 		return nil, err
 	}
 
-	req := fosite.NewRequest()
-	req.Session = session
-	if err := json.Unmarshal(dbModel.SessionData, req); err != nil {
-		return nil, err
+	clientDomain, clientErr := s.clientRepo.GetByTenantAndID(ctx, tenantID, dbModel.ClientID)
+	if clientErr != nil {
+		return nil, clientErr
 	}
-	return req, nil
+	req := fosite.NewAccessRequest(session)
+	req.SetID(dbModel.RequestID)
+	req.Client = ToFositeClient(clientDomain)
+
+	for _, scope := range dbModel.GrantedScopes {
+		req.GrantScope(scope)
+	}
+
+	type persistedRequest struct {
+		Form url.Values `json:"form"`
+	}
+	var pr persistedRequest
+	if jsonErr := json.Unmarshal(dbModel.RequestData, &pr); jsonErr == nil {
+		req.Form = pr.Form
+	}
+
+	if session != nil && len(dbModel.SessionData) > 0 {
+		if jsonErr := json.Unmarshal(dbModel.SessionData, session); jsonErr != nil {
+			return nil, jsonErr
+		}
+	}
+
+	return req, err
 }
 
 func (s *FositeStore) DeleteRefreshTokenSession(ctx context.Context, signature string) (err error) {
@@ -449,13 +474,28 @@ func (s *FositeStore) DeleteRefreshTokenSession(ctx context.Context, signature s
 }
 
 func (s *FositeStore) RevokeRefreshToken(ctx context.Context, requestID string) error {
+	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
+	if tenantID == "" {
+		return errors.New("tenant context missing")
+	}
 	return s.db.WithContext(ctx).Model(&models.OAuth2SessionGORM{}).
-		Where("request_id = ? AND token_type IN ?", requestID, []string{"access_token", "refresh_token"}).
+		Where("request_id = ? AND token_type IN ? AND tenant_id = ?", requestID, []string{"access_token", "refresh_token"}, tenantID).
 		Updates(map[string]interface{}{"active": false}).Error
 }
 
 func (s *FositeStore) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, signature string) error {
-	return s.DeleteRefreshTokenSession(ctx, signature)
+	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
+	if tenantID == "" {
+		return errors.New("tenant context missing")
+	}
+
+	graceExp := time.Now().UTC().Add(time.Minute * 5)
+
+	return s.db.WithContext(ctx).Model(&models.OAuth2SessionGORM{}).
+		Where("signature = ? AND token_type = ? AND tenant_id = ?", signature, "refresh_token", tenantID).
+		Updates(map[string]interface{}{
+			"grace_expires_at": graceExp,
+		}).Error
 }
 
 // --- AUTHORIZE CODE STORAGE ---

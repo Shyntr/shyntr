@@ -11,6 +11,7 @@ import (
 type OAuth2Session struct {
 	Signature       string // The token signature
 	Type            string // access_token, refresh_token, code, pkce, oidc
+	TenantID        string
 	RequestID       string
 	ClientID        string
 	Subject         string

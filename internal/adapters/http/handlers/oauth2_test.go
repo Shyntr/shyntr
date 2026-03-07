@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"crypto/rsa"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,6 +45,22 @@ func setupTestDB() *gorm.DB {
 	return db
 }
 
+func generateMockIDToken(privateKey *rsa.PrivateKey, subject, audience string) (string, error) {
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: privateKey}, nil)
+	if err != nil {
+		return "", err
+	}
+
+	cl := jwt.Claims{
+		Subject:  subject,
+		Issuer:   "http://test-issuer.local",
+		Audience: jwt.Audience{audience},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+	}
+
+	return jwt.Signed(signer).Claims(cl).CompactSerialize()
+}
+
 func TestOAuth2Handler_Logout(t *testing.T) {
 	db := setupTestDB()
 	cfg := &config.Config{
@@ -61,7 +78,7 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 		PostLogoutRedirectURIs: pq.StringArray{logoutURI},
 	})
 	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
+	activePrivKey := keyMgr.GetActivePrivateKey()
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
@@ -84,7 +101,7 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 	auditLogger := audit.NewAuditLogger(db)
 
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
-	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig.ClientSecretsHasher)
+	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	//UseCase
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
@@ -93,7 +110,7 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
-	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, auditLogger, sessionUseCase,
+	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,
 		connectionUseCase, tenantUseCase)
 	gin.SetMode(gin.TestMode)
 
@@ -101,19 +118,16 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 
-		signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.HS256, Key: []byte("secret")}, nil)
-		claims := jwt.Claims{
-			Audience: []string{clientID},
-		}
-		rawToken, _ := jwt.Signed(signer).Claims(claims).CompactSerialize()
+		validIDToken, err := generateMockIDToken(activePrivKey, "user-123", clientID)
+		assert.NoError(t, err)
 
-		req, _ := http.NewRequest("GET", "/oauth2/logout?post_logout_redirect_uri="+logoutURI+"&id_token_hint="+rawToken, nil)
+		req, _ := http.NewRequest("GET", "/oauth2/logout?id_token_hint="+validIDToken+"&post_logout_redirect_uri=http://localhost:3000/bye&state=xyz", nil)
 		c.Request = req
-
+		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: "user-123"})
 		handler.Logout(c)
 
 		assert.Equal(t, http.StatusFound, w.Code)
-		assert.Equal(t, logoutURI, w.Header().Get("Location"))
+		assert.Equal(t, logoutURI+"?state=xyz", w.Header().Get("Location"))
 		cookie := w.Header().Get("Set-Cookie")
 		assert.Contains(t, cookie, consts.SessionCookieName+"=;")
 	})
@@ -124,9 +138,8 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 
 		evilURI := "http://evil.com/logout"
 
-		signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.HS256, Key: []byte("secret")}, nil)
-		claims := jwt.Claims{Audience: []string{clientID}}
-		rawToken, _ := jwt.Signed(signer).Claims(claims).CompactSerialize()
+		rawToken, err := generateMockIDToken(activePrivKey, "user-123", clientID)
+		assert.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/oauth2/logout?post_logout_redirect_uri="+evilURI+"&id_token_hint="+rawToken, nil)
 		c.Request = req

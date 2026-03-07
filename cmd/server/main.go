@@ -710,6 +710,7 @@ func runServer() {
 	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
 	replayRepository := repository.NewSAMLReplayRepository(db)
 	eventRepository := repository.NewWebhookEventRepository(db)
+	healthRepository := repository.NewHealthRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
@@ -717,6 +718,7 @@ func runServer() {
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	//UseCase
+	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
@@ -728,10 +730,11 @@ func runServer() {
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg)
-	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
+	healthUseCase := usecase.NewHealthUseCase(healthRepository)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
-		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, fositeConfig, auditLogger, db, cfg, provider, keyMgr)
+		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
+		fositeConfig, cfg, provider, keyMgr)
 
 	publicSrv := &http.Server{
 		Addr:    ":" + cfg.Port,

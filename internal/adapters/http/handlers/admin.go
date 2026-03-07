@@ -1,161 +1,144 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
 	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/application/usecase"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.uber.org/zap"
 )
 
 type AdminHandler struct {
-	Tenant      usecase.TenantUseCase
-	OAuth       usecase.OAuth2ClientUseCase
-	AuthReq     usecase.AuthUseCase
-	AuditLogger port.AuditLogger
-	Config      *config.Config
+	TenantUse       usecase.TenantUseCase
+	OAuth2ClientUse usecase.OAuth2ClientUseCase
+	AuthReqUseCase  usecase.AuthUseCase
+	Config          *config.Config
 }
 
-func NewAdminHandler(TenantR usecase.TenantUseCase,
-	OAuthR usecase.OAuth2ClientUseCase,
-	AuthRR usecase.AuthUseCase, AuditLogger port.AuditLogger, cfg *config.Config) *AdminHandler {
-	return &AdminHandler{Tenant: TenantR, OAuth: OAuthR, AuthReq: AuthRR, AuditLogger: AuditLogger, Config: cfg}
+func NewAdminHandler(TenantUse usecase.TenantUseCase, OAuth2ClientUse usecase.OAuth2ClientUseCase, AuthReqUseCase usecase.AuthUseCase, Config *config.Config) *AdminHandler {
+	return &AdminHandler{
+		TenantUse:       TenantUse,
+		OAuth2ClientUse: OAuth2ClientUse,
+		AuthReqUseCase:  AuthReqUseCase,
+		Config:          Config,
+	}
+
 }
 
-func (h *AdminHandler) fetchTenant(ctx context.Context, tenantID string) *dto.TenantResponse {
-	tenant, _ := h.Tenant.GetTenant(ctx, tenantID)
-	return dto.FromDomainTenant(tenant)
-}
-
-func (h *AdminHandler) fetchClient(ctx context.Context, clientID string) *dto.OAuth2ClientResponse {
-	client, _ := h.OAuth.GetClient(ctx, clientID)
-	return dto.FromDomainOAuth2Client(client)
-}
+// --- Login API ---
 
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Missing login_challenge parameter", nil))
+		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
 		return
 	}
-	req, err := h.AuthReq.GetLoginRequest(c, challenge)
-	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Login request not found or expired", err))
-		return
-	}
-	var contextMap map[string]interface{}
-	if len(req.Context) > 0 {
-		_ = json.Unmarshal(req.Context, &contextMap)
-	}
-
-	tenant := h.fetchTenant(c, req.TenantID)
-	client := h.fetchClient(c, req.ClientID)
-
-	resp := gin.H{
-		"challenge":   req.ID,
-		"client_id":   req.ClientID,
-		"request_url": req.RequestURL,
-		"skip":        req.Skip,
-		"scopes":      req.RequestedScope,
-		"subject":     req.Subject,
-		"context":     contextMap,
-		"tenant":      tenant,
-		"client":      client,
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
-
-func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
-	challenge := c.Query("login_challenge")
-
-	var body dto.AcceptLoginRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
-		return
-	}
-
-	req, err := h.AuthReq.AcceptLoginRequest(c, challenge, body)
+	req, err := h.AuthReqUseCase.GetLoginRequest(c.Request.Context(), challenge)
 	if err != nil {
 		c.Error(response.NewAppError(http.StatusNotFound, "Login request not found", err))
 		return
 	}
 
-	h.AuditLogger.Log(req.TenantID, req.Subject, "admin.login.accept", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"challenge": challenge,
-		"client_id": req.ClientID,
-		"protocol":  req.Protocol,
-	})
+	c.JSON(http.StatusOK, req)
+}
 
-	var redirectTo string
-
-	if req.Protocol == "saml" {
-		redirectTo = fmt.Sprintf("%s/t/%s/saml/resume?login_challenge=%s",
-			strings.TrimSuffix(h.Config.BaseIssuerURL, "/"),
-			req.TenantID,
-			req.ID,
-		)
-	} else {
-		redirectPath := req.RequestURL
-		if !strings.HasPrefix(redirectPath, "http") {
-			base := strings.TrimSuffix(h.Config.BaseIssuerURL, "/")
-			if !strings.HasPrefix(redirectPath, "/") {
-				redirectPath = "/" + redirectPath
-			}
-			redirectPath = base + redirectPath
-		}
-		if strings.Contains(redirectPath, "?") {
-			redirectTo = fmt.Sprintf("%s&login_verifier=%s", redirectPath, req.ID)
-		} else {
-			redirectTo = fmt.Sprintf("%s?login_verifier=%s", redirectPath, req.ID)
-		}
+func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
+	challenge := c.Query("login_challenge")
+	if challenge == "" {
+		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"redirect_to": redirectTo,
+	var req dto.AcceptLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		return
+	}
+
+	loginReq, err := h.AuthReqUseCase.AcceptLoginRequest(
+		c.Request.Context(),
+		challenge,
+		req.Remember,
+		req.RememberFor,
+		req.Subject,
+		req.Context,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
+	if err != nil {
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to accept login request", err))
+		return
+	}
+
+	logger.FromGin(c).Info("Login request accepted", zap.String("challenge", challenge), zap.String("subject", req.Subject))
+
+	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, loginReq.RequestURL, map[string]string{
+		"login_verifier": loginReq.ID,
 	})
+	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
 func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
-	req, err := h.AuthReq.RejectLoginRequest(c, challenge)
+	if challenge == "" {
+		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		return
+	}
+
+	var req dto.RejectRequestPayload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		return
+	}
+
+	loginReq, err := h.AuthReqUseCase.RejectLoginRequest(
+		c.Request.Context(),
+		challenge,
+		req.Error,
+		req.ErrorDescription,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
 	if err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
 		return
 	}
-	h.AuditLogger.Log(req.TenantID, req.Subject, "admin.login.reject", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"challenge": challenge,
-		"client_id": req.ClientID,
-	})
+	logger.FromGin(c).Info("Login request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))
 
-	c.JSON(http.StatusOK, gin.H{
-		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+rejected+login",
+	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, loginReq.RequestURL, map[string]string{
+		"error":             req.Error,
+		"error_description": req.ErrorDescription,
 	})
+	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
+// --- Consent API ---
 func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Missing consent_challenge parameter", nil))
+		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
-	req, err := h.AuthReq.GetConsentRequest(c, challenge)
+	req, err := h.AuthReqUseCase.GetConsentRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found or expired", err))
+		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found", err))
 		return
 	}
 
-	client := h.fetchClient(c, req.ClientID)
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.ClientID)
+	if err != nil {
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to fetch client details", err))
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
+	responsePayload := map[string]interface{}{
 		"challenge":          req.ID,
 		"client_id":          req.ClientID,
 		"subject":            req.Subject,
@@ -165,65 +148,98 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 		"request_url":        req.RequestURL,
 		"client":             client,
 		"tenant":             client.TenantID,
-	})
+	}
+
+	c.JSON(http.StatusOK, responsePayload)
 }
 
 func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Missing consent_challenge parameter", nil))
+		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
-	var body dto.AcceptConsentRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
+	var req dto.AcceptConsentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
-	req, err := h.AuthReq.AcceptConsentRequest(c, challenge, body)
+	consentReq, err := h.AuthReqUseCase.AcceptConsentRequest(
+		c.Request.Context(),
+		challenge,
+		req.GrantScope,
+		req.GrantAudience,
+		req.Remember,
+		req.RememberFor,
+		req.Session,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found", err))
+		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to accept consent request", err))
 		return
 	}
 
-	h.AuditLogger.Log("", req.Subject, "admin.consent.accept", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"challenge":        challenge,
-		"client_id":        req.ClientID,
-		"granted_scopes":   req.GrantedScope,
-		"granted_audience": req.GrantedAudience,
+	logger.FromGin(c).Info("Consent request accepted", zap.String("challenge", challenge))
+
+	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, consentReq.RequestURL, map[string]string{
+		"consent_verifier": consentReq.ID,
 	})
-
-	redirectPath := req.RequestURL
-	if !strings.HasPrefix(redirectPath, "http") {
-		redirectPath = fmt.Sprintf("%s%s", h.Config.BaseIssuerURL, req.RequestURL)
-	}
-
-	redirectTo := fmt.Sprintf("%s&consent_verifier=%s", redirectPath, req.ID)
-
-	c.JSON(http.StatusOK, gin.H{
-		"redirect_to": redirectTo,
-	})
+	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
 func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Missing consent_challenge parameter", nil))
+		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
-	req, err := h.AuthReq.RejectConsentRequest(c, challenge)
+	var req dto.RejectRequestPayload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		return
+	}
+
+	consentReq, err := h.AuthReqUseCase.RejectConsentRequest(
+		c.Request.Context(),
+		challenge,
+		req.Error,
+		req.ErrorDescription,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
 	if err != nil {
 		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
 		return
 	}
-	h.AuditLogger.Log("", req.Subject, "admin.consent.reject", c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
-		"challenge": challenge,
-		"client_id": req.ClientID,
-	})
+	logger.FromGin(c).Info("Consent request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))
 
-	c.JSON(http.StatusOK, gin.H{
-		"redirect_to": h.Config.BaseIssuerURL + "/oauth2/auth?error=access_denied&error_description=User+denied+access",
+	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, consentReq.RequestURL, map[string]string{
+		"error":             req.Error,
+		"error_description": req.ErrorDescription,
 	})
+	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
+}
+
+func buildRedirectURL(baseURL, requestURL string, params map[string]string) string {
+	parsed, _ := url.Parse(requestURL)
+	q := parsed.Query()
+	for k, v := range params {
+		q.Set(k, v)
+	}
+	parsed.RawQuery = q.Encode()
+
+	if parsed.IsAbs() {
+		return parsed.String()
+	}
+
+	base := strings.TrimRight(baseURL, "/")
+	path := parsed.Path
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path + "?" + parsed.RawQuery
 }

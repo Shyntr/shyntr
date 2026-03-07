@@ -9,8 +9,9 @@ import (
 )
 
 type OAuth2SessionGORM struct {
-	Signature       string         `gorm:"primaryKey;type:varchar(255)"`
+	Signature       string         `gorm:"primaryKey;type:text"`
 	TokenType       string         `gorm:"primaryKey;type:varchar(50)"`
+	TenantID        string         `gorm:"type:varchar(255);not null;default:'default';index"`
 	RequestID       string         `gorm:"type:varchar(255);not null;index"`
 	ClientID        string         `gorm:"type:varchar(255);not null"`
 	Subject         string         `gorm:"index"`
@@ -37,6 +38,7 @@ func (m *OAuth2SessionGORM) ToDomain() *entity.OAuth2Session {
 	return &entity.OAuth2Session{
 		Signature:       m.Signature,
 		Type:            m.TokenType,
+		TenantID:        m.TenantID,
 		RequestID:       m.RequestID,
 		ClientID:        m.ClientID,
 		Subject:         m.Subject,
@@ -59,6 +61,7 @@ func FromDomainOAuth2Session(e *entity.OAuth2Session) *OAuth2SessionGORM {
 	return &OAuth2SessionGORM{
 		Signature:       e.Signature,
 		TokenType:       e.Type,
+		TenantID:        e.TenantID,
 		RequestID:       e.RequestID,
 		ClientID:        e.ClientID,
 		Subject:         e.Subject,

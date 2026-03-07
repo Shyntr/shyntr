@@ -9,12 +9,10 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/adapters/http/handlers"
 	"github.com/nevzatcirak/shyntr/internal/adapters/http/middleware"
 	"github.com/nevzatcirak/shyntr/internal/application/mapper"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/ory/fosite"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	"gorm.io/gorm"
 )
 
 func SetupRouter(
@@ -29,9 +27,8 @@ func SetupRouter(
 	auth2SessionUseCase usecase.OAuth2SessionUseCase,
 	webhookUseCase usecase.WebhookUseCase,
 	samlBuilderUseCase usecase.SamlBuilderUseCase,
+	healthUseCase usecase.HealthUseCase,
 	fositeCfg *fosite.Config,
-	audit port.AuditLogger,
-	db *gorm.DB,
 	cfg *config.Config,
 	Provider *utils2.Provider,
 	km *utils2.KeyManager,
@@ -39,18 +36,17 @@ func SetupRouter(
 	attrMapper := mapper.New()
 
 	// Handlers
-	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, audit, cfg)
-	healthHandler := handlers.NewHealthHandler(db)
+	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
+	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
-	mgmtHandler := handlers.NewManagementHandler(db, fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase,
-		authUseCase, audit, auth2SessionUseCase, connectionUseCase, tenantUseCase)
-	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, audit, auth2SessionUseCase,
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
+	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase)
 
-	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, audit, webhookUseCase)
+	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,
-		auth2SessionUseCase, audit, samlClientUseCase, clientUseCase, webhookUseCase)
-	webhookHandler := handlers.NewWebhookHandler(audit, webhookUseCase)
+		auth2SessionUseCase, samlClientUseCase, clientUseCase, webhookUseCase)
+	webhookHandler := handlers.NewWebhookHandler(webhookUseCase, cfg)
 	auditHandler := handlers.NewAuditHandler(auditUseCase)
 
 	public := gin.New()

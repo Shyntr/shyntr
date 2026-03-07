@@ -10,9 +10,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"encoding/xml"
 	"errors"
@@ -22,6 +24,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/beevik/etree"
@@ -31,12 +34,13 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
 	goxmldsig "github.com/russellhaering/goxmldsig"
 )
 
 type SamlBuilderUseCase interface {
 	BuildServiceProvider(ctx context.Context, tenantID string, conn *entity.SAMLConnection) (*crewjamsaml.ServiceProvider, error)
-	InitiateSSO(ctx context.Context, tenantID, connectionID, relayState string) (string, string, error)
+	InitiateSSO(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, string, error)
 	HandleACS(ctx context.Context, tenantID string, req *http.Request, possibleRequestID string) (*crewjamsaml.Assertion, string, error)
 	GetIdentityProvider(ctx context.Context, tenantID string) (*crewjamsaml.IdentityProvider, error)
 	GetServiceProvider(r *http.Request, serviceProviderID string) (*crewjamsaml.EntityDescriptor, error)
@@ -47,6 +51,7 @@ type SamlBuilderUseCase interface {
 	GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *entity.SAMLClient, relayState string) (string, error)
 	signElementXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error)
 	generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error)
+	VerifyRelayState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 }
 
 type samlBuilderUseCase struct {
@@ -150,7 +155,7 @@ func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID 
 	return sp, nil
 }
 
-func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connectionID, relayState string) (string, string, error) {
+func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, string, error) {
 	conn, err := s.connRepo.GetByID(ctx, connectionID)
 	if err != nil {
 		return "", "", fmt.Errorf("connection not found: %w", err)
@@ -214,6 +219,15 @@ func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connecti
 
 	if ssoURL == "" {
 		return "", "", fmt.Errorf("no SSO URL found for HTTP-Redirect or HTTP-POST bindings")
+	}
+
+	hash := sha256.Sum256([]byte(csrfToken))
+	csrfHash := hex.EncodeToString(hash[:])
+	plainState := fmt.Sprintf("%s|%s|%s", loginChallenge, connectionID, csrfHash)
+
+	relayState, err := shcrypto.EncryptAES([]byte(plainState), []byte(s.Config.AppSecret))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encrypt relay state: %w", err)
 	}
 
 	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, crewjamsaml.HTTPPostBinding)
@@ -833,6 +847,27 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(sp.SLOURL, b64Resp, relayState), nil
+}
+
+func (s *samlBuilderUseCase) VerifyRelayState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error) {
+	decryptedBytes, err := shcrypto.DecryptAES(encryptedState, []byte(s.Config.AppSecret))
+	if err != nil {
+		return "", "", fmt.Errorf("invalid relay state signature: %w", err)
+	}
+
+	parts := strings.Split(string(decryptedBytes), "|")
+	if len(parts) != 3 {
+		return "", "", errors.New("malformed relay state payload")
+	}
+
+	expectedHash := parts[2]
+	hash := sha256.Sum256([]byte(csrfToken))
+	actualHash := hex.EncodeToString(hash[:])
+	if expectedHash != actualHash {
+		return "", "", errors.New("csrf token mismatch")
+	}
+
+	return parts[0], parts[1], nil
 }
 
 func buildHTMLForm(acsURL, b64Resp, relayState string) string {

@@ -19,6 +19,7 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/repository"
 	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
+	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
@@ -70,7 +71,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
 	auditLogger := audit.NewAuditLogger(db)
 
-	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig.ClientSecretsHasher)
+	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
@@ -79,8 +80,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	handler := handlers.NewManagementHandler(db, fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase,
-		authUseCase, auditLogger, sessionUseCase, connectionUseCase, tenantUseCase)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -116,7 +116,7 @@ func TestManagementAPI_Security(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var clients []models.OAuth2ClientGORM
+		var clients []entity.OAuth2Client
 		err := json.Unmarshal(w.Body.Bytes(), &clients)
 		assert.NoError(t, err)
 

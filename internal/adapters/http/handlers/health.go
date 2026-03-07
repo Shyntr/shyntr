@@ -1,26 +1,27 @@
 package handlers
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
+	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 )
 
 type HealthHandler struct {
-	DB *gorm.DB
+	healthUse usecase.HealthUseCase
 }
 
-func NewHealthHandler(db *gorm.DB) *HealthHandler {
-	return &HealthHandler{DB: db}
+func NewHealthHandler(healthUse usecase.HealthUseCase) *HealthHandler {
+	return &HealthHandler{healthUse: healthUse}
 }
 
 func (h *HealthHandler) Check(c *gin.Context) {
-	sqlDB, err := h.DB.DB()
 	dbStatus := "connected"
-	if err != nil || sqlDB.Ping() != nil {
+	if err := h.healthUse.CheckDatabase(c.Request.Context()); err != nil {
 		dbStatus = "disconnected"
 	}
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"status":   "up",
 		"database": dbStatus,
 		"service":  "Shyntr",

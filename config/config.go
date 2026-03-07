@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	DEVELOPMENT         string   `mapstructure:"DEVELOPMENT"`
 	DSN                 string   `mapstructure:"DSN"`
 	DatabaseURL         string   `mapstructure:"DATABASE_URL"`
 	Port                string   `mapstructure:"PORT"`
@@ -41,6 +42,7 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
+	viper.SetDefault("DEVELOPMENT", false)
 	viper.SetDefault("PORT", "7496")
 	viper.SetDefault("ADMIN_PORT", "7497")
 	viper.SetDefault("DSN", "postgres://shyntr:secretpassword@localhost:5432/shyntr?sslmode=disable")
@@ -69,6 +71,7 @@ func LoadConfig() *Config {
 	viper.SetDefault("DB_MAX_IDLE_CONNS", 10)
 	viper.SetDefault("DB_MAX_OPEN_CONNS", 100)
 
+	mustBind("DEVELOPMENT")
 	mustBind(consts.EnvDatabaseDSN)
 	mustBind("DATABASE_URL")
 	mustBind("PORT")
