@@ -221,15 +221,7 @@ func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connecti
 		return "", "", fmt.Errorf("no SSO URL found for HTTP-Redirect or HTTP-POST bindings")
 	}
 
-	hash := sha256.Sum256([]byte(csrfToken))
-	csrfHash := hex.EncodeToString(hash[:])
-	plainState := fmt.Sprintf("%s|%s|%s", loginChallenge, connectionID, csrfHash)
-
-	relayState, err := shcrypto.EncryptAES([]byte(plainState), []byte(s.Config.AppSecret))
-	if err != nil {
-		return "", "", fmt.Errorf("failed to encrypt relay state: %w", err)
-	}
-
+	relayState := loginChallenge
 	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, crewjamsaml.HTTPPostBinding)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)

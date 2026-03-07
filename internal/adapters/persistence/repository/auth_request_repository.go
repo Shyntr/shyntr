@@ -68,10 +68,8 @@ func (r *authRequestRepository) GetAuthenticatedLoginRequestBySubject(ctx contex
 }
 
 func (r *authRequestRepository) UpdateLoginRequest(ctx context.Context, req *entity.LoginRequest) error {
-	dbModel := models.LoginRequestToUpdateMap(req)
-	return r.db.WithContext(ctx).Model(&models.LoginRequestGORM{}).
-		Where("id = ?", req.ID).
-		Updates(dbModel).Error
+	dbModel := models.FromDomainLoginRequest(req)
+	return r.db.WithContext(ctx).Save(dbModel).Error
 }
 
 func (r *authRequestRepository) SaveConsentRequest(ctx context.Context, req *entity.ConsentRequest) error {

@@ -4,8 +4,10 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"encoding/xml"
@@ -91,6 +93,11 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		return
 	}
 	csrfToken, _ := utils2.GenerateRandomHex(32)
+	sameSiteMode := http.SameSiteLaxMode
+	if h.Config.CookieSecure {
+		sameSiteMode = http.SameSiteNoneMode
+	}
+	c.SetSameSite(sameSiteMode)
 	c.SetCookie("shyntr_fed_csrf", csrfToken, 600, "/", "", h.Config.CookieSecure, true)
 
 	redirectURLOrHTML, requestID, err := h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
@@ -115,12 +122,16 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		ctxData = make(map[string]interface{})
 	}
 	ctxData["connection_id"] = connectionID
+	hash := sha256.Sum256([]byte(csrfToken))
+	ctxData["csrf_hash"] = hex.EncodeToString(hash[:])
+
+	loginReq.Context, _ = json.Marshal(ctxData)
 	loginReq.Context, _ = json.Marshal(ctxData)
 	if requestID != "" {
 		loginReq.SAMLRequestID = requestID
 	}
 
-	loginReq, err = h.AuthUse.CreateLoginRequest(c, loginReq)
+	loginReq, err = h.AuthUse.UpdateLoginRequest(c.Request.Context(), loginReq)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to save Login request", zap.Error(err), zap.String("protocol", "saml"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "login_request_save_failed", "details": err.Error()})
@@ -142,47 +153,47 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	relayState := c.PostForm("RelayState")
 	if relayState == "" {
-		logger.FromGin(c).Warn("Missing RelayState in SAML Response", zap.String("protocol", "saml"))
+		relayState = c.Query("RelayState")
+	}
+	if relayState == "" {
+		logger.FromGin(c).Error("SAML ACS failed: RelayState is completely missing")
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_relay_state"})
 		return
 	}
 
 	csrfCookie, err := c.Cookie("shyntr_fed_csrf")
 	if err != nil || csrfCookie == "" {
+		logger.FromGin(c).Warn("Missing CSRF Cookie on ACS")
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing_csrf_cookie"})
 		return
 	}
 	c.SetCookie("shyntr_fed_csrf", "", -1, "/", "", h.Config.CookieSecure, true)
 
-	loginChallenge, expectedConnID, err := h.samlBuilderUseCase.VerifyRelayState(relayState, csrfCookie)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_relay_state"})
-		return
-	}
+	loginChallenge := relayState
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
-		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", relayState), zap.String("protocol", "saml"))
+		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", loginChallenge))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session"})
-		return
-	}
-
-	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
-	if err != nil {
-		logger.FromGin(c).Warn("SAML ACS Validation Failed", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_saml_response", "details": err.Error()})
 		return
 	}
 
 	var ctxData map[string]interface{}
 	_ = json.Unmarshal(loginReq.Context, &ctxData)
+	expectedCsrfHash, _ := ctxData["csrf_hash"].(string)
+	actualHash := sha256.Sum256([]byte(csrfCookie))
+	if hex.EncodeToString(actualHash[:]) != expectedCsrfHash {
+		logger.FromGin(c).Error("CSRF Flow Hijacking Attempt!")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_csrf_token"})
+		return
+	}
 	expectedConnID, ok := ctxData["connection_id"].(string)
 	if !ok || expectedConnID == "" {
-		logger.FromGin(c).Error("SAML Flow Hijacking Attempt: Missing connection_id in state", zap.String("protocol", "saml"))
+		logger.FromGin(c).Error("Missing connection_id in session state")
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session_state"})
 		return
 	}
-
+	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
 	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, expectedConnID)
 	if err != nil {
 		logger.FromGin(c).Warn("Connection not found for stored state", zap.String("connection_id", expectedConnID))
@@ -552,7 +563,7 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 	connectionID := c.Query("connection_id")
 	relayState := c.Query("RelayState")
 
-	conn, connErr := h.SAMLUse.GetConnectionByIdpEntity(c.Request.Context(), tenantID, connectionID)
+	conn, connErr := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
 	if connectionID == "" {
 		logger.FromGin(c).Warn("SAML Connection is empty.")
 		if relayState != "" {

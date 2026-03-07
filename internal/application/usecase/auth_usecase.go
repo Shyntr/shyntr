@@ -13,6 +13,7 @@ import (
 
 type AuthUseCase interface {
 	CreateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error)
+	UpdateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error)
 	GetLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error)
 	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]entity.LoginRequest, error)
 	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error)
@@ -51,6 +52,14 @@ func (u *authUseCase) CreateLoginRequest(ctx context.Context, req *entity.LoginR
 	req.Active = true
 
 	if err := u.repo.SaveLoginRequest(ctx, req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (u *authUseCase) UpdateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error) {
+	req.Active = true
+	if err := u.repo.UpdateLoginRequest(ctx, req); err != nil {
 		return nil, err
 	}
 	return req, nil
