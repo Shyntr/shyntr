@@ -63,12 +63,12 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 
 	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,
-		connectionUseCase, tenantUseCase)
+		connectionUseCase, tenantUseCase, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

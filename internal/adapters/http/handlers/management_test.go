@@ -77,8 +77,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
 	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase)
 
