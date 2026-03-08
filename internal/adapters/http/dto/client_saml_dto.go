@@ -44,22 +44,41 @@ type SAMLClientResponse struct {
 
 func (req *CreateSAMLClientRequest) ToDomain() *entity.SAMLClient {
 	return &entity.SAMLClient{
-		TenantID:    req.TenantID,
-		Name:        req.Name,
-		EntityID:    req.EntityID,
-		ACSURL:      req.ACSURL,
-		MetadataURL: req.MetadataURL,
+		TenantID:                req.TenantID,
+		Name:                    req.Name,
+		EntityID:                req.EntityID,
+		ACSURL:                  req.ACSURL,
+		SLOURL:                  req.SLOURL,
+		SPCertificate:           req.SPCertificate,
+		SPEncryptionCertificate: req.SPEncryptionCertificate,
+		MetadataURL:             req.MetadataURL,
+		AttributeMapping:        req.AttributeMapping,
+		ForceAuthn:              req.ForceAuthn,
+		SignResponse:            req.SignResponse,
+		SignAssertion:           req.SignAssertion,
+		EncryptAssertion:        req.EncryptAssertion,
 	}
 }
 
 func FromDomainSAMLClient(c *entity.SAMLClient) *SAMLClientResponse {
 	return &SAMLClientResponse{
-		ID:       c.ID,
-		TenantID: c.TenantID,
-		Name:     c.Name,
-		EntityID: c.EntityID,
-		ACSURL:   c.ACSURL,
-		Active:   c.Active,
+		ID:                      c.ID,
+		TenantID:                c.TenantID,
+		Name:                    c.Name,
+		EntityID:                c.EntityID,
+		ACSURL:                  c.ACSURL,
+		SLOURL:                  c.SLOURL,
+		SPCertificate:           c.SPCertificate,
+		SPEncryptionCertificate: c.SPEncryptionCertificate,
+		MetadataURL:             c.MetadataURL,
+		AttributeMapping:        c.AttributeMapping,
+		ForceAuthn:              c.ForceAuthn,
+		SignResponse:            c.SignResponse,
+		SignAssertion:           c.SignAssertion,
+		EncryptAssertion:        c.EncryptAssertion,
+		Active:                  c.Active,
+		CreatedAt:               c.CreatedAt,
+		UpdatedAt:               c.UpdatedAt,
 	}
 }
 

@@ -486,26 +486,24 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 		return nil, fmt.Errorf("unknown service provider: %s", issuer)
 	}
 
-	if spClient.SPCertificate == "" {
-		return nil, fmt.Errorf("service provider signature validation failed: no certificate registered for entity %s", issuer)
-	}
-
-	block, _ := pem.Decode([]byte(spClient.SPCertificate))
-	if block == nil {
-		return nil, fmt.Errorf("invalid SP certificate format")
-	}
-	spCert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
-	}
-
-	if isRedirectBinding {
-		if err := verifyRedirectSignature(req, spCert); err != nil {
-			return nil, fmt.Errorf("signature validation failed: %w", err)
+	if spClient.SPCertificate != "" {
+		block, _ := pem.Decode([]byte(spClient.SPCertificate))
+		if block == nil {
+			return nil, fmt.Errorf("invalid SP certificate format")
 		}
-	} else {
-		if err := verifyPostSignature(xmlBytes, spCert); err != nil {
-			return nil, fmt.Errorf("xml signature validation failed: %w", err)
+		spCert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
+		}
+
+		if isRedirectBinding {
+			if err := verifyRedirectSignature(req, spCert); err != nil {
+				return nil, fmt.Errorf("signature validation failed: %w", err)
+			}
+		} else {
+			if err := verifyPostSignature(xmlBytes, spCert); err != nil {
+				return nil, fmt.Errorf("xml signature validation failed: %w", err)
+			}
 		}
 	}
 
