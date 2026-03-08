@@ -16,6 +16,7 @@ type CreateSAMLClientRequest struct {
 	SPEncryptionCertificate string                                 `json:"sp_encryption_certificate"`
 	MetadataURL             string                                 `json:"metadata_url"`
 	AttributeMapping        map[string]entity.AttributeMappingRule `json:"attribute_mapping"`
+	AllowedScopes           []string                               `json:"allowed_scopes"`
 	ForceAuthn              bool                                   `json:"force_authn"`
 	SignResponse            bool                                   `json:"sign_response"`
 	SignAssertion           bool                                   `json:"sign_assertion"`
@@ -33,6 +34,7 @@ type SAMLClientResponse struct {
 	SPEncryptionCertificate string                                 `json:"sp_encryption_certificate"`
 	MetadataURL             string                                 `json:"metadata_url"`
 	AttributeMapping        map[string]entity.AttributeMappingRule `json:"attribute_mapping"`
+	AllowedScopes           []string                               `json:"allowed_scopes"`
 	ForceAuthn              bool                                   `json:"force_authn"`
 	SignResponse            bool                                   `json:"sign_response"`
 	SignAssertion           bool                                   `json:"sign_assertion"`
@@ -53,6 +55,7 @@ func (req *CreateSAMLClientRequest) ToDomain() *entity.SAMLClient {
 		SPEncryptionCertificate: req.SPEncryptionCertificate,
 		MetadataURL:             req.MetadataURL,
 		AttributeMapping:        req.AttributeMapping,
+		AllowedScopes:           req.AllowedScopes,
 		ForceAuthn:              req.ForceAuthn,
 		SignResponse:            req.SignResponse,
 		SignAssertion:           req.SignAssertion,
@@ -72,6 +75,7 @@ func FromDomainSAMLClient(c *entity.SAMLClient) *SAMLClientResponse {
 		SPEncryptionCertificate: c.SPEncryptionCertificate,
 		MetadataURL:             c.MetadataURL,
 		AttributeMapping:        c.AttributeMapping,
+		AllowedScopes:           c.AllowedScopes,
 		ForceAuthn:              c.ForceAuthn,
 		SignResponse:            c.SignResponse,
 		SignAssertion:           c.SignAssertion,

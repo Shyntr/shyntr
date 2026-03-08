@@ -26,10 +26,12 @@ type BlacklistedJTI struct {
 }
 
 type AttributeMappingRule struct {
-	Source   string `json:"source"`
-	Type     string `json:"type"`
-	Fallback string `json:"fallback,omitempty"`
-	Value    string `json:"value,omitempty"`
+	Source       string   `json:"source"`
+	Target       string   `json:"target"`
+	Type         string   `json:"type"`
+	TargetScopes []string `json:"target_scopes,omitempty"`
+	Fallback     string   `json:"fallback,omitempty"`
+	Value        string   `json:"value,omitempty"`
 }
 
 // JWTSession represents explicitly stored JWT states if required by custom flows or specific Fosite implementations.

@@ -1,5 +1,7 @@
 package utils
 
+import "github.com/nevzatcirak/shyntr/internal/domain/entity"
+
 // Standard OIDC Claim Mappings
 var scopeToClaims = map[string][]string{
 	"profile": {"name", "family_name", "given_name", "middle_name", "nickname", "preferred_username", "profile", "picture", "website", "gender", "birthdate", "zoneinfo", "locale", "updated_at"},
@@ -9,23 +11,19 @@ var scopeToClaims = map[string][]string{
 }
 
 // MapClaims filters the raw context map based on requested scopes and tenant context.
-func MapClaims(subject string, contextMap map[string]interface{}, scopes []string) map[string]interface{} {
+func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes []*entity.Scope) map[string]interface{} {
 	finalClaims := make(map[string]interface{})
-
 	finalClaims["sub"] = subject
+
 	allowedKeys := make(map[string]bool)
 
 	allowedKeys["tenant_id"] = true
 	allowedKeys["idp"] = true
 	allowedKeys["amr"] = true
 
-	for _, scope := range scopes {
-		if keys, ok := scopeToClaims[scope]; ok {
-			for _, key := range keys {
-				allowedKeys[key] = true
-			}
-		} else {
-			allowedKeys[scope] = true
+	for _, scope := range grantedScopes {
+		for _, claim := range scope.Claims {
+			allowedKeys[claim] = true
 		}
 	}
 
@@ -40,6 +38,7 @@ func MapClaims(subject string, contextMap map[string]interface{}, scopes []strin
 			}
 			continue
 		}
+
 		if allowedKeys[key] {
 			finalClaims[key] = value
 		}

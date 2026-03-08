@@ -1,11 +1,12 @@
 package models
 
 import (
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"gorm.io/gorm"
 )
 
 type SAMLClientGORM struct {
@@ -19,11 +20,12 @@ type SAMLClientGORM struct {
 	SPEncryptionCertificate string                                 `gorm:"type:text"`
 	MetadataURL             string                                 `gorm:"type:text"`
 	AttributeMapping        map[string]entity.AttributeMappingRule `gorm:"serializer:json"`
+	AllowedScopes           pq.StringArray                         `gorm:"type:text[]"`
 	ForceAuthn              bool                                   `gorm:"default:false"`
 	SignResponse            bool                                   `gorm:"default:true"`
 	SignAssertion           bool                                   `gorm:"default:true"`
 	EncryptAssertion        bool                                   `gorm:"default:false"`
-	Active                  bool                                   `gorm:"default:true"`
+	Active                  bool                                   `gorm:"default:true;index"`
 	CreatedAt               time.Time                              `gorm:"autoCreateTime"`
 	UpdatedAt               time.Time                              `gorm:"autoUpdateTime"`
 	DeletedAt               gorm.DeletedAt                         `gorm:"index"`
@@ -50,6 +52,7 @@ func (m *SAMLClientGORM) ToDomain() *entity.SAMLClient {
 		SPEncryptionCertificate: m.SPEncryptionCertificate,
 		MetadataURL:             m.MetadataURL,
 		AttributeMapping:        m.AttributeMapping,
+		AllowedScopes:           m.AllowedScopes,
 		ForceAuthn:              m.ForceAuthn,
 		SignResponse:            m.SignResponse,
 		SignAssertion:           m.SignAssertion,
@@ -72,6 +75,7 @@ func FromDomainSAMLClient(e *entity.SAMLClient) *SAMLClientGORM {
 		SPEncryptionCertificate: e.SPEncryptionCertificate,
 		MetadataURL:             e.MetadataURL,
 		AttributeMapping:        e.AttributeMapping,
+		AllowedScopes:           e.AllowedScopes,
 		ForceAuthn:              e.ForceAuthn,
 		SignResponse:            e.SignResponse,
 		SignAssertion:           e.SignAssertion,

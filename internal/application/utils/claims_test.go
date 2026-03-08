@@ -4,69 +4,60 @@ import (
 	"testing"
 
 	"github.com/nevzatcirak/shyntr/internal/application/utils"
+	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMapClaims(t *testing.T) {
+func TestMapClaims_ZeroTrust_Isolation(t *testing.T) {
 	subject := "user-123"
-
-	rawContextMap := map[string]interface{}{
-		"tenant_id":             "tenant-a",
-		"name":                  "John Doe",
-		"email":                 "john@example.com",
-		"email_verified":        true,
-		"phone_number":          "+123456789",
-		"secret_internal_score": 99,
-		"address":               "123 Main St",
+	userContext := map[string]interface{}{
+		"tenant_id": "tenant-alpha",
+		"idp":       "azure-ad",
+		"login_claims": map[string]interface{}{
+			"email":       "alice@shyntr.com",
+			"department":  "Engineering",
+			"salary_band": "L5",
+			"title":       "Senior IAM Architect",
+		},
+		"some_random_injected_data": "malicious_payload",
 	}
 
-	tests := []struct {
-		name           string
-		scopes         []string
-		expectedKeys   []string
-		unexpectedKeys []string
-	}{
+	grantedScopesEmailOnly := []*entity.Scope{
 		{
-			name:           "Sadece sub ve tenant_id (En Az Ayrıcalık)",
-			scopes:         []string{},
-			expectedKeys:   []string{"sub", "tenant_id"},
-			unexpectedKeys: []string{"name", "email", "secret_internal_score"},
-		},
-		{
-			name:           "Email Scope talebi",
-			scopes:         []string{"email"},
-			expectedKeys:   []string{"sub", "tenant_id", "email", "email_verified"},
-			unexpectedKeys: []string{"name", "phone_number", "secret_internal_score"},
-		},
-		{
-			name:           "Profile ve Email Scope talebi",
-			scopes:         []string{"profile", "email"},
-			expectedKeys:   []string{"sub", "tenant_id", "name", "email", "email_verified"},
-			unexpectedKeys: []string{"phone_number", "address", "secret_internal_score"},
-		},
-		{
-			name:           "Özel (Custom) Scope talebi",
-			scopes:         []string{"custom_scope_not_in_map"},
-			expectedKeys:   []string{"sub", "tenant_id"},
-			unexpectedKeys: []string{"secret_internal_score"},
+			Name:   "email",
+			Claims: []string{"email", "email_verified"},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := utils.MapClaims(subject, rawContextMap, tt.scopes)
+	filteredClaimsA := utils.MapClaims(subject, userContext, grantedScopesEmailOnly)
 
-			for _, key := range tt.expectedKeys {
-				_, exists := result[key]
-				assert.True(t, exists, "Expected key '%s' missing in mapped claims", key)
-			}
+	assert.Equal(t, subject, filteredClaimsA["sub"], "Subject must always be present")
+	assert.Equal(t, "tenant-alpha", filteredClaimsA["tenant_id"], "System context must be preserved")
 
-			for _, key := range tt.unexpectedKeys {
-				_, exists := result[key]
-				assert.False(t, exists, "Unexpected key '%s' leaked in mapped claims", key)
-			}
+	assert.Equal(t, "alice@shyntr.com", filteredClaimsA["email"])
 
-			assert.Equal(t, subject, result["sub"])
-		})
+	_, hasSalary := filteredClaimsA["salary_band"]
+	assert.False(t, hasSalary, "SECURITY REGRESSION: Sensitive data leaked without scope authorization!")
+
+	_, hasDept := filteredClaimsA["department"]
+	assert.False(t, hasDept, "SECURITY REGRESSION: Unrequested claim mapped to output!")
+
+	_, hasMalicious := filteredClaimsA["some_random_injected_data"]
+	assert.False(t, hasMalicious, "SECURITY REGRESSION: Unmapped root context leaked!")
+
+	grantedScopesHR := []*entity.Scope{
+		{
+			Name:   "email",
+			Claims: []string{"email"},
+		},
+		{
+			Name:   "hr_data",
+			Claims: []string{"department", "salary_band", "title"},
+		},
 	}
+
+	filteredClaimsB := utils.MapClaims(subject, userContext, grantedScopesHR)
+
+	assert.Equal(t, "L5", filteredClaimsB["salary_band"], "Authorized sensitive data should be present")
+	assert.Equal(t, "Engineering", filteredClaimsB["department"])
 }

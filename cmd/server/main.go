@@ -711,6 +711,7 @@ func runServer() {
 	replayRepository := repository.NewSAMLReplayRepository(db)
 	eventRepository := repository.NewWebhookEventRepository(db)
 	healthRepository := repository.NewHealthRepository(db)
+	scopeRepository := repository.NewScopeRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
@@ -724,8 +725,9 @@ func runServer() {
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
 	auditUseCase := usecase.NewAuditUseCase(logRepository)
 	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger)
+	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase)
 	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger)
@@ -734,7 +736,7 @@ func runServer() {
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		fositeConfig, cfg, provider, keyMgr)
+		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
 
 	publicSrv := &http.Server{
 		Addr:    ":" + cfg.Port,

@@ -35,13 +35,14 @@ type OAuth2Handler struct {
 	AuthReq          usecase.AuthUseCase
 	OIDCConnUse      usecase.OIDCConnectionUseCase
 	TenantUse        usecase.TenantUseCase
+	ScopeUse         usecase.ScopeUseCase
 }
 
 func NewOAuth2Handler(p *utils2.Provider, km *utils2.KeyManager, cfg *config.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase,
 	AuthReq usecase.AuthUseCase, OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
-	TenantUse usecase.TenantUseCase) *OAuth2Handler {
+	TenantUse usecase.TenantUseCase, ScopeUse usecase.ScopeUseCase) *OAuth2Handler {
 	return &OAuth2Handler{Provider: p, KeyMgr: km, Config: cfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
-		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse}
+		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse, ScopeUse: ScopeUse}
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -330,7 +331,12 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	if userContext != nil {
-		mappedClaims := utils2.MapClaims(userID, userContext, grantedScopes)
+		scopeEntities, err := h.ScopeUse.GetScopesByNames(ctx, tenantID, grantedScopes)
+		if err != nil {
+			logger.FromGin(c).Error("Failed to fetch dynamic scopes", zap.Error(err))
+		}
+
+		mappedClaims := utils2.MapClaims(userID, userContext, scopeEntities)
 		for k, v := range mappedClaims {
 			session.Claims.Add(k, v)
 			session.JWTClaims.Extra[k] = v
@@ -544,6 +550,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 }
 
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
+	tenantID := h.resolveTenantID(c)
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
@@ -593,7 +600,12 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		}
 	}
 
-	safeClaims := utils2.MapClaims(subject, userCtx, grantedScopes)
+	scopeEntities, err := h.ScopeUse.GetScopesByNames(c.Request.Context(), tenantID, grantedScopes)
+	if err != nil {
+		logger.FromGin(c).Error("Failed to fetch dynamic scopes", zap.Error(err))
+	}
+
+	safeClaims := utils2.MapClaims(subject, userCtx, scopeEntities)
 
 	c.JSON(http.StatusOK, safeClaims)
 }

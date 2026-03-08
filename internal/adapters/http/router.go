@@ -28,6 +28,7 @@ func SetupRouter(
 	webhookUseCase usecase.WebhookUseCase,
 	samlBuilderUseCase usecase.SamlBuilderUseCase,
 	healthUseCase usecase.HealthUseCase,
+	scopeUseCase usecase.ScopeUseCase,
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
@@ -41,13 +42,14 @@ func SetupRouter(
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
 	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
-		connectionUseCase, tenantUseCase)
+		connectionUseCase, tenantUseCase, scopeUseCase)
 
 	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,
-		auth2SessionUseCase, samlClientUseCase, clientUseCase, webhookUseCase)
+		auth2SessionUseCase, samlClientUseCase, clientUseCase, webhookUseCase, scopeUseCase)
 	webhookHandler := handlers.NewWebhookHandler(webhookUseCase, cfg)
 	auditHandler := handlers.NewAuditHandler(auditUseCase)
+	scopeHandler := handlers.NewScopeHandler(scopeUseCase)
 
 	public := gin.New()
 	public.Use(gin.Recovery())
@@ -177,6 +179,11 @@ func SetupRouter(
 			mgmtGroup.POST("/tenants", mgmtHandler.CreateTenant)
 			mgmtGroup.PUT("/tenants/:id", mgmtHandler.UpdateTenant)
 			mgmtGroup.DELETE("/tenants/:id", mgmtHandler.DeleteTenant)
+			mgmtGroup.GET("/tenants/:id/scopes", scopeHandler.List)
+			mgmtGroup.GET("/tenants/:id/scopes/:scope_id", scopeHandler.Get)
+			mgmtGroup.POST("/tenants/:id/scopes", scopeHandler.Create)
+			mgmtGroup.PUT("/tenants/:id/scopes/:scope_id", scopeHandler.Update)
+			mgmtGroup.DELETE("/tenants/:id/scopes/:scope_id", scopeHandler.Delete)
 
 			// OAuth2 Clients
 			mgmtGroup.GET("/clients", mgmtHandler.ListClients)

@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.uber.org/zap"
 
 	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
@@ -15,15 +17,32 @@ type OIDCConnectionUseCase interface {
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
 	ListConnections(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error)
+	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule)
 }
 
 type oidcConnectionUseCase struct {
-	repo  port.OIDCConnectionRepository
-	audit port.AuditLogger
+	repo     port.OIDCConnectionRepository
+	audit    port.AuditLogger
+	scopeUse ScopeUseCase
 }
 
-func NewOIDCConnectionUseCase(repo port.OIDCConnectionRepository, audit port.AuditLogger) OIDCConnectionUseCase {
-	return &oidcConnectionUseCase{repo: repo, audit: audit}
+func NewOIDCConnectionUseCase(repo port.OIDCConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase) OIDCConnectionUseCase {
+	return &oidcConnectionUseCase{repo: repo, audit: audit, scopeUse: scopeUse}
+}
+
+func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule) {
+	for _, rule := range mappings {
+		if len(rule.TargetScopes) > 0 && rule.Target != "" {
+			err := u.scopeUse.AddClaimToScopes(ctx, tenantID, rule.Target, rule.TargetScopes)
+			if err != nil {
+				logger.Log.Warn("Failed to auto-bind claim to scopes during connection save",
+					zap.String("tenant_id", tenantID),
+					zap.String("claim", rule.Target),
+					zap.Error(err),
+				)
+			}
+		}
+	}
 }
 
 func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *entity.OIDCConnection, actorIP, userAgent string) (*entity.OIDCConnection, error) {
@@ -43,7 +62,8 @@ func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *enti
 		return nil, err
 	}
 
-	u.audit.LogWithoutIP(conn.TenantID, "system", "management.connection.oidc.create", map[string]interface{}{
+	u.bindMappingScopes(ctx, conn.TenantID, conn.AttributeMapping)
+	u.audit.Log(conn.TenantID, "system", "management.connection.oidc.create", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"issuer_url":    conn.IssuerURL,
 		"ip":            actorIP,
@@ -70,7 +90,8 @@ func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *enti
 		return err
 	}
 
-	u.audit.Log(conn.TenantID, "system", "management.connection.oidc.create", actorIP, userAgent, map[string]interface{}{
+	u.bindMappingScopes(ctx, conn.TenantID, conn.AttributeMapping)
+	u.audit.Log(conn.TenantID, "system", "management.connection.oidc.update", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"issuer_url":    conn.IssuerURL,
 		"ip":            actorIP,

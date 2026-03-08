@@ -44,13 +44,14 @@ type SAMLHandler struct {
 	Mapper             *mapper.Mapper
 	KeyMgr             *utils.KeyManager
 	wh                 usecase.WebhookUseCase
+	ScopeUse           usecase.ScopeUseCase
 }
 
 func NewSAMLHandler(Config *config.Config, KeyMgr *utils.KeyManager, samlBuilderUseCase usecase.SamlBuilderUseCase, ClientUseCase usecase.OAuth2ClientUseCase, m *mapper.Mapper,
 	AuthUse usecase.AuthUseCase, SAMLUse usecase.SAMLConnectionUseCase, OAuthSessionUse usecase.OAuth2SessionUseCase,
-	SAMLClientUse usecase.SAMLClientUseCase, OIDCClientUse usecase.OAuth2ClientUseCase, wh usecase.WebhookUseCase) *SAMLHandler {
+	SAMLClientUse usecase.SAMLClientUseCase, OIDCClientUse usecase.OAuth2ClientUseCase, wh usecase.WebhookUseCase, ScopeUse usecase.ScopeUseCase) *SAMLHandler {
 	return &SAMLHandler{Config: Config, KeyMgr: KeyMgr, samlBuilderUseCase: samlBuilderUseCase, ClientUseCase: ClientUseCase, Mapper: m, AuthUse: AuthUse, SAMLUse: SAMLUse,
-		OAuthSessionUse: OAuthSessionUse, SAMLClientUse: SAMLClientUse, OIDCClientUse: OIDCClientUse, wh: wh}
+		OAuthSessionUse: OAuthSessionUse, SAMLClientUse: SAMLClientUse, OIDCClientUse: OIDCClientUse, wh: wh, ScopeUse: ScopeUse}
 }
 
 func (h *SAMLHandler) SPMetadata(c *gin.Context) {
@@ -541,10 +542,18 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 		userAttrs["email"] = loginReq.Subject
 	}
 
-	finalAttrs, err := h.Mapper.Map(userAttrs, spClient.AttributeMapping)
+	allowedScopeEntities, err := h.ScopeUse.GetScopesByNames(c.Request.Context(), tenantID, spClient.AllowedScopes)
+	if err != nil {
+		logger.FromGin(c).Error("Failed to resolve SAML allowed scopes", zap.Error(err))
+		allowedScopeEntities = []*entity.Scope{}
+	}
+
+	secureClaims := utils.MapClaims(loginReq.Subject, userAttrs, allowedScopeEntities)
+
+	finalAttrs, err := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
 	if err != nil {
 		logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))
-		finalAttrs = userAttrs
+		finalAttrs = secureClaims
 	}
 
 	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)

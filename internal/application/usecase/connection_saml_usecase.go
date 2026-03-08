@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"go.uber.org/zap"
 
 	"github.com/crewjam/saml"
 	"github.com/nevzatcirak/shyntr/internal/application/port"
@@ -20,17 +22,35 @@ type SAMLConnectionUseCase interface {
 	UpdateConnection(ctx context.Context, conn *entity.SAMLConnection, actorIP, userAgent string) error
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
 	ListConnections(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error)
+	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule)
 }
 
 type samlConnectionUseCase struct {
-	repo  port.SAMLConnectionRepository
-	audit port.AuditLogger
+	repo     port.SAMLConnectionRepository
+	audit    port.AuditLogger
+	scopeUse ScopeUseCase
 }
 
-func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger) SAMLConnectionUseCase {
+func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase) SAMLConnectionUseCase {
 	return &samlConnectionUseCase{
-		repo:  repo,
-		audit: audit,
+		repo:     repo,
+		audit:    audit,
+		scopeUse: scopeUse,
+	}
+}
+
+func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule) {
+	for _, rule := range mappings {
+		if len(rule.TargetScopes) > 0 && rule.Target != "" {
+			err := u.scopeUse.AddClaimToScopes(ctx, tenantID, rule.Target, rule.TargetScopes)
+			if err != nil {
+				logger.Log.Warn("Failed to auto-bind claim to scopes during connection save",
+					zap.String("tenant_id", tenantID),
+					zap.String("claim", rule.Target),
+					zap.Error(err),
+				)
+			}
+		}
 	}
 }
 
@@ -112,7 +132,8 @@ func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *enti
 		return nil, err
 	}
 
-	u.audit.LogWithoutIP(conn.TenantID, "system", "management.connection.saml.create", map[string]interface{}{
+	u.bindMappingScopes(ctx, conn.TenantID, conn.AttributeMapping)
+	u.audit.Log(conn.TenantID, "system", "management.connection.saml.create", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"entity_id":     conn.IdpEntityID,
 		"ip":            actorIP,
@@ -209,6 +230,7 @@ func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *enti
 	if err := u.repo.Update(ctx, conn); err != nil {
 		return err
 	}
+	u.bindMappingScopes(ctx, conn.TenantID, conn.AttributeMapping)
 
 	u.audit.Log(conn.TenantID, "system", "management.connection.saml.update", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,

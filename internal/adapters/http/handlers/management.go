@@ -397,6 +397,7 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		SignResponse:            client.SignResponse,
 		SignAssertion:           client.SignAssertion,
 		EncryptAssertion:        client.EncryptAssertion,
+		AllowedScopes:           client.AllowedScopes,
 		Active:                  true,
 	}
 
@@ -432,6 +433,7 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.SignResponse = req.SignResponse
 	client.SignAssertion = req.SignAssertion
 	client.EncryptAssertion = req.EncryptAssertion
+	client.AllowedScopes = req.AllowedScopes
 
 	if client.MetadataURL != "" {
 		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
