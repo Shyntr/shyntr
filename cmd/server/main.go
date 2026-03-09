@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/crewjam/saml"
+	"github.com/lib/pq"
 	"github.com/nevzatcirak/shyntr/config"
 	"github.com/nevzatcirak/shyntr/internal/adapters/audit"
 	router "github.com/nevzatcirak/shyntr/internal/adapters/http"
@@ -89,7 +91,7 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			if tenantID == "" {
-				tenantID, _ = utils.GenerateRandomHex(4) // Random ID if empty
+				tenantID, _ = utils.GenerateRandomHex(4)
 			}
 			if tenantName == "" {
 				tenantName = tenantID
@@ -195,18 +197,146 @@ func main() {
 	}
 
 	// ==========================================
+	// SCOPE COMMANDS
+	// ==========================================
+
+	var (
+		scopeName, scopeDesc string
+		scopeClaims          []string
+		scopeIsSystem        bool
+	)
+
+	var createScopeCmd = &cobra.Command{
+		Use:   "create-scope",
+		Short: "Create a new scope for a tenant",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("Database connection failed: %v", err)
+			}
+			auditLogger := audit.NewAuditLogger(db)
+
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if scopeName == "" {
+				log.Fatal("Scope name is required")
+			}
+
+			scopeID, _ := utils.GenerateRandomHex(8)
+			scope := models.ScopeGORM{
+				ID:          scopeID,
+				TenantID:    tenantID,
+				Name:        strings.ToLower(strings.TrimSpace(scopeName)),
+				Description: scopeDesc,
+				Claims:      pq.StringArray(scopeClaims),
+				IsSystem:    scopeIsSystem,
+				Active:      true,
+			}
+
+			if err := db.Create(&scope).Error; err != nil {
+				log.Fatalf("Failed to create scope: %v", err)
+			}
+			auditLogger.Log(tenantID, "system_cli", "cli.scope.create", "127.0.0.1", "shyntr-cli", map[string]interface{}{"scope_name": scope.Name})
+			log.Printf("Scope created successfully: %s (%s)", scope.Name, scope.ID)
+		},
+	}
+	createScopeCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createScopeCmd.Flags().StringVar(&scopeName, "name", "", "Scope Name (Required)")
+	createScopeCmd.Flags().StringVar(&scopeDesc, "desc", "", "Scope Description")
+	createScopeCmd.Flags().StringSliceVar(&scopeClaims, "claims", nil, "Comma separated claims (e.g. email,email_verified)")
+	createScopeCmd.Flags().BoolVar(&scopeIsSystem, "system", false, "Is System Scope?")
+
+	var getScopeCmd = &cobra.Command{
+		Use:   "get-scope [id]",
+		Short: "Get scope details",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("Database connection failed: %v", err)
+			}
+			var scope models.ScopeGORM
+			if err := db.First(&scope, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Scope not found: %v", err)
+			}
+			printJSON(scope)
+		},
+	}
+
+	var updateScopeCmd = &cobra.Command{
+		Use:   "update-scope [id]",
+		Short: "Update scope details",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("Database connection failed: %v", err)
+			}
+			updates := make(map[string]interface{})
+			if scopeName != "" {
+				updates["name"] = strings.ToLower(strings.TrimSpace(scopeName))
+			}
+			if scopeDesc != "" {
+				updates["description"] = scopeDesc
+			}
+			if len(scopeClaims) > 0 {
+				updates["claims"] = pq.StringArray(scopeClaims)
+			}
+
+			if len(updates) == 0 {
+				log.Println("No changes detected.")
+				return
+			}
+			if err := db.Model(&models.ScopeGORM{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
+				log.Fatalf("Update failed: %v", err)
+			}
+			log.Println("Scope updated.")
+		},
+	}
+	updateScopeCmd.Flags().StringVar(&scopeName, "name", "", "New Scope Name")
+	updateScopeCmd.Flags().StringVar(&scopeDesc, "desc", "", "New Description")
+	updateScopeCmd.Flags().StringSliceVar(&scopeClaims, "claims", nil, "New Claims")
+
+	var deleteScopeCmd = &cobra.Command{
+		Use:   "delete-scope [id]",
+		Short: "Delete a scope",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("Database connection failed: %v", err)
+			}
+			var scope models.ScopeGORM
+			if err := db.First(&scope, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Scope not found")
+			}
+			if scope.IsSystem {
+				log.Fatalf("Cannot delete a system scope via CLI")
+			}
+
+			if err := db.Delete(&models.ScopeGORM{}, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Delete Failed: %v", err)
+			}
+			log.Println("Scope deleted.")
+		},
+	}
+	// ==========================================
 	// OIDC CLIENT COMMANDS
 	// ==========================================
 
-	// CREATE CLIENT
 	var (
-		clientID, clientName, clientSecret string
-		redirectURIs                       []string
-		isPublic                           bool
+		clientID, clientName, clientSecret                         string
+		redirectURIs, postLogoutURIs, clientScopes, clientAudience []string
+		isPublic, skipConsent                                      bool
 	)
 	var createClientCmd = &cobra.Command{
 		Use:   "create-client",
-		Short: "Create OIDC Client (Use flags)",
+		Short: "Create OIDC Client",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
 			db, err := persistence.ConnectDB(cfg)
@@ -214,7 +344,6 @@ func main() {
 				log.Fatalf("Database connection failed: %v", err)
 			}
 
-			// Defaults
 			if tenantID == "" {
 				tenantID = "default"
 			}
@@ -229,6 +358,9 @@ func main() {
 			}
 			if len(redirectURIs) == 0 {
 				redirectURIs = []string{"http://localhost:8080/callback"}
+			}
+			if len(clientScopes) == 0 {
+				clientScopes = []string{"openid", "profile", "email", "offline_access"}
 			}
 
 			hashedSecret := ""
@@ -248,12 +380,16 @@ func main() {
 				Name:                    clientName,
 				Secret:                  hashedSecret,
 				RedirectURIs:            redirectURIs,
+				PostLogoutRedirectURIs:  postLogoutURIs,
+				Audience:                clientAudience,
 				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
 				ResponseTypes:           []string{"code", "token", "id_token", "code id_token", "code token", "code id_token token"},
 				ResponseModes:           []string{"query", "fragment", "form_post"},
-				Scopes:                  []string{"openid", "profile", "email", "offline_access"},
+				Scopes:                  clientScopes,
 				TokenEndpointAuthMethod: authMethod,
 				Public:                  isPublic,
+				EnforcePKCE:             isPublic,
+				SkipConsent:             skipConsent,
 			}
 
 			if err := db.Create(&client).Error; err != nil {
@@ -273,7 +409,11 @@ func main() {
 	createClientCmd.Flags().StringVar(&clientName, "name", "", "Client Name")
 	createClientCmd.Flags().StringVar(&clientSecret, "secret", "", "Client Secret (Auto-generated if empty)")
 	createClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "Comma separated Redirect URIs")
+	createClientCmd.Flags().StringSliceVar(&postLogoutURIs, "post-logout-uris", nil, "Comma separated Post Logout URIs")
+	createClientCmd.Flags().StringSliceVar(&clientScopes, "scopes", nil, "Comma separated scopes")
+	createClientCmd.Flags().StringSliceVar(&clientAudience, "audience", nil, "Comma separated audiences")
 	createClientCmd.Flags().BoolVar(&isPublic, "public", false, "Is Public Client (SPA/Mobile)")
+	createClientCmd.Flags().BoolVar(&skipConsent, "skip-consent", false, "Skip user consent screen")
 
 	var getClientCmd = &cobra.Command{
 		Use:   "get-client [client_id]",
@@ -309,7 +449,13 @@ func main() {
 				updates["name"] = clientName
 			}
 			if len(redirectURIs) > 0 {
-				updates["redirect_uris"] = redirectURIs
+				updates["redirect_uris"] = pq.StringArray(redirectURIs)
+			}
+			if len(postLogoutURIs) > 0 {
+				updates["post_logout_redirect_uris"] = pq.StringArray(postLogoutURIs)
+			}
+			if len(clientScopes) > 0 {
+				updates["scopes"] = pq.StringArray(clientScopes)
 			}
 			if clientSecret != "" {
 				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
@@ -327,6 +473,8 @@ func main() {
 	}
 	updateClientCmd.Flags().StringVar(&clientName, "name", "", "New Client Name")
 	updateClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "New Redirect URIs")
+	updateClientCmd.Flags().StringSliceVar(&postLogoutURIs, "post-logout-uris", nil, "New Post Logout URIs")
+	updateClientCmd.Flags().StringSliceVar(&clientScopes, "scopes", nil, "New Scopes")
 	updateClientCmd.Flags().StringVar(&clientSecret, "secret", "", "New Client Secret")
 
 	var deleteClientCmd = &cobra.Command{
@@ -355,7 +503,9 @@ func main() {
 	// ==========================================
 
 	var (
-		samlEntityID, samlACSURL string
+		samlEntityID, samlACSURL, samlSLOURL string
+		samlAllowedScopes                    []string
+		samlForceAuthn                       bool
 	)
 	var createSAMLClientCmd = &cobra.Command{
 		Use:   "create-saml-client",
@@ -382,6 +532,9 @@ func main() {
 				Name:          clientName,
 				EntityID:      samlEntityID,
 				ACSURL:        samlACSURL,
+				SLOURL:        samlSLOURL,
+				AllowedScopes: pq.StringArray(samlAllowedScopes),
+				ForceAuthn:    samlForceAuthn,
 				Active:        true,
 				SignResponse:  true,
 				SignAssertion: true,
@@ -397,6 +550,9 @@ func main() {
 	createSAMLClientCmd.Flags().StringVar(&clientName, "name", "", "App Name")
 	createSAMLClientCmd.Flags().StringVar(&samlEntityID, "entity-id", "", "Entity ID (Required)")
 	createSAMLClientCmd.Flags().StringVar(&samlACSURL, "acs-url", "", "ACS URL (Required)")
+	createSAMLClientCmd.Flags().StringVar(&samlSLOURL, "slo-url", "", "SLO URL")
+	createSAMLClientCmd.Flags().StringSliceVar(&samlAllowedScopes, "allowed-scopes", nil, "Comma separated allowed scopes")
+	createSAMLClientCmd.Flags().BoolVar(&samlForceAuthn, "force-authn", false, "Force Authentication (ForceAuthn)")
 
 	var getSAMLClientCmd = &cobra.Command{
 		Use:   "get-saml-client [entity_id]",
@@ -431,8 +587,14 @@ func main() {
 			if samlACSURL != "" {
 				updates["acs_url"] = samlACSURL
 			}
+			if samlSLOURL != "" {
+				updates["slo_url"] = samlSLOURL
+			}
 			if clientName != "" {
 				updates["name"] = clientName
+			}
+			if len(samlAllowedScopes) > 0 {
+				updates["allowed_scopes"] = pq.StringArray(samlAllowedScopes)
 			}
 
 			if len(updates) == 0 {
@@ -449,7 +611,9 @@ func main() {
 		},
 	}
 	updateSAMLClientCmd.Flags().StringVar(&samlACSURL, "acs-url", "", "New ACS URL")
+	updateSAMLClientCmd.Flags().StringVar(&samlSLOURL, "slo-url", "", "New SLO URL")
 	updateSAMLClientCmd.Flags().StringVar(&clientName, "name", "", "New App Name")
+	updateSAMLClientCmd.Flags().StringSliceVar(&samlAllowedScopes, "allowed-scopes", nil, "New Allowed Scopes")
 
 	var deleteSAMLClientCmd = &cobra.Command{
 		Use:   "delete-saml-client [entity_id]",
@@ -476,7 +640,8 @@ func main() {
 	// SAML CONNECTION COMMANDS (IDP)
 	// ==========================================
 
-	var metadataFile string
+	var metadataFile, metadataURL string
+	var signRequest bool
 	var createSAMLConnectionCmd = &cobra.Command{
 		Use:   "create-saml-connection",
 		Short: "Register SAML IDP Connection",
@@ -490,25 +655,40 @@ func main() {
 			if tenantID == "" {
 				tenantID = "default"
 			}
-			if metadataFile == "" {
-				log.Fatal("--metadata-file is required")
+			if metadataFile == "" && metadataURL == "" {
+				log.Fatal("Either --metadata-file or --metadata-url is required")
 			}
 			if clientName == "" {
 				clientName = "SAML IDP"
 			}
 
-			xmlBytes, err := os.ReadFile(metadataFile)
-			if err != nil {
-				log.Fatalf("Failed to read metadata file: %v", err)
-			}
+			var xmlBytes []byte
+			var entityID string
 
-			meta := &saml.EntityDescriptor{}
-			_ = xml.Unmarshal(xmlBytes, meta)
+			if metadataFile != "" {
+				xmlBytes, err = os.ReadFile(metadataFile)
+				if err != nil {
+					log.Fatalf("Failed to read metadata file: %v", err)
+				}
+
+				meta := &saml.EntityDescriptor{}
+				_ = xml.Unmarshal(xmlBytes, meta)
+				entityID = meta.EntityID
+			} else if metadataURL != "" {
+				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(metadataURL)
+				if fetchErr != nil {
+					log.Fatalf("Failed to fetch metadata URL: %v", fetchErr)
+				}
+				xmlBytes = []byte(rawXML)
+				entityID = descriptor.EntityID
+			}
 			conn := models.SAMLConnectionGORM{
 				TenantID:       tenantID,
 				Name:           clientName,
 				IdpMetadataXML: string(xmlBytes),
-				IdpEntityID:    meta.EntityID,
+				IdpEntityID:    entityID,
+				MetadataURL:    metadataURL,
+				SignRequest:    signRequest,
 				Active:         true,
 			}
 
@@ -521,6 +701,8 @@ func main() {
 	createSAMLConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
 	createSAMLConnectionCmd.Flags().StringVar(&clientName, "name", "", "Connection Name")
 	createSAMLConnectionCmd.Flags().StringVar(&metadataFile, "metadata-file", "", "Path to metadata XML file")
+	createSAMLConnectionCmd.Flags().StringVar(&metadataURL, "metadata-url", "", "URL to fetch metadata XML")
+	createSAMLConnectionCmd.Flags().BoolVar(&signRequest, "sign-request", false, "Sign AuthnRequests")
 
 	var getSAMLConnectionCmd = &cobra.Command{
 		Use:   "get-saml-connection [id]",
@@ -566,6 +748,7 @@ func main() {
 	// ==========================================
 
 	var issuerURL string
+	var oidcScopes []string
 	var createOIDCConnectionCmd = &cobra.Command{
 		Use:   "create-oidc-connection",
 		Short: "Register OIDC Provider",
@@ -585,6 +768,9 @@ func main() {
 			if clientName == "" {
 				clientName = "OIDC Provider"
 			}
+			if len(oidcScopes) == 0 {
+				oidcScopes = []string{"openid", "profile", "email"}
+			}
 
 			conn := models.OIDCConnectionGORM{
 				TenantID:     tenantID,
@@ -593,7 +779,7 @@ func main() {
 				ClientID:     clientID,
 				ClientSecret: clientSecret,
 				Active:       true,
-				Scopes:       []string{"openid", "profile", "email"},
+				Scopes:       pq.StringArray(oidcScopes),
 			}
 
 			if err := db.Create(&conn).Error; err != nil {
@@ -607,6 +793,7 @@ func main() {
 	createOIDCConnectionCmd.Flags().StringVar(&issuerURL, "issuer", "", "Issuer URL")
 	createOIDCConnectionCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID")
 	createOIDCConnectionCmd.Flags().StringVar(&clientSecret, "client-secret", "", "Client Secret")
+	createOIDCConnectionCmd.Flags().StringSliceVar(&oidcScopes, "scopes", nil, "Comma separated scopes")
 
 	var getOIDCConnectionCmd = &cobra.Command{
 		Use:   "get-oidc-connection [id]",
@@ -662,6 +849,7 @@ func main() {
 	rootCmd.AddCommand(
 		migrateCmd,
 		createTenantCmd, getTenantCmd, updateTenantCmd, deleteTenantCmd,
+		createScopeCmd, getScopeCmd, updateScopeCmd, deleteScopeCmd,
 		createClientCmd, getClientCmd, updateClientCmd, deleteClientCmd,
 		createSAMLClientCmd, getSAMLClientCmd, updateSAMLClientCmd, deleteSAMLClientCmd,
 		createSAMLConnectionCmd, getSAMLConnectionCmd, deleteSAMLConnectionCmd,
