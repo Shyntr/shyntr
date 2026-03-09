@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"compress/flate"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -13,6 +15,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -324,6 +327,122 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		tenantID = h.Config.DefaultTenantID
 	}
 
+	loginVerifier := c.Query("login_verifier")
+	if loginVerifier != "" {
+		loginReq, err := h.AuthUse.GetAuthenticatedLoginRequest(c.Request.Context(), loginVerifier)
+		if err != nil {
+			logger.FromGin(c).Error("Invalid login verifier for SAML IdP", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_login_verifier"})
+			return
+		}
+
+		spClient, err := h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, loginReq.ClientID)
+		if err != nil {
+			logger.FromGin(c).Error("SP Client not found", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "sp_not_found"})
+			return
+		}
+
+		origURL, _ := url.Parse(loginReq.RequestURL)
+		samlReqBase64 := origURL.Query().Get("SAMLRequest")
+		relayState := origURL.Query().Get("RelayState")
+
+		var requestID, acsURL, issuer string
+		if samlReqBase64 != "" {
+			samlReqBase64 = strings.ReplaceAll(samlReqBase64, " ", "+")
+			decoded, err := base64.StdEncoding.DecodeString(samlReqBase64)
+			if err == nil {
+				flater := flate.NewReader(bytes.NewReader(decoded))
+				inflated, err := io.ReadAll(flater)
+				flater.Close()
+				if err == nil {
+					decoded = inflated
+				}
+
+				var tempReq struct {
+					ID                          string `xml:"ID,attr"`
+					AssertionConsumerServiceURL string `xml:"AssertionConsumerServiceURL,attr"`
+					Issuer                      struct {
+						Value string `xml:",chardata"`
+					} `xml:"Issuer"`
+				}
+				_ = xml.Unmarshal(decoded, &tempReq)
+				requestID = tempReq.ID
+				acsURL = tempReq.AssertionConsumerServiceURL
+				issuer = tempReq.Issuer.Value
+			}
+		}
+
+		if acsURL == "" {
+			acsURL = spClient.ACSURL
+		}
+		if issuer == "" {
+			issuer = spClient.EntityID
+		}
+
+		authReq := &crewjamsaml.AuthnRequest{
+			ID:                          requestID,
+			AssertionConsumerServiceURL: acsURL,
+			Issuer: &crewjamsaml.Issuer{
+				Value: issuer,
+			},
+		}
+
+		var ctxData map[string]interface{}
+		if len(loginReq.Context) > 0 {
+			_ = json.Unmarshal(loginReq.Context, &ctxData)
+		} else {
+			ctxData = make(map[string]interface{})
+		}
+
+		userAttrs := make(map[string]interface{})
+		for k, v := range ctxData {
+			if k != "saml_request" && k != "relay_state_raw" && k != "protocol" && k != "sp_entity_id" && k != "request_id" && k != "acs_url" && k != "issuer" {
+				userAttrs[k] = v
+			}
+		}
+
+		userAttrs["sub"] = loginReq.Subject
+		if _, ok := userAttrs["email"]; !ok {
+			userAttrs["email"] = loginReq.Subject
+		}
+
+		allowedScopeEntities, err := h.ScopeUse.GetScopesByNames(c.Request.Context(), tenantID, spClient.AllowedScopes)
+		if err != nil {
+			logger.FromGin(c).Error("Failed to fetch allowed scopes for mapping", zap.Error(err))
+		}
+
+		secureClaims := utils.MapClaims(loginReq.Subject, userAttrs, allowedScopeEntities)
+
+		finalAttrs, err := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+		if err != nil {
+			logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))
+			finalAttrs = secureClaims
+		}
+
+		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
+		if err != nil {
+			logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "saml_response_generation_failed"})
+			return
+		}
+		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, htmlForm)
+		return
+	}
+
+	samlReq := c.Query("SAMLRequest")
+	if samlReq == "" {
+		samlReq = c.PostForm("SAMLRequest")
+	}
+
+	if samlReq == "" {
+		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(errors.New("missing SAMLRequest parameter")), zap.String("protocol", "saml"))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing SAMLRequest parameter"})
+		return
+	}
+
 	authReq, err := h.samlBuilderUseCase.ParseAuthnRequest(c.Request.Context(), tenantID, c.Request)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(err), zap.String("protocol", "saml"))
@@ -357,13 +476,22 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		"acs_url":         authReq.AssertionConsumerServiceURL,
 		"issuer":          authReq.Issuer.Value,
 	}
-
 	ctxBytes, _ := json.Marshal(ctxData)
 
+	randomBytes := make([]byte, 32)
+	rand.Read(randomBytes)
+	loginChallenge := hex.EncodeToString(randomBytes)
+
+	safeReqURL := fmt.Sprintf("%s/t/%s/saml/idp/sso?SAMLRequest=%s&RelayState=%s",
+		h.Config.BaseIssuerURL,
+		tenantID,
+		url.QueryEscape(rawSAMLRequest),
+		url.QueryEscape(relayState))
+
 	loginReq := entity.LoginRequest{
-		ID:         fmt.Sprintf("req-%d", time.Now().UnixNano()),
+		ID:         loginChallenge,
 		TenantID:   tenantID,
-		RequestURL: fmt.Sprintf("%s/t/%s/saml/idp/sso", h.Config.BaseIssuerURL, tenantID),
+		RequestURL: safeReqURL,
 		ClientID:   spClient.ID,
 		ClientIP:   c.ClientIP(),
 		Protocol:   "saml",
@@ -433,38 +561,30 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		if err != nil {
 			logger.FromGin(c).Error("active session not found", zap.String("entity_id", logoutReq.NameID.Value),
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
-			return
-		}
-		issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
-
-		oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
-		if clientErr == nil {
-			if oidcClient.BackchannelLogoutURI != "" {
-				h.ClientUseCase.SendBackchannelLogout(oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
-			}
-		}
-
-		err = h.OAuthSessionUse.DeleteBySubject(c.Request.Context(), subject, activeSession.ClientID)
-		h.OAuthSessionUse.RecordLogout(c.Request.Context(), spClient.ID, c.ClientIP(), c.Request.UserAgent(), false)
-
-		if err != nil {
-			logger.FromGin(c).Warn("Failed to delete user Fosite sessions during SLO",
-				zap.String("subject", subject),
-				zap.Error(err))
 		} else {
-			logger.FromGin(c).Info("Successfully revoked OAuth2 sessions and dispatched Back-Channel logouts during SAML SLO",
-				zap.String("subject", subject))
+			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
+
+			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
+			if clientErr == nil {
+				if oidcClient.BackchannelLogoutURI != "" {
+					h.ClientUseCase.SendBackchannelLogout(oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
+				}
+			}
+
+			err = h.OAuthSessionUse.DeleteBySubject(c.Request.Context(), subject, activeSession.ClientID)
+			h.OAuthSessionUse.RecordLogout(c.Request.Context(), spClient.ID, c.ClientIP(), c.Request.UserAgent(), false)
 		}
 	}
 
 	relayState := c.Query("RelayState")
 	htmlForm, err := h.samlBuilderUseCase.GenerateLogoutResponse(c.Request.Context(), tenantID, logoutReq, spClient, relayState)
 	if err != nil {
-		logger.FromGin(c).Error("Failed to generate SLO response", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed_to_generate_response"})
+		logger.FromGin(c).Error("Failed to generate SAML Logout Response", zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "saml_logout_response_generation_failed"})
 		return
 	}
 
+	c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
 	c.Header("Content-Type", "text/html")
 	c.String(http.StatusOK, htmlForm)
 }
@@ -567,23 +687,147 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	c.String(http.StatusOK, htmlResponse)
 }
 
-func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
+func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		tenantID = h.Config.DefaultTenantID
+	}
+
+	samlReqEncoded := c.Query("SAMLRequest")
+	samlResEncoded := c.Query("SAMLResponse")
 	connectionID := c.Query("connection_id")
 	relayState := c.Query("RelayState")
 
-	conn, connErr := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
-	if connectionID == "" {
-		logger.FromGin(c).Warn("SAML Connection is empty.")
+	if samlReqEncoded != "" {
+		logoutReq, err := h.samlBuilderUseCase.ParseLogoutRequest(c.Request)
+		if err != nil {
+			logger.FromGin(c).Error("Invalid IdP SLO Request", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_logout_request"})
+			return
+		}
+
+		issuer := ""
+		if logoutReq.Issuer != nil {
+			issuer = logoutReq.Issuer.Value
+		}
+
+		c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
+
+		conn, err := h.SAMLUse.GetConnectionByIdpEntity(c.Request.Context(), tenantID, issuer)
+		if err != nil {
+			logger.FromGin(c).Warn("Unknown IdP in SLO", zap.String("entity_id", issuer))
+			c.JSON(http.StatusOK, gin.H{"message": "Logged out locally."})
+			return
+		}
+		if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
+			subject := logoutReq.NameID.Value
+			_ = h.OAuthSessionUse.DeleteBySubject(c.Request.Context(), subject, "")
+			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject", subject))
+		}
+		sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, conn)
+		if err != nil {
+			c.Redirect(http.StatusFound, conn.IdpSloUrl)
+			return
+		}
+
+		randomBytes := make([]byte, 16)
+		rand.Read(randomBytes)
+		respID := "resp-" + hex.EncodeToString(randomBytes)
+
+		logoutResp := crewjamsaml.LogoutResponse{
+			ID:           respID,
+			InResponseTo: logoutReq.ID,
+			Version:      "2.0",
+			IssueInstant: time.Now().UTC(),
+			Destination:  conn.IdpSloUrl,
+			Issuer: &crewjamsaml.Issuer{
+				Value: sp.EntityID,
+			},
+			Status: crewjamsaml.Status{
+				StatusCode: crewjamsaml.StatusCode{
+					Value: crewjamsaml.StatusSuccess,
+				},
+			},
+		}
+
+		var xmlBuf bytes.Buffer
+		xmlBuf.WriteString(xml.Header)
+		encoder := xml.NewEncoder(&xmlBuf)
+		_ = encoder.Encode(logoutResp)
+
+		var b bytes.Buffer
+		w, _ := flate.NewWriter(&b, flate.DefaultCompression)
+		w.Write(xmlBuf.Bytes())
+		w.Close()
+		samlResponseBase64 := base64.StdEncoding.EncodeToString(b.Bytes())
+
+		redirectURL, _ := url.Parse(conn.IdpSloUrl)
+		query := redirectURL.Query()
+		query.Set("SAMLResponse", samlResponseBase64)
+		if relayState != "" {
+			query.Set("RelayState", relayState)
+		}
+		if conn.SignRequest && sp.Key != nil {
+			rsaKey, ok := sp.Key.(*rsa.PrivateKey)
+			if ok {
+				sigAlg := "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+				if sp.SignatureMethod != "" {
+					sigAlg = sp.SignatureMethod
+				}
+				query.Set("SigAlg", sigAlg)
+
+				signString := "SAMLResponse=" + url.QueryEscape(samlResponseBase64)
+				if relayState != "" {
+					signString += "&RelayState=" + url.QueryEscape(relayState)
+				}
+				signString += "&SigAlg=" + url.QueryEscape(sigAlg)
+
+				hasher := crypto.SHA256.New()
+				hasher.Write([]byte(signString))
+				hashed := hasher.Sum(nil)
+
+				signature, err := rsa.SignPKCS1v15(rand.Reader, rsaKey, crypto.SHA256, hashed)
+				if err == nil {
+					query.Set("Signature", base64.StdEncoding.EncodeToString(signature))
+				}
+			}
+		}
+
+		rawQuery := query.Encode()
+		rawQuery = strings.ReplaceAll(rawQuery, "+", "%20")
+		redirectURL.RawQuery = rawQuery
+
+		c.Redirect(http.StatusFound, redirectURL.String())
+		return
+	}
+
+	if samlResEncoded != "" {
+		c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
+
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out from external Identity Provider."})
+		return
+	}
+
+	if connectionID == "" {
+		logger.FromGin(c).Warn("SAML Connection is empty for SP-initiated SLO.")
+		if relayState != "" {
+			c.Redirect(http.StatusFound, relayState)
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "connection_id_required"})
 		}
 		return
 	}
+	conn, connErr := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
 	if connErr != nil {
 		logger.FromGin(c).Error("SAML Connection not found for SLO", zap.Error(connErr))
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "connection_not_found"})
 		}
 		return
 	}
@@ -671,13 +915,13 @@ func (h *SAMLHandler) SPSLOInitiate(c *gin.Context) {
 				query.Set("Signature", base64.StdEncoding.EncodeToString(signature))
 			}
 		}
-
-		rawQuery := query.Encode()
-		rawQuery = strings.ReplaceAll(rawQuery, "+", "%20")
-		redirectURL.RawQuery = rawQuery
-
-		c.Redirect(http.StatusFound, redirectURL.String())
 	}
+
+	rawQuery := query.Encode()
+	rawQuery = strings.ReplaceAll(rawQuery, "+", "%20")
+	redirectURL.RawQuery = rawQuery
+
+	c.Redirect(http.StatusFound, redirectURL.String())
 }
 
 func verifyRedirectSignature(req *http.Request, certPEM string) error {

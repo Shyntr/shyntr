@@ -70,7 +70,7 @@ func (u *authUseCase) GetLoginRequest(ctx context.Context, challenge string) (*e
 	if err != nil {
 		return nil, err
 	}
-	if !req.Active {
+	if !req.Active && !req.Authenticated {
 		return nil, errors.New("login request is no longer active (replay attempt detected)")
 	}
 	return req, nil

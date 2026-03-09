@@ -85,7 +85,7 @@ func SetupRouter(
 	{
 		rootSamlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
 		rootSamlGroup.POST("/sp/acs", samlHandler.ACS)
-		rootSamlGroup.GET("/sp/slo", samlHandler.SPSLOInitiate)
+		rootSamlGroup.GET("/sp/slo", samlHandler.SPSLO)
 		rootSamlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
 		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
@@ -126,7 +126,7 @@ func SetupRouter(
 		{
 			samlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
 			samlGroup.POST("/sp/acs", samlHandler.ACS)
-			samlGroup.GET("/sp/slo", samlHandler.SPSLOInitiate)
+			samlGroup.GET("/sp/slo", samlHandler.SPSLO)
 			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
 			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)

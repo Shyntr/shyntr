@@ -61,6 +61,12 @@ func main() {
 				log.Fatalf("Migration failed: %v", err)
 			}
 			logger.Log.Info("Database migration completed successfully.")
+			scopeRepo := repository.NewScopeRepository(db)
+			if err := utils2.SeedSystemScopesForTenant(context.Background(), scopeRepo, cfg.DefaultTenantID); err != nil {
+				logger.Log.Error("Failed to seed system scopes during migration", zap.Error(err))
+			} else {
+				logger.Log.Info("System scopes verified/seeded successfully.")
+			}
 		},
 	}
 
@@ -722,7 +728,7 @@ func runServer() {
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
-	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
+	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	auditUseCase := usecase.NewAuditUseCase(logRepository)
 	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)

@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
@@ -32,12 +33,19 @@ func NewScopeUseCase(repo port.ScopeRepository, audit port.AuditLogger) ScopeUse
 }
 
 func (u *scopeUseCase) CreateScope(ctx context.Context, scope *entity.Scope, actorIP, userAgent string) (*entity.Scope, error) {
+	scope.Name = strings.ToLower(strings.TrimSpace(scope.Name))
+	scope.IsSystem = false
+
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
 	if scope.ID == "" {
 		scope.ID, _ = utils.GenerateRandomHex(8)
 	}
 
-	if err := scope.Validate(); err != nil {
-		return nil, err
+	existing, err := u.repo.GetByName(ctx, scope.TenantID, scope.Name)
+	if err == nil && existing != nil {
+		return nil, errors.New("conflict: a scope with this name already exists")
 	}
 
 	if err := u.repo.Create(ctx, scope); err != nil {
@@ -86,9 +94,14 @@ func (u *scopeUseCase) UpdateScope(ctx context.Context, scope *entity.Scope, act
 		return err
 	}
 
-	if existing.IsSystem {
-		if existing.Name != scope.Name {
-			return errors.New("security_violation: cannot rename a system-level scope")
+	scope.IsSystem = existing.IsSystem
+	if existing.IsSystem && existing.Name != scope.Name {
+		return errors.New("security_violation: cannot rename a system-level scope")
+	}
+	if existing.Name != scope.Name {
+		conflict, err := u.repo.GetByName(ctx, scope.TenantID, scope.Name)
+		if err == nil && conflict != nil {
+			return errors.New("conflict: a scope with this name already exists")
 		}
 	}
 

@@ -3,9 +3,11 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
 	"github.com/nevzatcirak/shyntr/internal/application/port"
+	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"github.com/nevzatcirak/shyntr/pkg/utils"
 )
@@ -21,14 +23,16 @@ type TenantUseCase interface {
 }
 
 type tenantUseCase struct {
-	repo  port.TenantRepository
-	audit port.AuditLogger
+	repo      port.TenantRepository
+	audit     port.AuditLogger
+	scopeRepo port.ScopeRepository
 }
 
-func NewTenantUseCase(repo port.TenantRepository, audit port.AuditLogger) TenantUseCase {
+func NewTenantUseCase(repo port.TenantRepository, audit port.AuditLogger, scopeRepo port.ScopeRepository) TenantUseCase {
 	return &tenantUseCase{
-		repo:  repo,
-		audit: audit,
+		repo:      repo,
+		audit:     audit,
+		scopeRepo: scopeRepo,
 	}
 }
 
@@ -51,6 +55,9 @@ func (u *tenantUseCase) CreateTenant(ctx context.Context, tenant *entity.Tenant,
 		return nil, err
 	}
 
+	if err := utils2.SeedSystemScopesForTenant(ctx, u.scopeRepo, tenant.ID); err != nil {
+		return nil, fmt.Errorf("tenant created but failed to seed system scopes: %w", err)
+	}
 	u.audit.Log(tenant.ID, "system", "management.tenant.create", actorIP, userAgent, map[string]interface{}{
 		"tenant_name": tenant.Name,
 	})

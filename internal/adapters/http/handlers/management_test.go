@@ -69,13 +69,14 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	sessionRepository := repository.NewOAuth2SessionRepository(db)
 	connectionRepository := repository.NewOIDCConnectionRepository(db)
 	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
+	scopeRepository := repository.NewScopeRepository(db)
 	auditLogger := audit.NewAuditLogger(db)
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
-	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
+	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil)
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil)

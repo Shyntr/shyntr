@@ -66,14 +66,14 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	tenantRepository := repository.NewTenantRepository(db)
 	clientRepository := repository.NewOAuth2ClientRepository(db)
 	connectionRepository := repository.NewOIDCConnectionRepository(db)
-
+	scopeRepository := repository.NewScopeRepository(db)
 	auditLogger := audit.NewAuditLogger(db)
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	clientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
-	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger)
+	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	handler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 
 	gin.SetMode(gin.TestMode)
