@@ -377,7 +377,6 @@ func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *entity.O
 			return nil, "", errors.New("failed to hash client secret securely")
 		}
 		client.Secret = hashed
-		client.TokenEndpointAuthMethod = "client_secret_basic"
 	} else {
 		client.Secret = ""
 		client.TokenEndpointAuthMethod = "none"
@@ -435,7 +434,6 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *entity.O
 			return nil, "", errors.New("failed to hash client secret securely")
 		}
 		client.Secret = hashed
-		client.TokenEndpointAuthMethod = "client_secret_basic"
 	} else {
 		client.Secret = ""
 		client.TokenEndpointAuthMethod = "none"

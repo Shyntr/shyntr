@@ -1,51 +1,56 @@
 package dto
 
-import "github.com/nevzatcirak/shyntr/internal/domain/entity"
+import (
+	"github.com/go-jose/go-jose/v3"
+	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+)
 
 type CreateOAuth2ClientRequest struct {
-	ID                      string   `json:"client_id"`
-	TenantID                string   `json:"tenant_id" binding:"required"`
-	Name                    string   `json:"name" binding:"required"`
-	Secret                  string   `json:"client_secret"`
-	RedirectURIs            []string `json:"redirect_uris" binding:"required"`
-	GrantTypes              []string `json:"grant_types" binding:"required"`
-	ResponseTypes           []string `json:"response_types"`
-	ResponseModes           []string `json:"response_modes"`
-	Scopes                  []string `json:"scopes"`
-	Audience                []string `json:"audience"`
-	Public                  bool     `json:"public"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
-	EnforcePKCE             bool     `json:"enforce_pkce"`
-	AllowedCORSOrigins      []string `json:"allowed_cors_origins"`
-	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI    string   `json:"backchannel_logout_uri"`
-	SubjectType             string   `json:"subject_type"`
+	ID                      string              `json:"client_id"`
+	TenantID                string              `json:"tenant_id" binding:"required"`
+	Name                    string              `json:"name" binding:"required"`
+	Secret                  string              `json:"client_secret"`
+	RedirectURIs            []string            `json:"redirect_uris" binding:"required"`
+	GrantTypes              []string            `json:"grant_types" binding:"required"`
+	ResponseTypes           []string            `json:"response_types"`
+	ResponseModes           []string            `json:"response_modes"`
+	Scopes                  []string            `json:"scopes"`
+	Audience                []string            `json:"audience"`
+	Public                  bool                `json:"public"`
+	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method"`
+	EnforcePKCE             bool                `json:"enforce_pkce"`
+	AllowedCORSOrigins      []string            `json:"allowed_cors_origins"`
+	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI    string              `json:"backchannel_logout_uri"`
+	SubjectType             string              `json:"subject_type"`
+	JWKS                    *jose.JSONWebKeySet `json:"jwks"`
 }
 
 type OAuth2ClientResponse struct {
-	ID                      string   `json:"client_id"`
-	TenantID                string   `json:"tenant_id"`
-	Name                    string   `json:"name"`
-	AppID                   string   `json:"app_id"`
-	Secret                  string   `json:"client_secret"`
-	RedirectURIs            []string `json:"redirect_uris"`
-	GrantTypes              []string `json:"grant_types"`
-	ResponseTypes           []string `json:"response_types"`
-	ResponseModes           []string `json:"response_modes"`
-	Scopes                  []string `json:"scopes"`
-	Audience                []string `json:"audience"`
-	Public                  bool     `json:"public"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
-	EnforcePKCE             bool     `json:"enforce_pkce"`
-	AllowedCORSOrigins      []string `json:"allowed_cors_origins"`
-	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI    string   `json:"backchannel_logout_uri"`
-	AccessTokenLifespan     string   `json:"access_token_lifespan,omitempty"`
-	RefreshTokenLifespan    string   `json:"refresh_token_lifespan,omitempty"`
-	IDTokenLifespan         string   `json:"id_token_lifespan,omitempty"`
-	SubjectType             string   `json:"subject_type"`
-	CreatedAt               string   `json:"created_at"`
-	UpdatedAt               string   `json:"updated_at,omitempty"`
+	ID                      string              `json:"client_id"`
+	TenantID                string              `json:"tenant_id"`
+	Name                    string              `json:"name"`
+	AppID                   string              `json:"app_id"`
+	Secret                  string              `json:"client_secret"`
+	RedirectURIs            []string            `json:"redirect_uris"`
+	GrantTypes              []string            `json:"grant_types"`
+	ResponseTypes           []string            `json:"response_types"`
+	ResponseModes           []string            `json:"response_modes"`
+	Scopes                  []string            `json:"scopes"`
+	Audience                []string            `json:"audience"`
+	Public                  bool                `json:"public"`
+	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method"`
+	EnforcePKCE             bool                `json:"enforce_pkce"`
+	AllowedCORSOrigins      []string            `json:"allowed_cors_origins"`
+	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI    string              `json:"backchannel_logout_uri"`
+	AccessTokenLifespan     string              `json:"access_token_lifespan,omitempty"`
+	RefreshTokenLifespan    string              `json:"refresh_token_lifespan,omitempty"`
+	IDTokenLifespan         string              `json:"id_token_lifespan,omitempty"`
+	SubjectType             string              `json:"subject_type"`
+	JWKS                    *jose.JSONWebKeySet `json:"jwks,omitempty"`
+	CreatedAt               string              `json:"created_at"`
+	UpdatedAt               string              `json:"updated_at,omitempty"`
 }
 
 func (req *CreateOAuth2ClientRequest) ToDomain() *entity.OAuth2Client {
@@ -67,6 +72,7 @@ func (req *CreateOAuth2ClientRequest) ToDomain() *entity.OAuth2Client {
 		PostLogoutRedirectURIs:  req.PostLogoutRedirectURIs,
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
+		JSONWebKeys:             req.JWKS,
 	}
 }
 
@@ -90,6 +96,7 @@ func FromDomainOAuth2Client(c *entity.OAuth2Client) *OAuth2ClientResponse {
 		PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
 		BackchannelLogoutURI:    c.BackchannelLogoutURI,
 		SubjectType:             c.SubjectType,
+		JWKS:                    c.JSONWebKeys,
 		AccessTokenLifespan:     c.AccessTokenLifespan,
 		RefreshTokenLifespan:    c.RefreshTokenLifespan,
 		IDTokenLifespan:         c.IDTokenLifespan,

@@ -69,7 +69,7 @@ func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
 
 func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	tenantID := h.resolveTenantID(c)
-	base := strings.TrimRight(h.Provider.Config.IDTokenIssuer, "/")
+	base := strings.TrimRight(h.Config.BaseIssuerURL, "/")
 	if c.Param(constants.ContextKeyTenantID) == "" {
 		return base
 	}
@@ -81,9 +81,9 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 
-	ar, err := h.Provider.Fosite.NewAuthorizeRequest(ctx, c.Request)
+	ar, err := h.Provider.GetFosite(tenantID).NewAuthorizeRequest(ctx, c.Request)
 	if err != nil {
-		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, err)
+		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, err)
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	if client.EnforcePKCE {
 		if ar.GetRequestForm().Get("code_challenge") == "" {
-			h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHint("This client requires PKCE. Please include code_challenge."))
+			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHint("This client requires PKCE. Please include code_challenge."))
 			return
 		}
 	}
@@ -111,7 +111,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		}
 		for _, reqAud := range requestedAudience {
 			if !allowedAudience[reqAud] {
-				h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHintf("The requested audience '%s' is not whitelisted for this client.", reqAud))
+				h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHintf("The requested audience '%s' is not whitelisted for this client.", reqAud))
 				return
 			}
 		}
@@ -125,7 +125,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	for _, reqScope := range requestedScopes {
 		if !allowedScopes[reqScope] {
-			h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidScope.WithHintf("The requested scope '%s' is not authorized for this client.", reqScope))
+			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidScope.WithHintf("The requested scope '%s' is not authorized for this client.", reqScope))
 			return
 		}
 	}
@@ -135,7 +135,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	hasSession := sessionCookie != ""
 
 	if prompt == "none" && !hasSession {
-		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
+		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
 		return
 	}
 
@@ -350,50 +350,51 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		ar.GrantAudience(aud)
 	}
 
-	response, err := h.Provider.Fosite.NewAuthorizeResponse(ctx, ar, session)
+	response, err := h.Provider.GetFosite(tenantID).NewAuthorizeResponse(ctx, ar, session)
 	if err != nil {
-		h.Provider.Fosite.WriteAuthorizeError(ctx, c.Writer, ar, err)
+		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, err)
 		return
 	}
 
 	h.OAuth2SessionUse.RecordAuthorization(ctx, ar.GetID(), clientID, c.ClientIP(), c.Request.UserAgent(), grantedScopes)
-	h.Provider.Fosite.WriteAuthorizeResponse(ctx, c.Writer, ar, response)
+	h.Provider.GetFosite(tenantID).WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
 func (h *OAuth2Handler) Token(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
+	fositeEngine := h.Provider.GetFosite(tenantID)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 	emptySession := entity.NewJWTSession("")
-	ar, err := h.Provider.Fosite.NewAccessRequest(ctx, c.Request, emptySession)
+	ar, err := fositeEngine.NewAccessRequest(ctx, c.Request, emptySession)
 	if err != nil {
 		logger.LogFositeError(c, err, "Failed to create access request in TokenEndpoint")
-		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
+		fositeEngine.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
 
 	urlTenantID := h.resolveTenantID(c)
 	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, ar.GetClient().GetID())
 	if dbClientErr != nil {
-		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
-		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
+		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
+		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
 	if dbClient.TenantID != urlTenantID {
-		logger.FromGin(c).Warn("Tenant mismatch", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
-		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
+		logger.FromGin(c).Warn("Tenant mismatch detected", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
+		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
-	response, err := h.Provider.Fosite.NewAccessResponse(ctx, ar)
+	response, err := fositeEngine.NewAccessResponse(ctx, ar)
 	if err != nil {
 		logger.LogFositeError(c, err, "Failed to create access response in TokenEndpoint")
-		h.Provider.Fosite.WriteAccessError(ctx, c.Writer, ar, err)
+		fositeEngine.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
 	h.OAuth2SessionUse.RecordTokenIssuance(ctx, ar.GetID(), ar.GetClient().GetID(), c.ClientIP(), c.Request.UserAgent(), ar.GetGrantedScopes())
-	h.Provider.Fosite.WriteAccessResponse(ctx, c.Writer, ar, response)
+	fositeEngine.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
 func (h *OAuth2Handler) Logout(c *gin.Context) {
@@ -558,7 +559,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	}
 
 	session := entity.NewJWTSession("")
-	_, accessRequest, err := h.Provider.Fosite.IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
+	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
@@ -614,21 +615,21 @@ func (h *OAuth2Handler) Introspect(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 	session := entity.NewJWTSession("")
-	ar, err := h.Provider.Fosite.NewIntrospectionRequest(ctx, c.Request, session)
+	ar, err := h.Provider.GetFosite(tenantID).NewIntrospectionRequest(ctx, c.Request, session)
 	if err != nil {
-		h.Provider.Fosite.WriteIntrospectionError(ctx, c.Writer, err)
+		h.Provider.GetFosite(tenantID).WriteIntrospectionError(ctx, c.Writer, err)
 		return
 	}
-	h.Provider.Fosite.WriteIntrospectionResponse(ctx, c.Writer, ar)
+	h.Provider.GetFosite(tenantID).WriteIntrospectionResponse(ctx, c.Writer, ar)
 }
 
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 
-	err := h.Provider.Fosite.NewRevocationRequest(ctx, c.Request)
+	err := h.Provider.GetFosite(tenantID).NewRevocationRequest(ctx, c.Request)
 	h.OAuth2SessionUse.RecordRevocation(ctx, c.ClientIP(), c.Request.UserAgent(), err == nil)
-	h.Provider.Fosite.WriteRevocationResponse(ctx, c.Writer, err)
+	h.Provider.GetFosite(tenantID).WriteRevocationResponse(ctx, c.Writer, err)
 }
 
 func (h *OAuth2Handler) Jwks(c *gin.Context) {

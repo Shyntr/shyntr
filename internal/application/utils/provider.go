@@ -2,6 +2,8 @@ package utils
 
 import (
 	"context"
+	"strings"
+	"sync"
 
 	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
 	"github.com/nevzatcirak/shyntr/internal/application/port"
@@ -12,33 +14,48 @@ import (
 )
 
 type Provider struct {
-	Fosite     fosite.OAuth2Provider
-	Store      *iam.FositeStore
-	Config     *fosite.Config
-	clientRepo port.OAuth2ClientRepository
-	jtiRepo    port.BlacklistedJTIRepository
+	db           *gorm.DB
+	baseConfig   *fosite.Config
+	keyMgr       *KeyManager
+	clientRepo   port.OAuth2ClientRepository
+	jtiRepo      port.BlacklistedJTIRepository
+	tenantFosite sync.Map
 }
 
-func NewProvider(db *gorm.DB, config *fosite.Config, km *KeyManager, clientRepo port.OAuth2ClientRepository, jtiRepo port.BlacklistedJTIRepository) *Provider {
-	store := iam.NewFositeStore(db, clientRepo, jtiRepo)
-	privateKey := km.GetActivePrivateKey()
+func NewProvider(db *gorm.DB, baseConfig *fosite.Config, km *KeyManager, clientRepo port.OAuth2ClientRepository, jtiRepo port.BlacklistedJTIRepository) *Provider {
+	return &Provider{
+		db:         db,
+		baseConfig: baseConfig,
+		keyMgr:     km,
+		clientRepo: clientRepo,
+		jtiRepo:    jtiRepo,
+	}
+}
 
+func (p *Provider) GetFosite(tenantID string) fosite.OAuth2Provider {
+	if cached, ok := p.tenantFosite.Load(tenantID); ok {
+		return cached.(fosite.OAuth2Provider)
+	}
+
+	tConfig := *p.baseConfig
+	tenantConfig := &tConfig
+
+	baseURL := strings.TrimSuffix(p.baseConfig.IDTokenIssuer, "/")
+	tenantConfig.TokenURL = baseURL + "/t/" + tenantID + "/oauth2/token"
+
+	store := iam.NewFositeStore(p.db, p.clientRepo, p.jtiRepo)
+	privateKey := p.keyMgr.GetActivePrivateKey()
 	keyGetter := func(ctx context.Context) (interface{}, error) {
 		return privateKey, nil
 	}
-	hmacStrategy := compose.NewOAuth2HMACStrategy(config)
-	jwtStrategy := compose.NewOAuth2JWTStrategy(
-		keyGetter,
-		hmacStrategy,
-		config,
-	)
-
+	hmacStrategy := compose.NewOAuth2HMACStrategy(tenantConfig)
+	jwtStrategy := compose.NewOAuth2JWTStrategy(keyGetter, hmacStrategy, tenantConfig)
 	oauth2Provider := compose.Compose(
-		config,
+		tenantConfig,
 		store,
 		&compose.CommonStrategy{
 			CoreStrategy:               jwtStrategy,
-			OpenIDConnectTokenStrategy: compose.NewOpenIDConnectStrategy(keyGetter, config),
+			OpenIDConnectTokenStrategy: compose.NewOpenIDConnectStrategy(keyGetter, tenantConfig),
 			Signer:                     &fositejwt.DefaultSigner{GetPrivateKey: keyGetter},
 		},
 		compose.OAuth2AuthorizeExplicitFactory,
@@ -54,9 +71,6 @@ func NewProvider(db *gorm.DB, config *fosite.Config, km *KeyManager, clientRepo 
 		compose.OpenIDConnectRefreshFactory,
 	)
 
-	return &Provider{
-		Fosite: oauth2Provider,
-		Store:  store,
-		Config: config,
-	}
+	p.tenantFosite.Store(tenantID, oauth2Provider)
+	return oauth2Provider
 }

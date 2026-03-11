@@ -219,6 +219,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		PostLogoutRedirectURIs:  req.PostLogoutRedirectURIs,
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
+		JSONWebKeys:             req.JWKS,
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {

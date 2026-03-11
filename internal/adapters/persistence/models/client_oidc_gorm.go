@@ -1,6 +1,9 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/go-jose/go-jose/v3"
@@ -8,37 +11,71 @@ import (
 	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
+type JSONB []byte
+
+func (j *JSONB) Scan(value interface{}) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		s, okstr := value.(string)
+		if !okstr {
+			return errors.New("type assertion to []byte failed in JSONB Scanner")
+		}
+		b = []byte(s)
+	}
+	*j = make([]byte, len(b))
+	copy(*j, b)
+	return nil
+}
+
+func (j JSONB) Value() (driver.Value, error) {
+	if len(j) == 0 {
+		return nil, nil
+	}
+	return []byte(j), nil
+}
+
 type OAuth2ClientGORM struct {
-	ID                      string              `gorm:"primaryKey;type:varchar(255)"`
-	TenantID                string              `gorm:"type:varchar(255);not null;index"`
-	Name                    string              `gorm:"type:varchar(255);not null;default:'Unnamed Client'"`
-	AppID                   string              `gorm:"index;type:varchar(255)"`
-	Secret                  string              `gorm:"type:varchar(255)"`
-	RedirectURIs            pq.StringArray      `gorm:"type:text[]"`
-	GrantTypes              pq.StringArray      `gorm:"type:text[]"`
-	ResponseTypes           pq.StringArray      `gorm:"type:text[]"`
-	ResponseModes           pq.StringArray      `gorm:"type:text[]"`
-	Scopes                  pq.StringArray      `gorm:"type:text[]"`
-	Audience                pq.StringArray      `gorm:"type:text[]"`
-	Public                  bool                `gorm:"default:false"`
-	TokenEndpointAuthMethod string              `gorm:"type:varchar(50);default:'client_secret_basic'"`
-	EnforcePKCE             bool                `gorm:"default:false"`
-	AllowedCORSOrigins      pq.StringArray      `gorm:"type:text[]"`
-	PostLogoutRedirectURIs  pq.StringArray      `gorm:"type:text[]"`
-	JSONWebKeys             *jose.JSONWebKeySet `gorm:"type:jsonb"`
-	SkipConsent             bool                `gorm:"default:false"`
-	SubjectType             string              `gorm:"type:varchar(50);default:'public'"`
-	BackchannelLogoutURI    string              `gorm:"type:text"`
-	AccessTokenLifespan     string              `gorm:"type:varchar(50);default:''"`
-	IDTokenLifespan         string              `gorm:"type:varchar(50);default:''"`
-	RefreshTokenLifespan    string              `gorm:"type:varchar(50);default:''"`
-	CreatedAt               time.Time           `gorm:"autoCreateTime"`
-	UpdatedAt               time.Time           `gorm:"autoUpdateTime"`
+	ID                      string         `gorm:"primaryKey;type:varchar(255)"`
+	TenantID                string         `gorm:"type:varchar(255);not null;index"`
+	Name                    string         `gorm:"type:varchar(255);not null;default:'Unnamed Client'"`
+	AppID                   string         `gorm:"index;type:varchar(255)"`
+	Secret                  string         `gorm:"type:varchar(255)"`
+	RedirectURIs            pq.StringArray `gorm:"type:text[]"`
+	GrantTypes              pq.StringArray `gorm:"type:text[]"`
+	ResponseTypes           pq.StringArray `gorm:"type:text[]"`
+	ResponseModes           pq.StringArray `gorm:"type:text[]"`
+	Scopes                  pq.StringArray `gorm:"type:text[]"`
+	Audience                pq.StringArray `gorm:"type:text[]"`
+	Public                  bool           `gorm:"default:false"`
+	TokenEndpointAuthMethod string         `gorm:"type:varchar(50);default:'client_secret_basic'"`
+	EnforcePKCE             bool           `gorm:"default:false"`
+	AllowedCORSOrigins      pq.StringArray `gorm:"type:text[]"`
+	PostLogoutRedirectURIs  pq.StringArray `gorm:"type:text[]"`
+	JSONWebKeys             JSONB          `gorm:"column:json_web_keys;type:jsonb"`
+	SkipConsent             bool           `gorm:"default:false"`
+	SubjectType             string         `gorm:"type:varchar(50);default:'public'"`
+	BackchannelLogoutURI    string         `gorm:"type:text"`
+	AccessTokenLifespan     string         `gorm:"type:varchar(50);default:''"`
+	IDTokenLifespan         string         `gorm:"type:varchar(50);default:''"`
+	RefreshTokenLifespan    string         `gorm:"type:varchar(50);default:''"`
+	CreatedAt               time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt               time.Time      `gorm:"autoUpdateTime"`
 }
 
 func (OAuth2ClientGORM) TableName() string { return "o_auth2_clients" }
 
 func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
+	var jwks *jose.JSONWebKeySet
+	if len(m.JSONWebKeys) > 0 {
+		var parsed jose.JSONWebKeySet
+		if err := json.Unmarshal(m.JSONWebKeys, &parsed); err == nil {
+			jwks = &parsed
+		}
+	}
 	return &entity.OAuth2Client{
 		ID:                      m.ID,
 		TenantID:                m.TenantID,
@@ -56,7 +93,7 @@ func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
 		EnforcePKCE:             m.EnforcePKCE,
 		AllowedCORSOrigins:      m.AllowedCORSOrigins,
 		PostLogoutRedirectURIs:  m.PostLogoutRedirectURIs,
-		JSONWebKeys:             m.JSONWebKeys,
+		JSONWebKeys:             jwks,
 		SkipConsent:             m.SkipConsent,
 		SubjectType:             m.SubjectType,
 		BackchannelLogoutURI:    m.BackchannelLogoutURI,
@@ -69,6 +106,11 @@ func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
 }
 
 func FromDomainOAuth2Client(e *entity.OAuth2Client) *OAuth2ClientGORM {
+	var jwksBytes JSONB
+	if e.JSONWebKeys != nil {
+		b, _ := json.Marshal(e.JSONWebKeys)
+		jwksBytes = JSONB(b)
+	}
 	return &OAuth2ClientGORM{
 		ID:                      e.ID,
 		TenantID:                e.TenantID,
@@ -86,7 +128,7 @@ func FromDomainOAuth2Client(e *entity.OAuth2Client) *OAuth2ClientGORM {
 		EnforcePKCE:             e.EnforcePKCE,
 		AllowedCORSOrigins:      e.AllowedCORSOrigins,
 		PostLogoutRedirectURIs:  e.PostLogoutRedirectURIs,
-		JSONWebKeys:             e.JSONWebKeys,
+		JSONWebKeys:             jwksBytes,
 		SkipConsent:             e.SkipConsent,
 		SubjectType:             e.SubjectType,
 		BackchannelLogoutURI:    e.BackchannelLogoutURI,
