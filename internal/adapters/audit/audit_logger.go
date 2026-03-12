@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
 	"gorm.io/gorm"
 )
 

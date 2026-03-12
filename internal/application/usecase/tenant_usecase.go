@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
+	"github.com/Shyntr/shyntr/internal/adapters/http/dto"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type TenantUseCase interface {

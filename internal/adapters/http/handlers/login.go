@@ -3,10 +3,10 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/response"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 )
 
 type LoginHandler struct {

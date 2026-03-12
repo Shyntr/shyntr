@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/Shyntr/shyntr/internal/adapters/http/response"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
 )
 

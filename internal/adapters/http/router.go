@@ -3,16 +3,20 @@ package http
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
+	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
+	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/handlers"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/middleware"
-	"github.com/nevzatcirak/shyntr/internal/application/mapper"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/ory/fosite"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+
+	_ "github.com/Shyntr/shyntr/docs"
 )
 
 func SetupRouter(
@@ -224,4 +228,12 @@ func SetupRouter(
 	}
 
 	return public, admin
+}
+
+func SetupSwaggerRouter() *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.StructuredLogger())
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	return r
 }

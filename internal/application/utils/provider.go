@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
 	fositejwt "github.com/ory/fosite/token/jwt"
@@ -59,15 +59,12 @@ func (p *Provider) GetFosite(tenantID string) fosite.OAuth2Provider {
 			Signer:                     &fositejwt.DefaultSigner{GetPrivateKey: keyGetter},
 		},
 		compose.OAuth2AuthorizeExplicitFactory,
-		compose.OAuth2AuthorizeImplicitFactory,
 		compose.OAuth2ClientCredentialsGrantFactory,
 		compose.OAuth2RefreshTokenGrantFactory,
 		compose.OAuth2TokenIntrospectionFactory,
 		compose.OAuth2TokenRevocationFactory,
 		compose.OAuth2PKCEFactory,
 		compose.OpenIDConnectExplicitFactory,
-		compose.OpenIDConnectImplicitFactory,
-		compose.OpenIDConnectHybridFactory,
 		compose.OpenIDConnectRefreshFactory,
 	)
 

@@ -3,14 +3,14 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/Shyntr/shyntr/internal/adapters/http/dto"
+	"github.com/Shyntr/shyntr/internal/adapters/http/response"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	shyntrsaml "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
 	"go.uber.org/zap"
 )
@@ -54,6 +54,14 @@ func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (str
 	return "", false
 }
 
+// @Summary Get Dashboard Statistics
+// @Description Retrieves global or tenant-specific usage statistics and active connection counts.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id query string false "Tenant ID (for filtering)"
+// @Success 200 {object} map[string]interface{}
+// @Router /admin/management/dashboard/stats [get]
 func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	tenantID := c.Query("tenant_id")
 	ctx := c.Request.Context()
@@ -102,6 +110,13 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// @Summary List Tenants
+// @Description Lists all tenants configured within the identity hub.
+// @Tags Tenants
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} dto.TenantResponse
+// @Router /admin/management/tenants [get]
 func (h *ManagementHandler) ListTenants(c *gin.Context) {
 	tenants, err := h.TenantUse.ListTenants(c.Request.Context())
 	if err != nil {
@@ -121,6 +136,15 @@ func (h *ManagementHandler) GetTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, tenant)
 }
 
+// @Summary Create Tenant
+// @Description Creates a new isolated tenant environment with strict data boundaries.
+// @Tags Tenants
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body dto.CreateTenantRequest true "Tenant Information"
+// @Success 201 {object} entity.Tenant
+// @Router /admin/management/tenants [post]
 func (h *ManagementHandler) CreateTenant(c *gin.Context) {
 	var tenantReq dto.CreateTenantRequest
 	if err := c.ShouldBindJSON(&tenantReq); err != nil {
@@ -185,8 +209,15 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Tenant and all associated resources deleted successfully"})
 }
 
-// --- OAuth2 Clients Management ---
-
+// @Summary Create OIDC Client
+// @Description Registers a new OAuth2/OIDC client under the specified tenant enforcing OAuth 2.1 standards.
+// @Tags OAuth2 Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body dto.CreateOAuth2ClientRequest true "Client Configuration"
+// @Success 201 {object} dto.CreateOAuth2ClientRequest
+// @Router /admin/management/clients [post]
 func (h *ManagementHandler) CreateClient(c *gin.Context) {
 	var req dto.CreateOAuth2ClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -360,6 +391,15 @@ func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, clients)
 }
 
+// @Summary Create SAML Client
+// @Description Registers a legacy SAML Service Provider in the system for federation.
+// @Tags SAML Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body dto.CreateSAMLClientRequest true "SAML Client Configuration"
+// @Success 201 {object} dto.CreateSAMLClientRequest
+// @Router /admin/management/saml-clients [post]
 func (h *ManagementHandler) GetSAMLClient(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")

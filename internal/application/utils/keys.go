@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/pkg/consts"
+	"github.com/Shyntr/shyntr/pkg/crypto"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/go-jose/go-jose/v3"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/pkg/consts"
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"gorm.io/gorm"
 )
 

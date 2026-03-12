@@ -5,8 +5,8 @@ import (
 	"gorm.io/gorm"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
 type SAMLClientGORM struct {

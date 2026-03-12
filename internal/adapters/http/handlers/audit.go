@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 )
 
 type AuditHandler struct {

@@ -40,6 +40,19 @@ func (c *OAuth2Client) Validate() error {
 		return errors.New("tenant_id is required")
 	}
 
+	c.EnforcePKCE = true
+	for _, gt := range c.GrantTypes {
+		if gt == "implicit" || gt == "password" {
+			return errors.New("grant_type '" + gt + "' is prohibited in OAuth 2.1 standards")
+		}
+	}
+
+	for _, rt := range c.ResponseTypes {
+		if rt != "code" {
+			return errors.New("response_type '" + rt + "' is prohibited in OAuth 2.1 standards. Only 'code' is permitted")
+		}
+	}
+
 	if c.Public {
 		if c.Secret != "" {
 			return errors.New("public clients cannot have a client_secret")
@@ -47,7 +60,6 @@ func (c *OAuth2Client) Validate() error {
 		if c.TokenEndpointAuthMethod != "none" {
 			return errors.New("public clients must use 'none' as token_endpoint_auth_method")
 		}
-		c.EnforcePKCE = true
 	} else {
 		if c.Secret == "" {
 			return errors.New("confidential clients must have a hashed secret")

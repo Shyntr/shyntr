@@ -9,12 +9,12 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/pkg/constants"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/constants"
 	"github.com/ory/fosite"
 	"gorm.io/gorm"
 )

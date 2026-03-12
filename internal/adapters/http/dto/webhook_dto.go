@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 )
 
 type CreateWebhookRequest struct {

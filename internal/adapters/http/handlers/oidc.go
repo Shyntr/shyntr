@@ -7,13 +7,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/response"
+	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/mapper"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"go.uber.org/zap"
 )
 

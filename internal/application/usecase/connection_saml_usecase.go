@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 
+	"github.com/Shyntr/shyntr/internal/application/port"
+	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	shyntrsaml "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 )
 
 type SAMLConnectionUseCase interface {

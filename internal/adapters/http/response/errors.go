@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )

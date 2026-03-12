@@ -1,8 +1,8 @@
 package iam
 
 import (
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/go-jose/go-jose/v3"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"github.com/ory/fosite"
 )
 

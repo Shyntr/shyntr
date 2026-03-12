@@ -1,56 +1,56 @@
 package dto
 
 import (
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/go-jose/go-jose/v3"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
 type CreateOAuth2ClientRequest struct {
-	ID                      string              `json:"client_id"`
-	TenantID                string              `json:"tenant_id" binding:"required"`
-	Name                    string              `json:"name" binding:"required"`
-	Secret                  string              `json:"client_secret"`
-	RedirectURIs            []string            `json:"redirect_uris" binding:"required"`
-	GrantTypes              []string            `json:"grant_types" binding:"required"`
-	ResponseTypes           []string            `json:"response_types"`
-	ResponseModes           []string            `json:"response_modes"`
-	Scopes                  []string            `json:"scopes"`
-	Audience                []string            `json:"audience"`
-	Public                  bool                `json:"public"`
-	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method"`
-	EnforcePKCE             bool                `json:"enforce_pkce"`
-	AllowedCORSOrigins      []string            `json:"allowed_cors_origins"`
-	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI    string              `json:"backchannel_logout_uri"`
-	SubjectType             string              `json:"subject_type"`
-	JWKS                    *jose.JSONWebKeySet `json:"jwks"`
+	ID                      string              `json:"client_id" example:"my-web-app"`
+	TenantID                string              `json:"tenant_id" binding:"required" example:"default"`
+	Name                    string              `json:"name" binding:"required" example:"My Frontend Application"`
+	Secret                  string              `json:"client_secret" example:"super-secure-secret-key"`
+	RedirectURIs            []string            `json:"redirect_uris" binding:"required" example:"https://app.example.com/callback"`
+	GrantTypes              []string            `json:"grant_types" binding:"required" example:"authorization_code,refresh_token"`
+	ResponseTypes           []string            `json:"response_types" example:"code"`
+	ResponseModes           []string            `json:"response_modes" example:"query,form_post"`
+	Scopes                  []string            `json:"scopes" example:"openid,profile,email,offline_access"`
+	Audience                []string            `json:"audience" example:"api-service"`
+	Public                  bool                `json:"public" example:"false"`
+	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method" example:"client_secret_basic"`
+	EnforcePKCE             bool                `json:"enforce_pkce" example:"true"`
+	AllowedCORSOrigins      []string            `json:"allowed_cors_origins" example:"https://app.example.com"`
+	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
+	BackchannelLogoutURI    string              `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
+	SubjectType             string              `json:"subject_type" example:"public"`
+	JWKS                    *jose.JSONWebKeySet `json:"jwks" swaggertype:"object"`
 }
 
 type OAuth2ClientResponse struct {
-	ID                      string              `json:"client_id"`
-	TenantID                string              `json:"tenant_id"`
-	Name                    string              `json:"name"`
-	AppID                   string              `json:"app_id"`
-	Secret                  string              `json:"client_secret"`
-	RedirectURIs            []string            `json:"redirect_uris"`
-	GrantTypes              []string            `json:"grant_types"`
-	ResponseTypes           []string            `json:"response_types"`
-	ResponseModes           []string            `json:"response_modes"`
-	Scopes                  []string            `json:"scopes"`
-	Audience                []string            `json:"audience"`
-	Public                  bool                `json:"public"`
-	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method"`
-	EnforcePKCE             bool                `json:"enforce_pkce"`
-	AllowedCORSOrigins      []string            `json:"allowed_cors_origins"`
-	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI    string              `json:"backchannel_logout_uri"`
-	AccessTokenLifespan     string              `json:"access_token_lifespan,omitempty"`
-	RefreshTokenLifespan    string              `json:"refresh_token_lifespan,omitempty"`
-	IDTokenLifespan         string              `json:"id_token_lifespan,omitempty"`
-	SubjectType             string              `json:"subject_type"`
-	JWKS                    *jose.JSONWebKeySet `json:"jwks,omitempty"`
-	CreatedAt               string              `json:"created_at"`
-	UpdatedAt               string              `json:"updated_at,omitempty"`
+	ID                      string              `json:"client_id" example:"my-web-app"`
+	TenantID                string              `json:"tenant_id" example:"default"`
+	Name                    string              `json:"name" example:"My Frontend Application"`
+	AppID                   string              `json:"app_id" example:"app-xyz123"`
+	Secret                  string              `json:"client_secret,omitempty" example:"super-secure-secret-key"`
+	RedirectURIs            []string            `json:"redirect_uris" example:"https://app.example.com/callback"`
+	GrantTypes              []string            `json:"grant_types" example:"authorization_code,refresh_token"`
+	ResponseTypes           []string            `json:"response_types" example:"code"`
+	ResponseModes           []string            `json:"response_modes" example:"query,form_post"`
+	Scopes                  []string            `json:"scopes" example:"openid,profile,email,offline_access"`
+	Audience                []string            `json:"audience" example:"api-service"`
+	Public                  bool                `json:"public" example:"false"`
+	TokenEndpointAuthMethod string              `json:"token_endpoint_auth_method" example:"client_secret_basic"`
+	EnforcePKCE             bool                `json:"enforce_pkce" example:"true"`
+	AllowedCORSOrigins      []string            `json:"allowed_cors_origins" example:"https://app.example.com"`
+	PostLogoutRedirectURIs  []string            `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
+	BackchannelLogoutURI    string              `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
+	AccessTokenLifespan     string              `json:"access_token_lifespan,omitempty" example:"1h"`
+	RefreshTokenLifespan    string              `json:"refresh_token_lifespan,omitempty" example:"720h"`
+	IDTokenLifespan         string              `json:"id_token_lifespan,omitempty" example:"1h"`
+	SubjectType             string              `json:"subject_type" example:"public"`
+	JWKS                    *jose.JSONWebKeySet `json:"jwks,omitempty" swaggertype:"object"`
+	CreatedAt               string              `json:"created_at" example:"2026-03-12T15:04:05Z"`
+	UpdatedAt               string              `json:"updated_at,omitempty" example:"2026-03-12T15:04:05Z"`
 }
 
 func (req *CreateOAuth2ClientRequest) ToDomain() *entity.OAuth2Client {

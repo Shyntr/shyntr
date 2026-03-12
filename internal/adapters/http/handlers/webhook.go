@@ -8,11 +8,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
 type WebhookHandler struct {

@@ -3,8 +3,8 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/stretchr/testify/assert"
 )
 

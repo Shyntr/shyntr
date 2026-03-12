@@ -1,6 +1,6 @@
 package dto
 
-import "github.com/nevzatcirak/shyntr/internal/domain/entity"
+import "github.com/Shyntr/shyntr/internal/domain/entity"
 
 type CreateTenantRequest struct {
 	ID          string `json:"id"`

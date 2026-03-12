@@ -27,14 +27,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/beevik/etree"
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
 	goxmldsig "github.com/russellhaering/goxmldsig"
 )
 

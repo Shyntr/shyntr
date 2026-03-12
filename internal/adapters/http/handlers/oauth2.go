@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/pkg/constants"
+	"github.com/Shyntr/shyntr/pkg/consts"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/constants"
-	"github.com/nevzatcirak/shyntr/pkg/consts"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
 	fositejwt "github.com/ory/fosite/token/jwt"
@@ -98,7 +98,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	if client.EnforcePKCE {
 		if ar.GetRequestForm().Get("code_challenge") == "" {
-			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHint("This client requires PKCE. Please include code_challenge."))
+			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrInvalidRequest.WithHint("OAuth 2.1 policy requires PKCE for all clients. Please include code_challenge."))
 			return
 		}
 	}
@@ -662,18 +662,12 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 
 		"response_types_supported": []string{
 			"code",
-			"token",
-			"id_token",
-			"code id_token",
-			"code token",
-			"code id_token token",
 		},
 
-		"response_modes_supported": []string{"query", "fragment", "form_post"},
+		"response_modes_supported": []string{"query", "form_post"},
 
 		"grant_types_supported": []string{
 			"authorization_code",
-			"implicit",
 			"refresh_token",
 			"client_credentials",
 		},
@@ -683,11 +677,11 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 
 		"scopes_supported": []string{"openid", "offline_access", "profile", "email", "address", "phone"},
 
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 
 		"claims_supported": []string{"sub", "iss", "tenant_id", "name", "email", "email_verified", "phone_number", "address", "auth_time"},
 
 		"display_values_supported": []string{"page", "popup"},
-		"ui_locales_supported":     []string{"en-US", "tr-TR"},
+		"ui_locales_supported":     []string{"en-US"},
 	})
 }

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
 type JSONB []byte

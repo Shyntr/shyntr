@@ -3,8 +3,8 @@ package models
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/entity"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"gorm.io/gorm"
 )
 

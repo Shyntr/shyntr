@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/nevzatcirak/shyntr/internal/domain/entity"
+import "github.com/Shyntr/shyntr/internal/domain/entity"
 
 // Standard OIDC Claim Mappings
 var scopeToClaims = map[string][]string{

@@ -1,5 +1,12 @@
 package main
 
+// @title Shyntr Identity Hub API
+// @version 1.0
+// @description Protocol Agnostic Zero Trust Identity Broker
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+
 import (
 	"context"
 	"encoding/json"
@@ -13,22 +20,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/audit"
+	router "github.com/Shyntr/shyntr/internal/adapters/http"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	persistence "github.com/Shyntr/shyntr/internal/adapters/persistence"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/application/worker"
+	"github.com/Shyntr/shyntr/internal/domain/entity"
+	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/audit"
-	router "github.com/nevzatcirak/shyntr/internal/adapters/http"
-	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
-	persistence "github.com/nevzatcirak/shyntr/internal/adapters/persistence"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/repository"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/application/worker"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"github.com/ory/fosite"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -62,6 +69,14 @@ func main() {
 			if err := persistence.MigrateDB(db); err != nil {
 				log.Fatalf("Migration failed: %v", err)
 			}
+
+			logger.Log.Info("Running OAuth 2.1 security enforcements on existing data...")
+			if err := db.Exec("UPDATE o_auth2_clients SET enforce_pkce = true WHERE enforce_pkce = false").Error; err != nil {
+				logger.Log.Error("Failed to enforce PKCE on existing clients", zap.Error(err))
+			} else {
+				logger.Log.Info("PKCE enforced for all existing clients.")
+			}
+
 			logger.Log.Info("Database migration completed successfully.")
 			scopeRepo := repository.NewScopeRepository(db)
 			if err := utils2.SeedSystemScopesForTenant(context.Background(), scopeRepo, cfg.DefaultTenantID); err != nil {
@@ -76,7 +91,6 @@ func main() {
 	// TENANT COMMANDS
 	// ==========================================
 
-	// CREATE TENANT
 	var (
 		tenantID, tenantName, tenantDisplay, tenantDesc string
 	)
@@ -382,13 +396,13 @@ func main() {
 				RedirectURIs:            redirectURIs,
 				PostLogoutRedirectURIs:  postLogoutURIs,
 				Audience:                clientAudience,
-				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
-				ResponseTypes:           []string{"code", "token", "id_token", "code id_token", "code token", "code id_token token"},
-				ResponseModes:           []string{"query", "fragment", "form_post"},
+				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials"},
+				ResponseTypes:           []string{"code"},
+				ResponseModes:           []string{"query", "form_post"},
 				Scopes:                  clientScopes,
 				TokenEndpointAuthMethod: authMethod,
 				Public:                  isPublic,
-				EnforcePKCE:             isPublic,
+				EnforcePKCE:             true, // OAuth 2.1 Requirement
 				SkipConsent:             skipConsent,
 			}
 
@@ -957,6 +971,8 @@ func runServer() {
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
 		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
 
+	swaggerRouter := router.SetupSwaggerRouter()
+
 	publicSrv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: publicRouter,
@@ -965,6 +981,11 @@ func runServer() {
 	adminSrv := &http.Server{
 		Addr:    ":" + cfg.AdminPort,
 		Handler: adminRouter,
+	}
+
+	swaggerSrv := &http.Server{
+		Addr:    ":" + cfg.SwaggerPort,
+		Handler: swaggerRouter,
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())
@@ -980,6 +1001,14 @@ func runServer() {
 	g.Go(func() error {
 		logger.Log.Info("Starting Admin Server", zap.String("port", cfg.AdminPort))
 		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		logger.Log.Info("Starting Swagger Documentation Server", zap.String("port", cfg.SwaggerPort))
+		if err := swaggerSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
 		}
 		return nil
@@ -1004,6 +1033,9 @@ func runServer() {
 		}
 		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
 			logger.Log.Error("Admin server forced to shutdown", zap.Error(err))
+		}
+		if err := swaggerSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Log.Error("Swagger server forced to shutdown", zap.Error(err))
 		}
 		return nil
 	})
