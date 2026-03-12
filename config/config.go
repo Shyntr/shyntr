@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	DEVELOPMENT         string   `mapstructure:"DEVELOPMENT"`
 	DSN                 string   `mapstructure:"DSN"`
 	DatabaseURL         string   `mapstructure:"DATABASE_URL"`
 	Port                string   `mapstructure:"PORT"`
@@ -41,6 +42,7 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
+	viper.SetDefault("DEVELOPMENT", false)
 	viper.SetDefault("PORT", "7496")
 	viper.SetDefault("ADMIN_PORT", "7497")
 	viper.SetDefault("DSN", "postgres://shyntr:secretpassword@localhost:5432/shyntr?sslmode=disable")
@@ -49,8 +51,8 @@ func LoadConfig() *Config {
 	viper.SetDefault("ISSUER_URL", "http://localhost:7496")
 
 	viper.SetDefault("COOKIE_SECURE", false)
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3274"})
-	viper.SetDefault("ADMIN_CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3274", "http://localhost:7497"})
+	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"*"})
+	viper.SetDefault("ADMIN_CORS_ALLOWED_ORIGINS", []string{"http://localhost:3010", "http://localhost:3000", "http://localhost:3274", "http://localhost:7497"})
 
 	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:3000/login")
 	viper.SetDefault("EXTERNAL_CONSENT_URL", "http://localhost:3000/consent")
@@ -66,9 +68,10 @@ func LoadConfig() *Config {
 	// Security Defaults
 	viper.SetDefault("SKIP_TLS_VERIFY", false)
 
-	viper.SetDefault("DB_MAX_IDLE_CONNS", 10)
-	viper.SetDefault("DB_MAX_OPEN_CONNS", 100)
+	viper.SetDefault("DB_MAX_IDLE_CONNS", 20)
+	viper.SetDefault("DB_MAX_OPEN_CONNS", 80)
 
+	mustBind("DEVELOPMENT")
 	mustBind(consts.EnvDatabaseDSN)
 	mustBind("DATABASE_URL")
 	mustBind("PORT")

@@ -25,7 +25,7 @@ services:
   # 2. SHYNTR IDENTITY HUB (Backend)
   # ----------------------------------------
   shyntr-backend:
-    image: shyntr/shyntr:1.0.0-beta.6
+    image: shyntr/shyntr:dev
     container_name: shyntr-backend
     ports:
       - "7496:7496" # Public Port (SHYN)
@@ -43,7 +43,7 @@ services:
       - EXTERNAL_LOGIN_URL=http://localhost:3000/login
       - EXTERNAL_CONSENT_URL=http://localhost:3000/consent
 
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3274
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3274,http://localhost:3010,http://localhost:8282
       - ADMIN_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3274,http://localhost:7497
       - LOG_LEVEL=info
       - SKIP_TLS_VERIFY=true #Development only
@@ -65,13 +65,13 @@ services:
   # 3. SHYNTR DASHBOARD (React / Nginx)
   # ----------------------------------------
   shyntr-dashboard:
-    image: shyntr/shyntr-dashboard:1.0.0-beta.2
+    image: shyntr/shyntr-dashboard:dev
     container_name: shyntr_dashboard
     ports:
       - "3274:80"
     environment:
-      - REACT_MANAGEMENT_BACKEND_URL=http://localhost:7497
-      - REACT_PUBLIC_BACKEND_URL=http://localhost:7496
+      - REACT_MANAGEMENT_BACKEND_URL=http://host.docker.internal:7497
+      - REACT_PUBLIC_BACKEND_URL=http://host.docker.internal:7496
     depends_on:
       shyntr-backend:
         condition: service_healthy
@@ -82,13 +82,13 @@ services:
   # 4. SHYNTR AUTH PORTAL (Next.js)
   # ----------------------------------------
   shyntr-auth-portal:
-    image: shyntr/shyntr-auth-portal:1.0.0-beta.3
+    image: shyntr/shyntr-auth-portal:dev
     container_name: shyntr_auth_portal
     ports:
       - "3000:3000"
     environment:
-      - SHYNTR_INTERNAL_API_URL=http://shyntr-backend:7497
-      - SHYNTR_PUBLIC_API_URL=http://localhost:7496
+      - SHYNTR_INTERNAL_API_URL=http://host.docker.internal:7497
+      - SHYNTR_PUBLIC_API_URL=http://host.docker.internal:7496
     depends_on:
       shyntr-backend:
         condition: service_healthy

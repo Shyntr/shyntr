@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ory/fosite"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -31,12 +32,13 @@ func InitLogger(level string) {
 			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 		} else {
 			config = zap.NewDevelopmentConfig()
+			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 			config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		}
 
 		config.Level = zap.NewAtomicLevelAt(logLevel)
 
-		Log, err = config.Build()
+		Log, err = config.Build(zap.AddStacktrace(zap.ErrorLevel))
 		if err != nil {
 			panic("Failed to initialize logger: " + err.Error())
 		}
@@ -100,4 +102,32 @@ func FromGin(c *gin.Context) *zap.Logger {
 	}
 
 	return log
+}
+
+func LogFositeError(c *gin.Context, err error, contextMsg string) {
+	if err == nil {
+		return
+	}
+
+	rfcErr := fosite.ErrorToRFC6749Error(err)
+
+	if rfcErr.CodeField >= 500 {
+		FromGin(c).Error(contextMsg,
+			zap.Error(err),
+			zap.Int("status_code", rfcErr.CodeField),
+			zap.String("fosite_error", rfcErr.ErrorField),
+			zap.String("fosite_description", rfcErr.DescriptionField),
+			zap.String("fosite_hint", rfcErr.HintField),
+			zap.String("fosite_debug", rfcErr.DebugField),
+		)
+		return
+	}
+
+	FromGin(c).Warn(contextMsg,
+		zap.Error(err),
+		zap.Int("status_code", rfcErr.CodeField),
+		zap.String("fosite_error", rfcErr.ErrorField),
+		zap.String("fosite_description", rfcErr.DescriptionField),
+		zap.String("fosite_hint", rfcErr.HintField),
+	)
 }
