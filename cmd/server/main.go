@@ -415,6 +415,31 @@ func main() {
 	createClientCmd.Flags().BoolVar(&isPublic, "public", false, "Is Public Client (SPA/Mobile)")
 	createClientCmd.Flags().BoolVar(&skipConsent, "skip-consent", false, "Skip user consent screen")
 
+	var injectJWKSCmd = &cobra.Command{
+		Use:   "inject-jwks [client_id] [jwks_file]",
+		Short: "Directly injects a JWKS payload into the client's database record",
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("Database connection failed: %v", err)
+			}
+			jwksBytes, err := os.ReadFile(args[1])
+			if err != nil {
+				log.Fatalf("Failed to read JWKS file: %v", err)
+			}
+
+			result := db.Exec(`UPDATE o_auth2_clients SET json_web_keys = ? WHERE id = ?`, string(jwksBytes), args[0])
+			if result.Error != nil {
+				log.Fatalf("Failed to inject JWKS: %v", result.Error)
+			}
+			if result.RowsAffected == 0 {
+				log.Fatalf("Client %s not found", args[0])
+			}
+			log.Printf("Successfully injected JWKS into client %s. Fosite will now recognize the Public Key.", args[0])
+		},
+	}
 	var getClientCmd = &cobra.Command{
 		Use:   "get-client [client_id]",
 		Short: "Get OIDC Client details",
@@ -850,7 +875,7 @@ func main() {
 		migrateCmd,
 		createTenantCmd, getTenantCmd, updateTenantCmd, deleteTenantCmd,
 		createScopeCmd, getScopeCmd, updateScopeCmd, deleteScopeCmd,
-		createClientCmd, getClientCmd, updateClientCmd, deleteClientCmd,
+		createClientCmd, getClientCmd, updateClientCmd, deleteClientCmd, injectJWKSCmd,
 		createSAMLClientCmd, getSAMLClientCmd, updateSAMLClientCmd, deleteSAMLClientCmd,
 		createSAMLConnectionCmd, getSAMLConnectionCmd, deleteSAMLConnectionCmd,
 		createOIDCConnectionCmd, getOIDCConnectionCmd, deleteOIDCConnectionCmd,

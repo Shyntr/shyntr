@@ -68,8 +68,8 @@ func LoadConfig() *Config {
 	// Security Defaults
 	viper.SetDefault("SKIP_TLS_VERIFY", false)
 
-	viper.SetDefault("DB_MAX_IDLE_CONNS", 10)
-	viper.SetDefault("DB_MAX_OPEN_CONNS", 100)
+	viper.SetDefault("DB_MAX_IDLE_CONNS", 20)
+	viper.SetDefault("DB_MAX_OPEN_CONNS", 80)
 
 	mustBind("DEVELOPMENT")
 	mustBind(consts.EnvDatabaseDSN)

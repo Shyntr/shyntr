@@ -18,8 +18,19 @@ type ExtendedClient struct {
 	ResponseModes []fosite.ResponseModeType
 }
 
+var _ fosite.Client = (*ExtendedClient)(nil)
+var _ fosite.OpenIDConnectClient = (*ExtendedClient)(nil)
+
 func (c *ExtendedClient) GetJSONWebKeys() *jose.JSONWebKeySet {
 	return c.JSONWebKeys
+}
+
+func (c *ExtendedClient) GetJSONWebKeysURI() string {
+	return ""
+}
+
+func (c *ExtendedClient) GetTokenEndpointAuthSigningAlgorithm() string {
+	return "RS256"
 }
 
 func (c *ExtendedClient) GetPostLogoutRedirectURIs() []string {
@@ -27,6 +38,9 @@ func (c *ExtendedClient) GetPostLogoutRedirectURIs() []string {
 }
 
 func (c *ExtendedClient) GetTokenEndpointAuthMethod() string {
+	if c.TokenEndpointAuthMethod == "" {
+		return "client_secret_basic"
+	}
 	return c.TokenEndpointAuthMethod
 }
 
@@ -39,6 +53,14 @@ func (c *ExtendedClient) GetResponseModes() []fosite.ResponseModeType {
 		}
 	}
 	return c.ResponseModes
+}
+
+func (c *ExtendedClient) GetRequestURIs() []string {
+	return nil
+}
+
+func (c *ExtendedClient) GetRequestObjectSigningAlgorithm() string {
+	return "RS256"
 }
 
 func toResponseModeTypes(modes []string) []fosite.ResponseModeType {
@@ -61,7 +83,7 @@ func ToFositeClient(c *entity.OAuth2Client) fosite.Client {
 			Audience:      c.Audience,
 			Public:        c.Public,
 		},
-		JSONWebKeys:             nil,
+		JSONWebKeys:             c.JSONWebKeys,
 		PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
 		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
 		ResponseModes:           toResponseModeTypes(c.ResponseModes),
