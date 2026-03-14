@@ -77,9 +77,8 @@ func (u *webhookUseCase) DeleteWebhook(ctx context.Context, id string, actorIP, 
 	if err := u.repo.Delete(ctx, id); err != nil {
 		return err
 	}
-	u.audit.LogWithoutIP("system", "system", "management.webhook.delete", map[string]interface{}{
+	u.audit.Log("system", "system", "management.webhook.delete", actorIP, userAgent, map[string]interface{}{
 		"webhook_id": id,
-		"ip":         actorIP,
 	})
 	return nil
 }

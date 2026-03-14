@@ -21,7 +21,7 @@ type AuthUseCase interface {
 	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
 	MarkLoginAsProviderStarted(ctx context.Context, challenge, provider, connectionID string, providerContext map[string]interface{}, actorIP, userAgent string) error
-	CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
+	CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 
 	CreateConsentRequest(ctx context.Context, req *model.ConsentRequest) (*model.ConsentRequest, error)
 	GetConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error)
@@ -111,9 +111,8 @@ func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, 
 	if err := u.repo.UpdateLoginRequest(ctx, req); err != nil {
 		return nil, err
 	}
-	u.audit.Log(req.ID, "system", "auth.login.accept", actorIP, userAgent, map[string]interface{}{
+	u.audit.Log(req.ID, subject, "auth.login.accept", actorIP, userAgent, map[string]interface{}{
 		"client_id": req.ClientID,
-		"subject":   subject,
 	})
 
 	return req, nil
@@ -130,7 +129,7 @@ func (u *authUseCase) RejectLoginRequest(ctx context.Context, challenge string, 
 	if err := u.repo.UpdateLoginRequest(ctx, req); err != nil {
 		return nil, err
 	}
-	u.audit.Log(req.ID, "system", "auth.login.reject", actorIP, userAgent, map[string]interface{}{
+	u.audit.Log(req.ID, req.Subject, "auth.login.reject", actorIP, userAgent, map[string]interface{}{
 		"client_id":         req.ClientID,
 		"error_name":        errName,
 		"error_description": errDesc,
@@ -159,14 +158,17 @@ func (u *authUseCase) MarkLoginAsProviderStarted(ctx context.Context, challenge,
 		}
 	}
 
-	u.audit.Log(req.ID, "system", provider+".login.start", actorIP, userAgent, map[string]interface{}{
-		"connection_id": connectionID,
-		"provider":      provider,
+	u.audit.Log(req.ID, req.Subject, provider+".login.start", actorIP, userAgent, map[string]interface{}{
+		"connection_id":      connectionID,
+		"provider":           provider,
+		"requested_scopes":   req.RequestedScope,
+		"requested_audience": req.RequestedAudience,
+		"protocol":           req.Protocol,
 	})
 	return nil
 }
 
-func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
+func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -189,9 +191,12 @@ func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subj
 		return nil, err
 	}
 
-	u.audit.Log(req.ID, "system", "provider.login.success", actorIP, userAgent, map[string]interface{}{
-		"subject":   subject,
-		"client_id": req.ClientID,
+	u.audit.Log(req.ID, req.Subject, "provider.login.success", actorIP, userAgent, map[string]interface{}{
+		"client_id":          req.ClientID,
+		"connection":         connectionName,
+		"requested_scopes":   req.RequestedScope,
+		"requested_audience": req.RequestedAudience,
+		"protocol":           req.Protocol,
 	})
 
 	return req, nil
@@ -249,9 +254,12 @@ func (u *authUseCase) AcceptConsentRequest(ctx context.Context, challenge string
 		return nil, err
 	}
 
-	u.audit.Log(req.ID, "system", "auth.consent.accept", actorIP, userAgent, map[string]interface{}{
-		"client_id": req.ClientID,
-		"scopes":    grantScope,
+	u.audit.Log(req.ID, req.Subject, "auth.consent.accept", actorIP, userAgent, map[string]interface{}{
+		"client_id":          req.ClientID,
+		"scopes":             req.GrantedScope,
+		"requested_scopes":   req.RequestedScope,
+		"audience":           req.GrantedAudience,
+		"requested_audience": req.RequestedAudience,
 	})
 
 	return req, nil
@@ -266,10 +274,14 @@ func (u *authUseCase) RejectConsentRequest(ctx context.Context, challenge string
 	if err := u.repo.UpdateConsentRequest(ctx, req); err != nil {
 		return nil, err
 	}
-	u.audit.Log(req.ID, "system", "auth.consent.reject", actorIP, userAgent, map[string]interface{}{
-		"client_id":         req.ClientID,
-		"error_name":        errName,
-		"error_description": errDesc,
+	u.audit.Log(req.ID, req.Subject, "auth.consent.reject", actorIP, userAgent, map[string]interface{}{
+		"client_id":          req.ClientID,
+		"scopes":             req.GrantedScope,
+		"requested_scopes":   req.RequestedScope,
+		"audience":           req.GrantedAudience,
+		"requested_audience": req.RequestedAudience,
+		"error":              errName,
+		"error_reason":       errDesc,
 	})
 	return req, nil
 }

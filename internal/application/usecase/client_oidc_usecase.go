@@ -489,10 +489,8 @@ func (u *oauth2ClientUseCase) DeleteClient(ctx context.Context, tenantID, client
 	if err := u.repo.Delete(ctx, tenantID, clientID); err != nil {
 		return err
 	}
-	u.audit.LogWithoutIP(tenantID, "system", "management.client.oidc.delete", map[string]interface{}{
-		"client_id":  clientID,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+	u.audit.Log(tenantID, "system", "management.client.oidc.delete", actorIP, userAgent, map[string]interface{}{
+		"client_id": clientID,
 	})
 	return nil
 }

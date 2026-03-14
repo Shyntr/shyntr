@@ -7,14 +7,14 @@ import (
 )
 
 type AuditLog struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	Actor     string    `json:"actor"`
-	Action    string    `json:"action"`
-	IPAddress string    `json:"ip_address"`
-	UserAgent string    `json:"user_agent"`
-	Details   []byte    `json:"details"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string                 `json:"id"`
+	TenantID  string                 `json:"tenant_id"`
+	Actor     string                 `json:"actor"`
+	Action    string                 `json:"action"`
+	IPAddress string                 `json:"ip_address"`
+	UserAgent string                 `json:"user_agent"`
+	Details   map[string]interface{} `json:"details"`
+	CreatedAt time.Time              `json:"created_at"`
 }
 
 func (a *AuditLog) Validate() error {
