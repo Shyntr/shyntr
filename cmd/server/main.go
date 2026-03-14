@@ -30,7 +30,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/application/worker"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
@@ -911,7 +911,7 @@ func runServer() {
 	}
 
 	var count int64
-	if err := db.Model(&entity.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
+	if err := db.Model(&model.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
 		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
 		persistence.SeedDefaultTenant(db, cfg)
 	}

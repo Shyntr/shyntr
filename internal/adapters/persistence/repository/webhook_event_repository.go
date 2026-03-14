@@ -5,7 +5,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -17,12 +17,12 @@ func NewWebhookEventRepository(db *gorm.DB) port.WebhookEventRepository {
 	return &webhookEventRepository{db: db}
 }
 
-func (r *webhookEventRepository) SaveEvent(ctx context.Context, event *entity.WebhookEvent) error {
+func (r *webhookEventRepository) SaveEvent(ctx context.Context, event *model.WebhookEvent) error {
 	dbModel := models.FromDomainWebhookEvent(event)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *webhookEventRepository) GetPendingEvents(ctx context.Context, webhookID string, limit int) ([]*entity.WebhookEvent, error) {
+func (r *webhookEventRepository) GetPendingEvents(ctx context.Context, webhookID string, limit int) ([]*model.WebhookEvent, error) {
 	var dbModels []models.WebhookEventGORM
 	if err := r.db.WithContext(ctx).
 		Where("webhook_id = ?", webhookID).
@@ -32,7 +32,7 @@ func (r *webhookEventRepository) GetPendingEvents(ctx context.Context, webhookID
 		return nil, err
 	}
 
-	var entities []*entity.WebhookEvent
+	var entities []*model.WebhookEvent
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

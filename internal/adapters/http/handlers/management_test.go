@@ -17,7 +17,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -117,7 +117,7 @@ func TestManagementAPI_Security(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var clients []entity.OAuth2Client
+		var clients []model.OAuth2Client
 		err := json.Unmarshal(w.Body.Bytes(), &clients)
 		assert.NoError(t, err)
 

@@ -16,6 +16,18 @@ func NewAuditHandler(audit usecase.AuditUseCase) *AuditHandler {
 	return &AuditHandler{audit: audit}
 }
 
+// Get godoc
+// @Summary Get Tenant Audit Logs
+// @Description Retrieves paginated audit logs for a specific tenant.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID for isolation boundary"
+// @Param limit query int false "Number of records to return" default(100)
+// @Param offset query int false "Number of records to skip" default(0)
+// @Success 200 {array} map[string]interface{} "List of tenant audit logs"
+// @Failure 500 {object} map[string]string "error - Failed to get audit logs"
+// @Router /audit/{tenant_id} [get]
 func (h *AuditHandler) Get(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	limitStr := c.DefaultQuery("limit", "100")

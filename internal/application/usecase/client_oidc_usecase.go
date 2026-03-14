@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
-	"github.com/Shyntr/shyntr/internal/adapters/http/dto"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
@@ -37,15 +37,15 @@ type OAuth2ClientUseCase interface {
 	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
 	SendBackchannelLogout(clientID, logoutURI, subject, issuer string)
-	CreateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
-	UpdateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
-	GetClient(ctx context.Context, clientID string) (*entity.OAuth2Client, error)
+	CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
+	UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
+	GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error)
 	GetClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetPublicClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetConfidentialClientCount(ctx context.Context, tenantID string) (int64, error)
-	GetClientByTenant(ctx context.Context, tenantID, clientID string) (*entity.OAuth2Client, error)
+	GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error)
 	DeleteClient(ctx context.Context, tenantID, clientID string, actorIP, userAgent string) error
-	ListClients(ctx context.Context, tenantID string) ([]*dto.OAuth2ClientResponse, error)
+	ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error)
 }
 
 type oauth2ClientUseCase struct {
@@ -348,7 +348,7 @@ func (u *oauth2ClientUseCase) discoverEndpoints(ctx context.Context, issuer stri
 	return &disc, nil
 }
 
-func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error) {
+func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error) {
 	if client.TenantID == "" {
 		client.TenantID = "default"
 	}
@@ -408,7 +408,7 @@ func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *entity.O
 	return client, returnedSecret, nil
 }
 
-func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error) {
+func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error) {
 	if client.TenantID == "" {
 		client.TenantID = "default"
 	}
@@ -465,7 +465,7 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *entity.O
 	return client, returnedSecret, nil
 }
 
-func (u *oauth2ClientUseCase) GetClient(ctx context.Context, clientID string) (*entity.OAuth2Client, error) {
+func (u *oauth2ClientUseCase) GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error) {
 	return u.repo.GetByID(ctx, clientID)
 }
 
@@ -481,7 +481,7 @@ func (u *oauth2ClientUseCase) GetConfidentialClientCount(ctx context.Context, te
 	return u.repo.GetConfidentialClientCount(ctx, tenantID)
 }
 
-func (u *oauth2ClientUseCase) GetClientByTenant(ctx context.Context, tenantID, clientID string) (*entity.OAuth2Client, error) {
+func (u *oauth2ClientUseCase) GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error) {
 	return u.repo.GetByTenantAndID(ctx, tenantID, clientID)
 }
 
@@ -497,10 +497,10 @@ func (u *oauth2ClientUseCase) DeleteClient(ctx context.Context, tenantID, client
 	return nil
 }
 
-func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*dto.OAuth2ClientResponse, error) {
+func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error) {
 	clients, err := u.repo.ListByTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	return dto.FromDomainOAuth2Clients(clients), nil
+	return payload.FromDomainOAuth2Clients(clients), nil
 }

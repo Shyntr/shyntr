@@ -1,4 +1,4 @@
-package response
+package payload
 
 import (
 	"fmt"
@@ -12,12 +12,12 @@ import (
 
 // ManagementError represents the RFC 9457 Problem Details for HTTP APIs
 type ManagementError struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   int    `json:"status"`
-	Detail   string `json:"detail,omitempty"`
-	Instance string `json:"instance,omitempty"`
-	TraceID  string `json:"trace_id,omitempty"`
+	Type     string `json:"type" example:"https://shyntr.com/docs/errors/400"`
+	Title    string `json:"title" example:"Bad Request"`
+	Status   int    `json:"status" example:"400"`
+	Detail   string `json:"detail,omitempty" example:"The provided request payload is invalid."`
+	Instance string `json:"instance,omitempty" example:"/admin/management/tenants"`
+	TraceID  string `json:"trace_id,omitempty" example:"5b8aa5a2-388c-4817-a068-d0658eb11175"`
 }
 
 // HandleManagementError logs the error with OTel Trace ID and returns an RFC 9457 compliant JSON response.
@@ -77,9 +77,9 @@ func LogOnlyError(c *gin.Context, statusCode int, userMessage string, err error)
 }
 
 type AppError struct {
-	StatusCode  int
-	UserMessage string
-	Err         error
+	StatusCode  int    `json:"status_code" example:"400"`
+	UserMessage string `json:"user_message" example:"Invalid input provided"`
+	Err         error  `json:"-" swaggerignore:"true"`
 }
 
 func (e *AppError) Error() string {

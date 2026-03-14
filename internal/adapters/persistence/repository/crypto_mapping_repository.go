@@ -5,7 +5,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -17,12 +17,12 @@ func NewSigningKeyRepository(db *gorm.DB) port.SigningKeyRepository {
 	return &signingKeyRepository{db: db}
 }
 
-func (r *signingKeyRepository) Save(ctx context.Context, key *entity.SigningKey) error {
+func (r *signingKeyRepository) Save(ctx context.Context, key *model.SigningKey) error {
 	dbModel := models.FromDomainSigningKey(key)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *signingKeyRepository) GetActiveKeysByTenant(ctx context.Context, tenantID, use string) ([]*entity.SigningKey, error) {
+func (r *signingKeyRepository) GetActiveKeysByTenant(ctx context.Context, tenantID, use string) ([]*model.SigningKey, error) {
 	var dbModels []models.SigningKeyGORM
 	query := r.db.WithContext(ctx).Where("tenant_id = ? AND is_active = ?", tenantID, true)
 	if use != "" {
@@ -31,7 +31,7 @@ func (r *signingKeyRepository) GetActiveKeysByTenant(ctx context.Context, tenant
 	if err := query.Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	var entities []*entity.SigningKey
+	var entities []*model.SigningKey
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
@@ -50,7 +50,7 @@ func NewBlacklistedJTIRepository(db *gorm.DB) port.BlacklistedJTIRepository {
 	return &blacklistedJTIRepository{db: db}
 }
 
-func (r *blacklistedJTIRepository) Save(ctx context.Context, jti *entity.BlacklistedJTI) error {
+func (r *blacklistedJTIRepository) Save(ctx context.Context, jti *model.BlacklistedJTI) error {
 	dbModel := models.FromDomainBlacklistedJTI(jti)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }

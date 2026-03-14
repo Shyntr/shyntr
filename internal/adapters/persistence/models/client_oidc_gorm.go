@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lib/pq"
 )
@@ -68,7 +68,7 @@ type OAuth2ClientGORM struct {
 
 func (OAuth2ClientGORM) TableName() string { return "o_auth2_clients" }
 
-func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
+func (m *OAuth2ClientGORM) ToDomain() *model.OAuth2Client {
 	var jwks *jose.JSONWebKeySet
 	if len(m.JSONWebKeys) > 0 {
 		var parsed jose.JSONWebKeySet
@@ -76,7 +76,7 @@ func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
 			jwks = &parsed
 		}
 	}
-	return &entity.OAuth2Client{
+	return &model.OAuth2Client{
 		ID:                      m.ID,
 		TenantID:                m.TenantID,
 		Name:                    m.Name,
@@ -105,7 +105,7 @@ func (m *OAuth2ClientGORM) ToDomain() *entity.OAuth2Client {
 	}
 }
 
-func FromDomainOAuth2Client(e *entity.OAuth2Client) *OAuth2ClientGORM {
+func FromDomainOAuth2Client(e *model.OAuth2Client) *OAuth2ClientGORM {
 	var jwksBytes JSONB
 	if e.JSONWebKeys != nil {
 		b, _ := json.Marshal(e.JSONWebKeys)

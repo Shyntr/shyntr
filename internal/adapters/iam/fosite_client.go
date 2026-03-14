@@ -1,7 +1,7 @@
 package iam
 
 import (
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/ory/fosite"
 )
@@ -71,7 +71,7 @@ func toResponseModeTypes(modes []string) []fosite.ResponseModeType {
 	return result
 }
 
-func ToFositeClient(c *entity.OAuth2Client) fosite.Client {
+func ToFositeClient(c *model.OAuth2Client) fosite.Client {
 	return &ExtendedClient{
 		DefaultClient: &fosite.DefaultClient{
 			ID:            c.ID,

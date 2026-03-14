@@ -5,21 +5,21 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Shyntr/shyntr/internal/adapters/http/dto"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type TenantUseCase interface {
-	CreateTenant(ctx context.Context, tenant *entity.Tenant, actorIP, userAgent string) (*entity.Tenant, error)
-	GetTenant(ctx context.Context, id string) (*entity.Tenant, error)
+	CreateTenant(ctx context.Context, tenant *model.Tenant, actorIP, userAgent string) (*model.Tenant, error)
+	GetTenant(ctx context.Context, id string) (*model.Tenant, error)
 	GetCount(ctx context.Context) (int64, error)
-	GetTenantByName(ctx context.Context, name string) (*entity.Tenant, error)
-	UpdateTenant(ctx context.Context, tenant *entity.Tenant, actorIP, userAgent string) error
+	GetTenantByName(ctx context.Context, name string) (*model.Tenant, error)
+	UpdateTenant(ctx context.Context, tenant *model.Tenant, actorIP, userAgent string) error
 	DeleteTenant(ctx context.Context, id string, actorIP, userAgent string) error
-	ListTenants(ctx context.Context) ([]*dto.TenantResponse, error)
+	ListTenants(ctx context.Context) ([]*payload.TenantResponse, error)
 }
 
 type tenantUseCase struct {
@@ -36,7 +36,7 @@ func NewTenantUseCase(repo port.TenantRepository, audit port.AuditLogger, scopeR
 	}
 }
 
-func (u *tenantUseCase) CreateTenant(ctx context.Context, tenant *entity.Tenant, actorIP, userAgent string) (*entity.Tenant, error) {
+func (u *tenantUseCase) CreateTenant(ctx context.Context, tenant *model.Tenant, actorIP, userAgent string) (*model.Tenant, error) {
 	if tenant.ID == "" {
 		tenant.ID, _ = utils.GenerateRandomHex(4)
 	}
@@ -65,7 +65,7 @@ func (u *tenantUseCase) CreateTenant(ctx context.Context, tenant *entity.Tenant,
 	return tenant, nil
 }
 
-func (u *tenantUseCase) GetTenant(ctx context.Context, id string) (*entity.Tenant, error) {
+func (u *tenantUseCase) GetTenant(ctx context.Context, id string) (*model.Tenant, error) {
 	return u.repo.GetByID(ctx, id)
 }
 
@@ -73,11 +73,11 @@ func (u *tenantUseCase) GetCount(ctx context.Context) (int64, error) {
 	return u.repo.GetCount(ctx)
 }
 
-func (u *tenantUseCase) GetTenantByName(ctx context.Context, name string) (*entity.Tenant, error) {
+func (u *tenantUseCase) GetTenantByName(ctx context.Context, name string) (*model.Tenant, error) {
 	return u.repo.GetByName(ctx, name)
 }
 
-func (u *tenantUseCase) UpdateTenant(ctx context.Context, tenant *entity.Tenant, actorIP, userAgent string) error {
+func (u *tenantUseCase) UpdateTenant(ctx context.Context, tenant *model.Tenant, actorIP, userAgent string) error {
 	if err := u.repo.Update(ctx, tenant); err != nil {
 		return err
 	}
@@ -104,10 +104,10 @@ func (u *tenantUseCase) DeleteTenant(ctx context.Context, id string, actorIP, us
 	return nil
 }
 
-func (u *tenantUseCase) ListTenants(ctx context.Context) ([]*dto.TenantResponse, error) {
+func (u *tenantUseCase) ListTenants(ctx context.Context) ([]*payload.TenantResponse, error) {
 	tenants, err := u.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return dto.FromDomainTenants(tenants), nil
+	return payload.FromDomainTenants(tenants), nil
 }

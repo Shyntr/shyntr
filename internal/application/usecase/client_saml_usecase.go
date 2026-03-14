@@ -4,22 +4,22 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Shyntr/shyntr/internal/adapters/http/dto"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 )
 
 type SAMLClientUseCase interface {
-	CreateClient(ctx context.Context, client *entity.SAMLClient, actorIP, userAgent string) (*entity.SAMLClient, error)
-	GetClient(ctx context.Context, tenantID, id string) (*entity.SAMLClient, error)
+	CreateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) (*model.SAMLClient, error)
+	GetClient(ctx context.Context, tenantID, id string) (*model.SAMLClient, error)
 	GetClientCount(ctx context.Context, tenantID string) (int64, error)
-	GetClientByEntityID(ctx context.Context, tenantID, entityID string) (*entity.SAMLClient, error)
-	UpdateClient(ctx context.Context, client *entity.SAMLClient, actorIP, userAgent string) error
+	GetClientByEntityID(ctx context.Context, tenantID, entityID string) (*model.SAMLClient, error)
+	UpdateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) error
 	DeleteClient(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListClients(ctx context.Context, tenantID string) ([]*dto.SAMLClientResponse, error)
+	ListClients(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error)
 }
 
 type samlClientUseCase struct {
@@ -32,7 +32,7 @@ func NewSAMLClientUseCase(repo port.SAMLClientRepository, tenant port.TenantRepo
 	return &samlClientUseCase{repo: repo, tenant: tenant, audit: audit}
 }
 
-func (u *samlClientUseCase) CreateClient(ctx context.Context, client *entity.SAMLClient, actorIP, userAgent string) (*entity.SAMLClient, error) {
+func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) (*model.SAMLClient, error) {
 	if client.TenantID == "" {
 		client.TenantID = "default"
 	}
@@ -110,7 +110,7 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *entity.SAM
 	return client, nil
 }
 
-func (u *samlClientUseCase) GetClient(ctx context.Context, tenantID, id string) (*entity.SAMLClient, error) {
+func (u *samlClientUseCase) GetClient(ctx context.Context, tenantID, id string) (*model.SAMLClient, error) {
 	client, err := u.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (u *samlClientUseCase) GetClientCount(ctx context.Context, tenantID string)
 	return u.repo.GetClientCount(ctx, tenantID)
 }
 
-func (u *samlClientUseCase) GetClientByEntityID(ctx context.Context, tenantID, entityID string) (*entity.SAMLClient, error) {
+func (u *samlClientUseCase) GetClientByEntityID(ctx context.Context, tenantID, entityID string) (*model.SAMLClient, error) {
 	client, err := u.repo.GetByTenantAndEntityID(ctx, tenantID, entityID)
 	if err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func (u *samlClientUseCase) GetClientByEntityID(ctx context.Context, tenantID, e
 	return client, nil
 }
 
-func (u *samlClientUseCase) UpdateClient(ctx context.Context, client *entity.SAMLClient, actorIP, userAgent string) error {
+func (u *samlClientUseCase) UpdateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) error {
 	if err := client.Validate(); err != nil {
 		return err
 	}
@@ -151,10 +151,10 @@ func (u *samlClientUseCase) DeleteClient(ctx context.Context, tenantID, id strin
 	return nil
 }
 
-func (u *samlClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*dto.SAMLClientResponse, error) {
+func (u *samlClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error) {
 	clients, err := u.repo.ListByTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	return dto.FromDomainSAMLClients(clients), nil
+	return payload.FromDomainSAMLClients(clients), nil
 }

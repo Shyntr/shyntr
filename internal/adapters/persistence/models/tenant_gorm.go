@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -27,8 +27,8 @@ func (t *TenantGORM) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-func (m *TenantGORM) ToDomain() *entity.Tenant {
-	return &entity.Tenant{
+func (m *TenantGORM) ToDomain() *model.Tenant {
+	return &model.Tenant{
 		ID:          m.ID,
 		Name:        m.Name,
 		DisplayName: m.DisplayName,
@@ -38,7 +38,7 @@ func (m *TenantGORM) ToDomain() *entity.Tenant {
 	}
 }
 
-func FromDomainTenant(e *entity.Tenant) *TenantGORM {
+func FromDomainTenant(e *model.Tenant) *TenantGORM {
 	return &TenantGORM{
 		ID:          e.ID,
 		Name:        e.Name,

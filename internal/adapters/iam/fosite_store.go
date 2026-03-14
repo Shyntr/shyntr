@@ -11,7 +11,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/constants"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lib/pq"
@@ -61,7 +61,7 @@ func (s *FositeStore) ClientAssertionJWTValid(ctx context.Context, jti string) e
 }
 
 func (s *FositeStore) SetClientAssertionJWT(ctx context.Context, jti string, exp time.Time) error {
-	jtiEntity := &entity.BlacklistedJTI{
+	jtiEntity := &model.BlacklistedJTI{
 		JTI:       jti,
 		ExpiresAt: exp,
 	}
@@ -119,7 +119,7 @@ func (s *FositeStore) IsJWTUsed(ctx context.Context, jti string) (bool, error) {
 }
 
 func (s *FositeStore) MarkJWTUsedForTime(ctx context.Context, jti string, exp time.Time) error {
-	blacklisted := &entity.BlacklistedJTI{
+	blacklisted := &model.BlacklistedJTI{
 		JTI:       jti,
 		ExpiresAt: exp,
 	}
@@ -297,7 +297,7 @@ func (s *FositeStore) getSession(ctx context.Context, signature, tokenType strin
 	}
 
 	if session == nil {
-		session = entity.NewJWTSession("")
+		session = model.NewJWTSession("")
 	}
 
 	if err := json.Unmarshal(sess.SessionData, session); err != nil {

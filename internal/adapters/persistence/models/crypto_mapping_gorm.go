@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type SigningKeyGORM struct {
@@ -19,8 +19,8 @@ type SigningKeyGORM struct {
 
 func (SigningKeyGORM) TableName() string { return "signing_keys" }
 
-func (m *SigningKeyGORM) ToDomain() *entity.SigningKey {
-	return &entity.SigningKey{
+func (m *SigningKeyGORM) ToDomain() *model.SigningKey {
+	return &model.SigningKey{
 		ID:        m.ID,
 		Algorithm: m.Algorithm,
 		KeyData:   m.KeyData,
@@ -32,7 +32,7 @@ func (m *SigningKeyGORM) ToDomain() *entity.SigningKey {
 	}
 }
 
-func FromDomainSigningKey(e *entity.SigningKey) *SigningKeyGORM {
+func FromDomainSigningKey(e *model.SigningKey) *SigningKeyGORM {
 	return &SigningKeyGORM{
 		ID:        e.ID,
 		Algorithm: e.Algorithm,
@@ -50,14 +50,14 @@ type BlacklistedJTIGORM struct {
 
 func (BlacklistedJTIGORM) TableName() string { return "blacklisted_jtis" }
 
-func (m *BlacklistedJTIGORM) ToDomain() *entity.BlacklistedJTI {
-	return &entity.BlacklistedJTI{
+func (m *BlacklistedJTIGORM) ToDomain() *model.BlacklistedJTI {
+	return &model.BlacklistedJTI{
 		JTI:       m.JTI,
 		ExpiresAt: m.ExpiresAt,
 	}
 }
 
-func FromDomainBlacklistedJTI(e *entity.BlacklistedJTI) *BlacklistedJTIGORM {
+func FromDomainBlacklistedJTI(e *model.BlacklistedJTI) *BlacklistedJTIGORM {
 	return &BlacklistedJTIGORM{
 		JTI:       e.JTI,
 		ExpiresAt: e.ExpiresAt,

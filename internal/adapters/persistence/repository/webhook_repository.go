@@ -6,7 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -18,12 +18,12 @@ func NewWebhookRepository(db *gorm.DB) port.WebhookRepository {
 	return &webhookRepository{db: db}
 }
 
-func (r *webhookRepository) Create(ctx context.Context, webhook *entity.Webhook) error {
+func (r *webhookRepository) Create(ctx context.Context, webhook *model.Webhook) error {
 	dbModel := models.FromDomainWebhook(webhook)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *webhookRepository) GetByID(ctx context.Context, id string) (*entity.Webhook, error) {
+func (r *webhookRepository) GetByID(ctx context.Context, id string) (*model.Webhook, error) {
 	var dbModel models.WebhookGORM
 	if err := r.db.WithContext(ctx).First(&dbModel, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -34,7 +34,7 @@ func (r *webhookRepository) GetByID(ctx context.Context, id string) (*entity.Web
 	return dbModel.ToDomain(), nil
 }
 
-func (r *webhookRepository) Update(ctx context.Context, webhook *entity.Webhook) error {
+func (r *webhookRepository) Update(ctx context.Context, webhook *model.Webhook) error {
 	dbModel := models.FromDomainWebhook(webhook)
 	return r.db.WithContext(ctx).Model(&models.WebhookGORM{}).Where("id = ?", webhook.ID).Updates(dbModel).Error
 }
@@ -50,19 +50,19 @@ func (r *webhookRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *webhookRepository) List(ctx context.Context) ([]*entity.Webhook, error) {
+func (r *webhookRepository) List(ctx context.Context) ([]*model.Webhook, error) {
 	var dbModels []models.WebhookGORM
 	if err := r.db.WithContext(ctx).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	var entities []*entity.Webhook
+	var entities []*model.Webhook
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
 	return entities, nil
 }
 
-func (r *webhookRepository) ListByEvent(ctx context.Context, event string) ([]*entity.Webhook, error) {
+func (r *webhookRepository) ListByEvent(ctx context.Context, event string) ([]*model.Webhook, error) {
 	var dbModels []models.WebhookGORM
 	// Veritabanı bağımsız (Postgres JSONB / MySQL JSON) arama için LIKE kullanılıyor
 	// (Gelişmiş DB operasyonlarında PostgreSQL spesifik jsonb ops. kullanılabilir)
@@ -70,7 +70,7 @@ func (r *webhookRepository) ListByEvent(ctx context.Context, event string) ([]*e
 	if err := r.db.WithContext(ctx).Where("is_active = ? AND events LIKE ?", true, query).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	var entities []*entity.Webhook
+	var entities []*model.Webhook
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

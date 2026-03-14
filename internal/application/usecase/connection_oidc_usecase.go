@@ -6,18 +6,18 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type OIDCConnectionUseCase interface {
-	CreateConnection(ctx context.Context, conn *entity.OIDCConnection, actorIP, userAgent string) (*entity.OIDCConnection, error)
-	UpdateConnection(ctx context.Context, conn *entity.OIDCConnection, actorIP, userAgent string) error
-	GetConnection(ctx context.Context, tenantID, id string) (*entity.OIDCConnection, error)
+	CreateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) (*model.OIDCConnection, error)
+	UpdateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) error
+	GetConnection(ctx context.Context, tenantID, id string) (*model.OIDCConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListConnections(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error)
-	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule)
+	ListConnections(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error)
+	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule)
 }
 
 type oidcConnectionUseCase struct {
@@ -30,7 +30,7 @@ func NewOIDCConnectionUseCase(repo port.OIDCConnectionRepository, audit port.Aud
 	return &oidcConnectionUseCase{repo: repo, audit: audit, scopeUse: scopeUse}
 }
 
-func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule) {
+func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule) {
 	for _, rule := range mappings {
 		if len(rule.TargetScopes) > 0 && rule.Target != "" {
 			err := u.scopeUse.AddClaimToScopes(ctx, tenantID, rule.Target, rule.TargetScopes)
@@ -45,7 +45,7 @@ func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID 
 	}
 }
 
-func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *entity.OIDCConnection, actorIP, userAgent string) (*entity.OIDCConnection, error) {
+func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) (*model.OIDCConnection, error) {
 	if conn.ID == "" {
 		conn.ID, _ = utils.GenerateRandomHex(8)
 	}
@@ -72,7 +72,7 @@ func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *enti
 	return conn, nil
 }
 
-func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *entity.OIDCConnection, actorIP, userAgent string) error {
+func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) error {
 	connection, err := u.GetConnection(ctx, conn.TenantID, conn.ID)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *enti
 	return nil
 }
 
-func (u *oidcConnectionUseCase) GetConnection(ctx context.Context, tenantID, id string) (*entity.OIDCConnection, error) {
+func (u *oidcConnectionUseCase) GetConnection(ctx context.Context, tenantID, id string) (*model.OIDCConnection, error) {
 	return u.repo.GetByTenantAndID(ctx, tenantID, id)
 }
 
@@ -116,6 +116,6 @@ func (u *oidcConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 	return nil
 }
 
-func (u *oidcConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error) {
+func (u *oidcConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
 	return u.repo.ListByTenant(ctx, tenantID)
 }

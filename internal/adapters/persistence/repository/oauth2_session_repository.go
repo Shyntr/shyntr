@@ -6,7 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -18,7 +18,7 @@ func NewOAuth2SessionRepository(db *gorm.DB) port.OAuth2SessionRepository {
 	return &oauth2SessionRepository{db: db}
 }
 
-func (r *oauth2SessionRepository) GetBySubjectAndClient(ctx context.Context, subject, clientID string) (*entity.OAuth2Session, error) {
+func (r *oauth2SessionRepository) GetBySubjectAndClient(ctx context.Context, subject, clientID string) (*model.OAuth2Session, error) {
 	var dbModel models.OAuth2SessionGORM
 	if err := r.db.WithContext(ctx).Where("client_id = ? AND subject = ?", clientID, subject).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

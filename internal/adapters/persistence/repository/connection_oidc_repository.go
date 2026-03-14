@@ -6,7 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -18,12 +18,12 @@ func NewOIDCConnectionRepository(db *gorm.DB) port.OIDCConnectionRepository {
 	return &oidcConnectionRepository{db: db}
 }
 
-func (r *oidcConnectionRepository) Create(ctx context.Context, conn *entity.OIDCConnection) error {
+func (r *oidcConnectionRepository) Create(ctx context.Context, conn *model.OIDCConnection) error {
 	dbModel := models.FromDomainOIDCConnection(conn)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *oidcConnectionRepository) GetByID(ctx context.Context, id string) (*entity.OIDCConnection, error) {
+func (r *oidcConnectionRepository) GetByID(ctx context.Context, id string) (*model.OIDCConnection, error) {
 	var dbModel models.OIDCConnectionGORM
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -34,7 +34,7 @@ func (r *oidcConnectionRepository) GetByID(ctx context.Context, id string) (*ent
 	return dbModel.ToDomain(), nil
 }
 
-func (r *oidcConnectionRepository) GetByTenantAndID(ctx context.Context, tenantID, id string) (*entity.OIDCConnection, error) {
+func (r *oidcConnectionRepository) GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.OIDCConnection, error) {
 	var dbModel models.OIDCConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -56,7 +56,7 @@ func (r *oidcConnectionRepository) GetConnectionCount(ctx context.Context, tenan
 	}
 	return count, nil
 }
-func (r *oidcConnectionRepository) Update(ctx context.Context, conn *entity.OIDCConnection) error {
+func (r *oidcConnectionRepository) Update(ctx context.Context, conn *model.OIDCConnection) error {
 	dbModel := models.FromDomainOIDCConnection(conn)
 	return r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{}).
 		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
@@ -74,7 +74,7 @@ func (r *oidcConnectionRepository) Delete(ctx context.Context, tenantID, id stri
 	return nil
 }
 
-func (r *oidcConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error) {
+func (r *oidcConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
 	var dbModels []models.OIDCConnectionGORM
 	query := r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{})
 
@@ -85,31 +85,31 @@ func (r *oidcConnectionRepository) ListByTenant(ctx context.Context, tenantID st
 	if err := query.Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*entity.OIDCConnection, 0)
+	entities := make([]*model.OIDCConnection, 0)
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
 	return entities, nil
 }
 
-func (r *oidcConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error) {
+func (r *oidcConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
 	var dbModels []models.OIDCConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND active = ?", tenantID, true).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	var entities []*entity.OIDCConnection
+	var entities []*model.OIDCConnection
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
 	return entities, nil
 }
 
-func (r *oidcConnectionRepository) List(ctx context.Context) ([]*entity.OIDCConnection, error) {
+func (r *oidcConnectionRepository) List(ctx context.Context) ([]*model.OIDCConnection, error) {
 	var dbModels []models.OIDCConnectionGORM
 	if err := r.db.WithContext(ctx).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*entity.OIDCConnection, 0)
+	entities := make([]*model.OIDCConnection, 0)
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

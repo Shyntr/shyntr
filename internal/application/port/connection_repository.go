@@ -3,30 +3,30 @@ package port
 import (
 	"context"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type OIDCConnectionRepository interface {
-	Create(ctx context.Context, conn *entity.OIDCConnection) error
-	GetByID(ctx context.Context, id string) (*entity.OIDCConnection, error)
-	GetByTenantAndID(ctx context.Context, tenantID, id string) (*entity.OIDCConnection, error)
+	Create(ctx context.Context, conn *model.OIDCConnection) error
+	GetByID(ctx context.Context, id string) (*model.OIDCConnection, error)
+	GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.OIDCConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
-	Update(ctx context.Context, conn *entity.OIDCConnection) error
+	Update(ctx context.Context, conn *model.OIDCConnection) error
 	Delete(ctx context.Context, tenantID, id string) error
-	ListByTenant(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error)
-	ListActiveByTenant(ctx context.Context, tenantID string) ([]*entity.OIDCConnection, error)
-	List(ctx context.Context) ([]*entity.OIDCConnection, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error)
+	ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error)
+	List(ctx context.Context) ([]*model.OIDCConnection, error)
 }
 
 type SAMLConnectionRepository interface {
-	Create(ctx context.Context, conn *entity.SAMLConnection) error
-	GetByID(ctx context.Context, id string) (*entity.SAMLConnection, error)
-	GetByTenantAndID(ctx context.Context, tenantID, id string) (*entity.SAMLConnection, error)
+	Create(ctx context.Context, conn *model.SAMLConnection) error
+	GetByID(ctx context.Context, id string) (*model.SAMLConnection, error)
+	GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.SAMLConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
-	GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*entity.SAMLConnection, error)
-	Update(ctx context.Context, conn *entity.SAMLConnection) error
+	GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*model.SAMLConnection, error)
+	Update(ctx context.Context, conn *model.SAMLConnection) error
 	Delete(ctx context.Context, tenantID, id string) error
-	ListByTenant(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error)
-	ListActiveByTenant(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error)
-	List(ctx context.Context) ([]*entity.SAMLConnection, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
+	ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
+	List(ctx context.Context) ([]*model.SAMLConnection, error)
 }

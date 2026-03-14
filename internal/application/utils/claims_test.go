@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -22,7 +22,7 @@ func TestMapClaims_ZeroTrust_Isolation(t *testing.T) {
 		"some_random_injected_data": "malicious_payload",
 	}
 
-	grantedScopesEmailOnly := []*entity.Scope{
+	grantedScopesEmailOnly := []*model.Scope{
 		{
 			Name:   "email",
 			Claims: []string{"email", "email_verified"},
@@ -45,7 +45,7 @@ func TestMapClaims_ZeroTrust_Isolation(t *testing.T) {
 	_, hasMalicious := filteredClaimsA["some_random_injected_data"]
 	assert.False(t, hasMalicious, "SECURITY REGRESSION: Unmapped root context leaked!")
 
-	grantedScopesHR := []*entity.Scope{
+	grantedScopesHR := []*model.Scope{
 		{
 			Name:   "email",
 			Claims: []string{"email"},

@@ -3,30 +3,30 @@ package models
 import (
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
 type OIDCConnectionGORM struct {
-	ID                    string                                 `gorm:"primaryKey;type:varchar(255)"`
-	TenantID              string                                 `gorm:"type:varchar(255);not null;index"`
-	Name                  string                                 `gorm:"type:varchar(255);not null"`
-	IssuerURL             string                                 `gorm:"type:varchar(255);not null"`
-	ClientID              string                                 `gorm:"type:varchar(255);not null"`
-	ClientSecret          string                                 `gorm:"type:varchar(255)"`
-	AuthorizationEndpoint string                                 `gorm:"type:varchar(255)"`
-	TokenEndpoint         string                                 `gorm:"type:varchar(255)"`
-	UserInfoEndpoint      string                                 `gorm:"type:varchar(255)"`
-	JWKSURI               string                                 `gorm:"type:varchar(255)"`
-	EndSessionEndpoint    string                                 `gorm:"type:varchar(255)"`
-	Scopes                pq.StringArray                         `gorm:"type:text[]"`
-	AttributeMapping      map[string]entity.AttributeMappingRule `gorm:"serializer:json"`
-	Active                bool                                   `gorm:"default:true"`
-	CreatedAt             time.Time                              `gorm:"autoCreateTime"`
-	UpdatedAt             time.Time                              `gorm:"autoUpdateTime"`
-	DeletedAt             gorm.DeletedAt                         `gorm:"index"`
+	ID                    string                                `gorm:"primaryKey;type:varchar(255)"`
+	TenantID              string                                `gorm:"type:varchar(255);not null;index"`
+	Name                  string                                `gorm:"type:varchar(255);not null"`
+	IssuerURL             string                                `gorm:"type:varchar(255);not null"`
+	ClientID              string                                `gorm:"type:varchar(255);not null"`
+	ClientSecret          string                                `gorm:"type:varchar(255)"`
+	AuthorizationEndpoint string                                `gorm:"type:varchar(255)"`
+	TokenEndpoint         string                                `gorm:"type:varchar(255)"`
+	UserInfoEndpoint      string                                `gorm:"type:varchar(255)"`
+	JWKSURI               string                                `gorm:"type:varchar(255)"`
+	EndSessionEndpoint    string                                `gorm:"type:varchar(255)"`
+	Scopes                pq.StringArray                        `gorm:"type:text[]"`
+	AttributeMapping      map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	Active                bool                                  `gorm:"default:true"`
+	CreatedAt             time.Time                             `gorm:"autoCreateTime"`
+	UpdatedAt             time.Time                             `gorm:"autoUpdateTime"`
+	DeletedAt             gorm.DeletedAt                        `gorm:"index"`
 }
 
 func (OIDCConnectionGORM) TableName() string { return "oidc_connections" }
@@ -37,8 +37,8 @@ func (c *OIDCConnectionGORM) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
-func (m *OIDCConnectionGORM) ToDomain() *entity.OIDCConnection {
-	return &entity.OIDCConnection{
+func (m *OIDCConnectionGORM) ToDomain() *model.OIDCConnection {
+	return &model.OIDCConnection{
 		ID:                    m.ID,
 		TenantID:              m.TenantID,
 		Name:                  m.Name,
@@ -58,7 +58,7 @@ func (m *OIDCConnectionGORM) ToDomain() *entity.OIDCConnection {
 	}
 }
 
-func FromDomainOIDCConnection(e *entity.OIDCConnection) *OIDCConnectionGORM {
+func FromDomainOIDCConnection(e *model.OIDCConnection) *OIDCConnectionGORM {
 	return &OIDCConnectionGORM{
 		ID:                    e.ID,
 		TenantID:              e.TenantID,

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type Mapper struct{}
@@ -14,7 +14,7 @@ func New() *Mapper {
 	return &Mapper{}
 }
 
-func (m *Mapper) Map(input map[string]interface{}, mapping map[string]entity.AttributeMappingRule) (map[string]interface{}, error) {
+func (m *Mapper) Map(input map[string]interface{}, mapping map[string]model.AttributeMappingRule) (map[string]interface{}, error) {
 	if len(mapping) == 0 {
 		return make(map[string]interface{}), nil
 	}

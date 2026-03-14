@@ -1,7 +1,7 @@
-package dto
+package payload
 
 import (
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/go-jose/go-jose/v3"
 )
 
@@ -53,8 +53,8 @@ type OAuth2ClientResponse struct {
 	UpdatedAt               string              `json:"updated_at,omitempty" example:"2026-03-12T15:04:05Z"`
 }
 
-func (req *CreateOAuth2ClientRequest) ToDomain() *entity.OAuth2Client {
-	return &entity.OAuth2Client{
+func (req *CreateOAuth2ClientRequest) ToDomain() *model.OAuth2Client {
+	return &model.OAuth2Client{
 		ID:                      req.ID,
 		TenantID:                req.TenantID,
 		Name:                    req.Name,
@@ -76,7 +76,7 @@ func (req *CreateOAuth2ClientRequest) ToDomain() *entity.OAuth2Client {
 	}
 }
 
-func FromDomainOAuth2Client(c *entity.OAuth2Client) *OAuth2ClientResponse {
+func FromDomainOAuth2Client(c *model.OAuth2Client) *OAuth2ClientResponse {
 	return &OAuth2ClientResponse{
 		ID:                      c.ID,
 		TenantID:                c.TenantID,
@@ -105,7 +105,7 @@ func FromDomainOAuth2Client(c *entity.OAuth2Client) *OAuth2ClientResponse {
 	}
 }
 
-func FromDomainOAuth2Clients(clients []*entity.OAuth2Client) []*OAuth2ClientResponse {
+func FromDomainOAuth2Clients(clients []*model.OAuth2Client) []*OAuth2ClientResponse {
 	responses := make([]*OAuth2ClientResponse, 0, len(clients))
 
 	for i := range clients {

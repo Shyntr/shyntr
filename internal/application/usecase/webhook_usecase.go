@@ -12,17 +12,17 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"go.uber.org/zap"
 )
 
 type WebhookUseCase interface {
-	CreateWebhook(ctx context.Context, webhook *entity.Webhook, actorIP, userAgent string) (*entity.Webhook, string, error)
-	GetWebhook(ctx context.Context, id string) (*entity.Webhook, error)
+	CreateWebhook(ctx context.Context, webhook *model.Webhook, actorIP, userAgent string) (*model.Webhook, string, error)
+	GetWebhook(ctx context.Context, id string) (*model.Webhook, error)
 	DeleteWebhook(ctx context.Context, id string, actorIP, userAgent string) error
-	ListWebhooks(ctx context.Context) ([]*entity.Webhook, error)
+	ListWebhooks(ctx context.Context) ([]*model.Webhook, error)
 	FireEvent(tenantID, eventType string, data map[string]interface{})
 	StartDispatcher()
 }
@@ -43,7 +43,7 @@ func NewWebhookUseCase(repo port.WebhookRepository, eventRepo port.WebhookEventR
 	}
 }
 
-func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *entity.Webhook, actorIP, userAgent string) (*entity.Webhook, string, error) {
+func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *model.Webhook, actorIP, userAgent string) (*model.Webhook, string, error) {
 	if webhook.ID == "" {
 		webhook.ID, _ = utils.GenerateRandomHex(8)
 	}
@@ -69,7 +69,7 @@ func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *entity.Webh
 	return webhook, secret, nil
 }
 
-func (u *webhookUseCase) GetWebhook(ctx context.Context, id string) (*entity.Webhook, error) {
+func (u *webhookUseCase) GetWebhook(ctx context.Context, id string) (*model.Webhook, error) {
 	return u.repo.GetByID(ctx, id)
 }
 
@@ -84,7 +84,7 @@ func (u *webhookUseCase) DeleteWebhook(ctx context.Context, id string, actorIP, 
 	return nil
 }
 
-func (u *webhookUseCase) ListWebhooks(ctx context.Context) ([]*entity.Webhook, error) {
+func (u *webhookUseCase) ListWebhooks(ctx context.Context) ([]*model.Webhook, error) {
 	return u.repo.List(ctx)
 }
 
@@ -108,7 +108,7 @@ func (u *webhookUseCase) FireEvent(tenantID, eventType string, data map[string]i
 		for _, wh := range webhooks {
 			if matchPattern(tenantID, wh.TenantIDs) && matchPattern(eventType, wh.Events) {
 				evtID, _ := utils.GenerateRandomHex(8)
-				evt := &entity.WebhookEvent{
+				evt := &model.WebhookEvent{
 					ID:        "we_" + evtID,
 					WebhookID: wh.ID,
 					TenantID:  tenantID,
@@ -158,7 +158,7 @@ func (u *webhookUseCase) StartDispatcher() {
 	}()
 }
 
-func (u *webhookUseCase) sendHTTP(wh *entity.Webhook, payload []byte) bool {
+func (u *webhookUseCase) sendHTTP(wh *model.Webhook, payload []byte) bool {
 	req, err := http.NewRequest("POST", wh.URL, bytes.NewBuffer(payload))
 	if err != nil {
 		return false

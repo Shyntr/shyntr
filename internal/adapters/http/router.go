@@ -220,10 +220,10 @@ func SetupRouter(
 			mgmtGroup.DELETE("/oidc-connections/:tenant_id/:id", mgmtHandler.DeleteOIDCConnection)
 
 			//Webhook
-			mgmtGroup.POST("/webhook", webhookHandler.Create)
+			mgmtGroup.POST("/webhooks", webhookHandler.Create)
 
 			//Audit
-			mgmtGroup.GET("/audit", auditHandler.Get)
+			mgmtGroup.GET("/audit/:tenant_id", auditHandler.Get)
 		}
 	}
 

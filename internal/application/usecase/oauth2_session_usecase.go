@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type OAuth2SessionUseCase interface {
-	GetBySubject(ctx context.Context, subject, clientID string) (*entity.OAuth2Session, error)
+	GetBySubject(ctx context.Context, subject, clientID string) (*model.OAuth2Session, error)
 	DeleteBySubject(ctx context.Context, subject, clientID string) error
 	RecordAuthorization(ctx context.Context, requestID, clientID, actorIP, userAgent string, grantedScopes []string)
 	RecordTokenIssuance(ctx context.Context, requestID, clientID, actorIP, userAgent string, grantedScopes []string)
@@ -28,7 +28,7 @@ func NewOAuth2SessionUseCase(repo port.OAuth2SessionRepository, audit port.Audit
 	}
 }
 
-func (o *oauth2SessionUseCase) GetBySubject(ctx context.Context, subject, clientID string) (*entity.OAuth2Session, error) {
+func (o *oauth2SessionUseCase) GetBySubject(ctx context.Context, subject, clientID string) (*model.OAuth2Session, error) {
 	return o.repo.GetBySubjectAndClient(ctx, subject, clientID)
 }
 

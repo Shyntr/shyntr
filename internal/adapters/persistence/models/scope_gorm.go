@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/lib/pq"
 )
 
@@ -23,8 +23,8 @@ func (ScopeGORM) TableName() string {
 	return "scopes"
 }
 
-func (m *ScopeGORM) ToDomain() *entity.Scope {
-	return &entity.Scope{
+func (m *ScopeGORM) ToDomain() *model.Scope {
+	return &model.Scope{
 		ID:          m.ID,
 		TenantID:    m.TenantID,
 		Name:        m.Name,
@@ -37,7 +37,7 @@ func (m *ScopeGORM) ToDomain() *entity.Scope {
 	}
 }
 
-func FromDomainScope(e *entity.Scope) *ScopeGORM {
+func FromDomainScope(e *model.Scope) *ScopeGORM {
 	return &ScopeGORM{
 		ID:          e.ID,
 		TenantID:    e.TenantID,

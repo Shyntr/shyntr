@@ -9,20 +9,20 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 )
 
 type SAMLConnectionUseCase interface {
-	CreateConnection(ctx context.Context, conn *entity.SAMLConnection, actorIP, userAgent string) (*entity.SAMLConnection, error)
-	GetConnection(ctx context.Context, tenantID, id string) (*entity.SAMLConnection, error)
+	CreateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) (*model.SAMLConnection, error)
+	GetConnection(ctx context.Context, tenantID, id string) (*model.SAMLConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
-	GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*entity.SAMLConnection, error)
-	UpdateConnection(ctx context.Context, conn *entity.SAMLConnection, actorIP, userAgent string) error
+	GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*model.SAMLConnection, error)
+	UpdateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) error
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListConnections(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error)
-	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule)
+	ListConnections(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
+	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule)
 }
 
 type samlConnectionUseCase struct {
@@ -39,7 +39,7 @@ func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.Aud
 	}
 }
 
-func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]entity.AttributeMappingRule) {
+func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule) {
 	for _, rule := range mappings {
 		if len(rule.TargetScopes) > 0 && rule.Target != "" {
 			err := u.scopeUse.AddClaimToScopes(ctx, tenantID, rule.Target, rule.TargetScopes)
@@ -54,7 +54,7 @@ func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID 
 	}
 }
 
-func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *entity.SAMLConnection, actorIP, userAgent string) (*entity.SAMLConnection, error) {
+func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) (*model.SAMLConnection, error) {
 	if conn.ID == "" {
 		conn.ID, _ = utils.GenerateRandomHex(8)
 	}
@@ -142,7 +142,7 @@ func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *enti
 	return conn, nil
 }
 
-func (u *samlConnectionUseCase) GetConnection(ctx context.Context, tenantID, id string) (*entity.SAMLConnection, error) {
+func (u *samlConnectionUseCase) GetConnection(ctx context.Context, tenantID, id string) (*model.SAMLConnection, error) {
 	return u.repo.GetByTenantAndID(ctx, tenantID, id)
 }
 
@@ -150,11 +150,11 @@ func (u *samlConnectionUseCase) GetConnectionCount(ctx context.Context, tenantID
 	return u.repo.GetConnectionCount(ctx, tenantID)
 }
 
-func (u *samlConnectionUseCase) GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*entity.SAMLConnection, error) {
+func (u *samlConnectionUseCase) GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*model.SAMLConnection, error) {
 	return u.repo.GetConnectionByIdpEntity(ctx, tenantID, idpEntity)
 }
 
-func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *entity.SAMLConnection, actorIP, userAgent string) error {
+func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) error {
 	var descriptor *saml.EntityDescriptor
 	if conn.MetadataURL != "" {
 		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
@@ -253,6 +253,6 @@ func (u *samlConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 	return nil
 }
 
-func (u *samlConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error) {
+func (u *samlConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
 	return u.repo.ListByTenant(ctx, tenantID)
 }

@@ -1,4 +1,4 @@
-package entity
+package model
 
 type AuthMethod struct {
 	ID       string `json:"id"`

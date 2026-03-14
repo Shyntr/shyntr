@@ -7,28 +7,28 @@ import (
 	"fmt"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type AuthUseCase interface {
-	CreateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error)
-	UpdateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error)
-	GetLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error)
-	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]entity.LoginRequest, error)
-	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error)
-	GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*entity.LoginRequest, error)
-	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*entity.LoginRequest, error)
-	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*entity.LoginRequest, error)
+	CreateLoginRequest(ctx context.Context, req *model.LoginRequest) (*model.LoginRequest, error)
+	UpdateLoginRequest(ctx context.Context, req *model.LoginRequest) (*model.LoginRequest, error)
+	GetLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
+	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error)
+	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
+	GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*model.LoginRequest, error)
+	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
+	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
 	MarkLoginAsProviderStarted(ctx context.Context, challenge, provider, connectionID string, providerContext map[string]interface{}, actorIP, userAgent string) error
-	CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*entity.LoginRequest, error)
+	CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 
-	CreateConsentRequest(ctx context.Context, req *entity.ConsentRequest) (*entity.ConsentRequest, error)
-	GetConsentRequest(ctx context.Context, challenge string) (*entity.ConsentRequest, error)
-	GetAuthenticatedConsentRequest(ctx context.Context, challenge string) (*entity.ConsentRequest, error)
-	GetAuthenticatedConsentRequestBySubject(ctx context.Context, subject string) (*entity.ConsentRequest, error)
-	AcceptConsentRequest(ctx context.Context, challenge string, grantScope, grantAudience []string, remember bool, rememberFor int, contextData map[string]interface{}, actorIP, userAgent string) (*entity.ConsentRequest, error)
-	RejectConsentRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*entity.ConsentRequest, error)
+	CreateConsentRequest(ctx context.Context, req *model.ConsentRequest) (*model.ConsentRequest, error)
+	GetConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error)
+	GetAuthenticatedConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error)
+	GetAuthenticatedConsentRequestBySubject(ctx context.Context, subject string) (*model.ConsentRequest, error)
+	AcceptConsentRequest(ctx context.Context, challenge string, grantScope, grantAudience []string, remember bool, rememberFor int, contextData map[string]interface{}, actorIP, userAgent string) (*model.ConsentRequest, error)
+	RejectConsentRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.ConsentRequest, error)
 }
 
 type authUseCase struct {
@@ -45,7 +45,7 @@ func NewAuthUseCase(repo port.AuthRequestRepository, audit port.AuditLogger) Aut
 
 // --- Login Request Methods ---
 
-func (u *authUseCase) CreateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error) {
+func (u *authUseCase) CreateLoginRequest(ctx context.Context, req *model.LoginRequest) (*model.LoginRequest, error) {
 	if req.ID == "" {
 		req.ID, _ = utils.GenerateRandomHex(16)
 	}
@@ -57,7 +57,7 @@ func (u *authUseCase) CreateLoginRequest(ctx context.Context, req *entity.LoginR
 	return req, nil
 }
 
-func (u *authUseCase) UpdateLoginRequest(ctx context.Context, req *entity.LoginRequest) (*entity.LoginRequest, error) {
+func (u *authUseCase) UpdateLoginRequest(ctx context.Context, req *model.LoginRequest) (*model.LoginRequest, error) {
 	req.Active = true
 	if err := u.repo.UpdateLoginRequest(ctx, req); err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (u *authUseCase) UpdateLoginRequest(ctx context.Context, req *entity.LoginR
 	return req, nil
 }
 
-func (u *authUseCase) GetLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error) {
+func (u *authUseCase) GetLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -76,18 +76,18 @@ func (u *authUseCase) GetLoginRequest(ctx context.Context, challenge string) (*e
 	return req, nil
 }
 
-func (u *authUseCase) GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]entity.LoginRequest, error) {
+func (u *authUseCase) GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error) {
 	return u.repo.GetRecentLogins(ctx, tenantID, limit)
 }
-func (u *authUseCase) GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*entity.LoginRequest, error) {
+func (u *authUseCase) GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error) {
 	return u.repo.GetAuthenticatedLoginRequest(ctx, challenge)
 }
 
-func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*entity.LoginRequest, error) {
+func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*model.LoginRequest, error) {
 	return u.repo.GetAuthenticatedLoginRequestBySubject(ctx, subject)
 }
 
-func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*entity.LoginRequest, error) {
+func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, 
 	return req, nil
 }
 
-func (u *authUseCase) RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*entity.LoginRequest, error) {
+func (u *authUseCase) RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func (u *authUseCase) MarkLoginAsProviderStarted(ctx context.Context, challenge,
 	return nil
 }
 
-func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*entity.LoginRequest, error) {
+func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subj
 
 // --- Consent Request Methods ---
 
-func (u *authUseCase) CreateConsentRequest(ctx context.Context, req *entity.ConsentRequest) (*entity.ConsentRequest, error) {
+func (u *authUseCase) CreateConsentRequest(ctx context.Context, req *model.ConsentRequest) (*model.ConsentRequest, error) {
 	if req.ID == "" {
 		req.ID, _ = utils.GenerateRandomHex(16)
 	}
@@ -211,19 +211,19 @@ func (u *authUseCase) CreateConsentRequest(ctx context.Context, req *entity.Cons
 	return req, nil
 }
 
-func (u *authUseCase) GetConsentRequest(ctx context.Context, challenge string) (*entity.ConsentRequest, error) {
+func (u *authUseCase) GetConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error) {
 	return u.repo.GetConsentRequest(ctx, challenge)
 }
 
-func (u *authUseCase) GetAuthenticatedConsentRequest(ctx context.Context, challenge string) (*entity.ConsentRequest, error) {
+func (u *authUseCase) GetAuthenticatedConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error) {
 	return u.repo.GetAuthenticatedConsentRequest(ctx, challenge)
 }
 
-func (u *authUseCase) GetAuthenticatedConsentRequestBySubject(ctx context.Context, subject string) (*entity.ConsentRequest, error) {
+func (u *authUseCase) GetAuthenticatedConsentRequestBySubject(ctx context.Context, subject string) (*model.ConsentRequest, error) {
 	return u.repo.GetAuthenticatedConsentRequestBySubject(ctx, subject)
 }
 
-func (u *authUseCase) AcceptConsentRequest(ctx context.Context, challenge string, grantScope, grantAudience []string, remember bool, rememberFor int, contextData map[string]interface{}, actorIP, userAgent string) (*entity.ConsentRequest, error) {
+func (u *authUseCase) AcceptConsentRequest(ctx context.Context, challenge string, grantScope, grantAudience []string, remember bool, rememberFor int, contextData map[string]interface{}, actorIP, userAgent string) (*model.ConsentRequest, error) {
 	req, err := u.repo.GetConsentRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -257,7 +257,7 @@ func (u *authUseCase) AcceptConsentRequest(ctx context.Context, challenge string
 	return req, nil
 }
 
-func (u *authUseCase) RejectConsentRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*entity.ConsentRequest, error) {
+func (u *authUseCase) RejectConsentRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.ConsentRequest, error) {
 	req, err := u.repo.GetConsentRequest(ctx, challenge)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,7 @@ import (
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/constants"
 	"github.com/Shyntr/shyntr/pkg/consts"
 	"github.com/Shyntr/shyntr/pkg/logger"
@@ -76,6 +76,24 @@ func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	return fmt.Sprintf("%s/t/%s", base, tenantID)
 }
 
+// Authorize godoc
+// @Summary OAuth2 Authorization Endpoint
+// @Description Handles the initial step of the OAuth 2.1 authorization code flow. Enforces PKCE, tenant boundaries, and redirects the user agent to the login or consent UI.
+// @Tags OAuth2/OIDC Core
+// @Produce html
+// @Param client_id query string true "OAuth2 Client ID"
+// @Param response_type query string true "Must be 'code'"
+// @Param redirect_uri query string true "Registered redirect URI"
+// @Param scope query string false "Requested space-separated scopes"
+// @Param state query string false "Opaque value used to maintain state between the request and the callback"
+// @Param code_challenge query string false "PKCE code challenge (Required if client enforces PKCE)"
+// @Param code_challenge_method query string false "PKCE method, e.g., 'S256'"
+// @Param prompt query string false "Forces login or consent (e.g., 'login', 'consent', 'none')"
+// @Success 302 {string} string "Redirects to login UI, consent UI, or the client's redirect URI with an authorization code"
+// @Failure 400 {object} map[string]string "Bad Request (e.g., missing PKCE, invalid redirect URI)"
+// @Failure 403 {object} map[string]string "Forbidden (e.g., client not found in tenant)"
+// @Router /oauth2/auth [get]
+// @Router /t/{tenant_id}/oauth2/auth [get]
 func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
@@ -191,7 +209,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			return
 		}
 
-		request := entity.LoginRequest{
+		request := model.LoginRequest{
 			ID:                challengeID,
 			TenantID:          tenantID,
 			ClientID:          clientID,
@@ -239,7 +257,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			grantedAudience = consentReq.GrantedAudience
 		} else {
 			challengeID, _ := utils.GenerateRandomHex(16)
-			request := entity.ConsentRequest{
+			request := model.ConsentRequest{
 				ID:                challengeID,
 				ClientID:          clientID,
 				Subject:           userID,
@@ -279,7 +297,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	issuer := h.getIssuer(c)
 	now := time.Now()
-	session := entity.NewJWTSession(userID)
+	session := model.NewJWTSession(userID)
 	session.DefaultSession = &openid.DefaultSession{
 		Claims: &fositejwt.IDTokenClaims{
 			Issuer:      issuer,
@@ -360,12 +378,29 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	h.Provider.GetFosite(tenantID).WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
+// Token godoc
+// @Summary OAuth2 Token Endpoint
+// @Description Issues access tokens, ID tokens, and refresh tokens based on the provided grant type (e.g., authorization_code, client_credentials, refresh_token). Enforces tenant isolation.
+// @Tags OAuth2/OIDC Core
+// @Accept application/x-www-form-urlencoded
+// @Produce json
+// @Param grant_type formData string true "Grant Type (e.g., 'authorization_code', 'client_credentials')"
+// @Param client_id formData string false "OAuth2 Client ID"
+// @Param client_secret formData string false "OAuth2 Client Secret (for basic/post auth)"
+// @Param code formData string false "Authorization code (if grant_type=authorization_code)"
+// @Param redirect_uri formData string false "Registered redirect URI (must match the one in the auth request)"
+// @Param code_verifier formData string false "PKCE code verifier (if PKCE was used)"
+// @Param refresh_token formData string false "Refresh token (if grant_type=refresh_token)"
+// @Success 200 {object} map[string]interface{} "Returns access_token, id_token, refresh_token, and expires_in"
+// @Failure 400 {object} map[string]interface{} "Bad Request (e.g., invalid grant, invalid client)"
+// @Router /oauth2/token [post]
+// @Router /t/{tenant_id}/oauth2/token [post]
 func (h *OAuth2Handler) Token(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
 	fositeEngine := h.Provider.GetFosite(tenantID)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
-	emptySession := entity.NewJWTSession("")
+	emptySession := model.NewJWTSession("")
 	ar, err := fositeEngine.NewAccessRequest(ctx, c.Request, emptySession)
 	if err != nil {
 		logger.LogFositeError(c, err, "Failed to create access request in TokenEndpoint")
@@ -397,6 +432,18 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	fositeEngine.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
+// Logout godoc
+// @Summary OpenID Connect RP-Initiated Logout
+// @Description Terminates the user's session. Supports id_token_hint for validation and post_logout_redirect_uri for safe redirection. Also propagates logout to federated IdPs if applicable.
+// @Tags OAuth2/OIDC Core
+// @Produce html
+// @Param id_token_hint query string false "Previously issued ID Token to validate the logout request"
+// @Param post_logout_redirect_uri query string false "Registered URI to redirect after successful logout"
+// @Param state query string false "Opaque value to maintain state"
+// @Success 200 {object} map[string]string "Returns a success message if no redirect URI is provided"
+// @Success 302 {string} string "Redirects to post_logout_redirect_uri"
+// @Router /oauth2/logout [get]
+// @Router /t/{tenant_id}/oauth2/logout [get]
 func (h *OAuth2Handler) Logout(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	postLogoutRedirectURI := c.Query("post_logout_redirect_uri")
@@ -550,6 +597,17 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	}
 }
 
+// UserInfo godoc
+// @Summary OIDC UserInfo Endpoint
+// @Description Returns Claims about the authenticated End-User. Requires a valid Access Token.
+// @Tags OAuth2/OIDC Core
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{} "User claims (e.g., sub, email, name) scoped by RBAC rules"
+// @Failure 401 {object} map[string]string "Unauthorized (missing or invalid token)"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /userinfo [get]
+// @Router /t/{tenant_id}/userinfo [get]
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	token := fosite.AccessTokenFromRequest(c.Request)
@@ -558,14 +616,14 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
-	session := entity.NewJWTSession("")
+	session := model.NewJWTSession("")
 	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
 		return
 	}
 
-	sess, ok := accessRequest.GetSession().(*entity.JWTSession)
+	sess, ok := accessRequest.GetSession().(*model.JWTSession)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_session_type"})
 		return
@@ -611,10 +669,22 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	c.JSON(http.StatusOK, safeClaims)
 }
 
+// Introspect godoc
+// @Summary Token Introspection Endpoint (RFC 7662)
+// @Description Allows a protected resource (e.g., an API gateway) to query the active state and metadata of a given token.
+// @Tags OAuth2/OIDC Core
+// @Accept application/x-www-form-urlencoded
+// @Produce json
+// @Param token formData string true "The token to introspect"
+// @Param client_id formData string false "OAuth2 Client ID"
+// @Param client_secret formData string false "OAuth2 Client Secret"
+// @Success 200 {object} map[string]interface{} "Introspection response (active boolean and token metadata)"
+// @Router /oauth2/introspect [post]
+// @Router /t/{tenant_id}/oauth2/introspect [post]
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
-	session := entity.NewJWTSession("")
+	session := model.NewJWTSession("")
 	ar, err := h.Provider.GetFosite(tenantID).NewIntrospectionRequest(ctx, c.Request, session)
 	if err != nil {
 		h.Provider.GetFosite(tenantID).WriteIntrospectionError(ctx, c.Writer, err)
@@ -623,6 +693,17 @@ func (h *OAuth2Handler) Introspect(c *gin.Context) {
 	h.Provider.GetFosite(tenantID).WriteIntrospectionResponse(ctx, c.Writer, ar)
 }
 
+// Revoke godoc
+// @Summary Token Revocation Endpoint (RFC 7009)
+// @Description Allows clients to notify the authorization server that a previously obtained refresh or access token is no longer needed.
+// @Tags OAuth2/OIDC Core
+// @Accept application/x-www-form-urlencoded
+// @Produce json
+// @Param token formData string true "The token to revoke"
+// @Param token_type_hint formData string false "Hint about the token type (e.g., 'refresh_token' or 'access_token')"
+// @Success 200 "Empty response on successful revocation (or if token didn't exist)"
+// @Router /oauth2/revoke [post]
+// @Router /t/{tenant_id}/oauth2/revoke [post]
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
@@ -632,12 +713,29 @@ func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	h.Provider.GetFosite(tenantID).WriteRevocationResponse(ctx, c.Writer, err)
 }
 
+// Jwks godoc
+// @Summary JSON Web Key Set (JWKS) Endpoint
+// @Description Returns the public keys used by the Authorization Server to sign JWTs (like ID Tokens). Used by clients to verify signatures.
+// @Tags OAuth2/OIDC Core
+// @Produce json
+// @Success 200 {object} map[string]interface{} "The JWKS document containing an array of keys"
+// @Router /.well-known/jwks.json [get]
+// @Router /t/{tenant_id}/.well-known/jwks.json [get]
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
 	privKey := h.KeyMgr.GetActivePrivateKey()
 	jwks := utils2.GeneratePublicJWKS(privKey)
 	c.JSON(http.StatusOK, jwks)
 }
 
+// Discover godoc
+// @Summary OpenID Connect Discovery Endpoint
+// @Description Returns the OIDC Provider Configuration Document. Details the supported scopes, claims, and endpoints for a specific tenant.
+// @Tags OAuth2/OIDC Core
+// @Produce json
+// @Success 200 {object} map[string]interface{} "The OIDC discovery metadata document"
+// @Failure 404 {object} map[string]string "Tenant not found"
+// @Router /.well-known/openid-configuration [get]
+// @Router /t/{tenant_id}/.well-known/openid-configuration [get]
 func (h *OAuth2Handler) Discover(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 

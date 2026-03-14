@@ -6,7 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -18,12 +18,12 @@ func NewSAMLConnectionRepository(db *gorm.DB) port.SAMLConnectionRepository {
 	return &samlConnectionRepository{db: db}
 }
 
-func (r *samlConnectionRepository) Create(ctx context.Context, conn *entity.SAMLConnection) error {
+func (r *samlConnectionRepository) Create(ctx context.Context, conn *model.SAMLConnection) error {
 	dbModel := models.FromDomainSAMLConnection(conn)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *samlConnectionRepository) GetByID(ctx context.Context, id string) (*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) GetByID(ctx context.Context, id string) (*model.SAMLConnection, error) {
 	var dbModel models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -34,7 +34,7 @@ func (r *samlConnectionRepository) GetByID(ctx context.Context, id string) (*ent
 	return dbModel.ToDomain(), nil
 }
 
-func (r *samlConnectionRepository) GetByTenantAndID(ctx context.Context, tenantID, id string) (*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.SAMLConnection, error) {
 	var dbModel models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -57,7 +57,7 @@ func (r *samlConnectionRepository) GetConnectionCount(ctx context.Context, tenan
 	return count, nil
 }
 
-func (r *samlConnectionRepository) GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*model.SAMLConnection, error) {
 	var dbModel models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND idp_entity_id = ?", tenantID, idpEntity).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -68,7 +68,7 @@ func (r *samlConnectionRepository) GetConnectionByIdpEntity(ctx context.Context,
 	return dbModel.ToDomain(), nil
 }
 
-func (r *samlConnectionRepository) Update(ctx context.Context, conn *entity.SAMLConnection) error {
+func (r *samlConnectionRepository) Update(ctx context.Context, conn *model.SAMLConnection) error {
 	dbModel := models.FromDomainSAMLConnection(conn)
 	return r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{}).
 		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
@@ -86,7 +86,7 @@ func (r *samlConnectionRepository) Delete(ctx context.Context, tenantID, id stri
 	return nil
 }
 
-func (r *samlConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
 	var dbModels []models.SAMLConnectionGORM
 	query := r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{})
 
@@ -97,31 +97,31 @@ func (r *samlConnectionRepository) ListByTenant(ctx context.Context, tenantID st
 	if err := query.Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*entity.SAMLConnection, 0)
+	entities := make([]*model.SAMLConnection, 0)
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
 	return entities, nil
 }
 
-func (r *samlConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
 	var dbModels []models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND active = ?", tenantID, true).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	var entities []*entity.SAMLConnection
+	var entities []*model.SAMLConnection
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
 	return entities, nil
 }
 
-func (r *samlConnectionRepository) List(ctx context.Context) ([]*entity.SAMLConnection, error) {
+func (r *samlConnectionRepository) List(ctx context.Context) ([]*model.SAMLConnection, error) {
 	var dbModels []models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*entity.SAMLConnection, 0)
+	entities := make([]*model.SAMLConnection, 0)
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

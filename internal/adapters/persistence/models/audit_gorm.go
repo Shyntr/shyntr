@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/Shyntr/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type AuditLogGORM struct {
@@ -19,8 +19,8 @@ type AuditLogGORM struct {
 
 func (AuditLogGORM) TableName() string { return "audit_logs" }
 
-func (m *AuditLogGORM) ToDomain() *entity.AuditLog {
-	return &entity.AuditLog{
+func (m *AuditLogGORM) ToDomain() *model.AuditLog {
+	return &model.AuditLog{
 		ID:        m.ID,
 		TenantID:  m.TenantID,
 		Actor:     m.Actor,
@@ -32,7 +32,7 @@ func (m *AuditLogGORM) ToDomain() *entity.AuditLog {
 	}
 }
 
-func FromDomainAuditLog(e *entity.AuditLog) *AuditLogGORM {
+func FromDomainAuditLog(e *model.AuditLog) *AuditLogGORM {
 	return &AuditLogGORM{
 		ID:        e.ID,
 		TenantID:  e.TenantID,
