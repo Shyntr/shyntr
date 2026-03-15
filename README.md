@@ -58,7 +58,7 @@ services:
   # 2. SHYNTR IDENTITY HUB (Backend)
   # ----------------------------------------
   shyntr-backend:
-    image: shyntr/shyntr:1.0.0-beta.7
+    image: shyntr/shyntr:dev
     container_name: shyntr_app
     ports:
       - "7496:7496" # Public Port (SHYN)
@@ -98,7 +98,7 @@ services:
   # 3. SHYNTR DASHBOARD (React / Nginx)
   # ----------------------------------------
   shyntr-dashboard:
-    image: shyntr/shyntr-dashboard:1.0.0-beta.2
+    image: shyntr/shyntr-dashboard:dev
     container_name: shyntr_dashboard
     ports:
       - "3274:80"
@@ -115,7 +115,7 @@ services:
   # 4. SHYNTR AUTH PORTAL (Next.js)
   # ----------------------------------------
   shyntr-auth-portal:
-    image: shyntr/shyntr-auth-portal:1.0.0-beta.3
+    image: shyntr/shyntr-auth-portal:dev
     container_name: shyntr_auth_portal
     ports:
       - "3000:3000"
