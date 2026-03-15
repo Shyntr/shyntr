@@ -81,6 +81,15 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 
 	metaDesc := sp.Metadata()
 
+	if len(metaDesc.SPSSODescriptors) > 0 {
+		metaDesc.SPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
+			crewjamsaml.PersistentNameIDFormat,   // urn:oasis:names:tc:SAML:2.0:nameid-format:persistent
+			crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
+			crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+			crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+		}
+	}
+
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
 		logger.FromGin(c).Error("Failed to write metadata XML", zap.Error(err), zap.String("protocol", "saml"))
