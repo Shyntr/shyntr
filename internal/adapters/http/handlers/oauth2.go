@@ -523,7 +523,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
 	if subject != "" {
-		err := h.OAuth2SessionUse.DeleteByClient(ctx, subject, tenantID, idTokenAudience)
+		err := h.OAuth2SessionUse.DeleteByClient(ctx, subject, idTokenAudience)
 		if err != nil {
 			logger.LogFositeError(c, err, "Failed to delete session in TokenEndpoint")
 		}
