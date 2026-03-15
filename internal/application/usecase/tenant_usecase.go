@@ -83,7 +83,7 @@ func (u *tenantUseCase) UpdateTenant(ctx context.Context, tenant *model.Tenant, 
 	}
 
 	u.audit.Log(tenant.ID, "system", "management.tenant.update", actorIP, userAgent, map[string]interface{}{
-		"tenant_id": tenant.ID,
+		"tenant_name": tenant.Name,
 	})
 	return nil
 }
@@ -97,9 +97,7 @@ func (u *tenantUseCase) DeleteTenant(ctx context.Context, id string, actorIP, us
 		return err
 	}
 
-	u.audit.Log(id, "system", "management.tenant.delete", actorIP, userAgent, map[string]interface{}{
-		"tenant_id": id,
-	})
+	u.audit.Log(id, "system", "management.tenant.delete", actorIP, userAgent, map[string]interface{}{})
 
 	return nil
 }

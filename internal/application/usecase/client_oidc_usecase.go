@@ -399,10 +399,11 @@ func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *model.OA
 	}
 
 	u.audit.Log(client.TenantID, "system", "management.client.oidc.create", actorIP, userAgent, map[string]interface{}{
-		"client_id":  client.ID,
-		"public":     client.Public,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+		"client_id":                 client.ID,
+		"public":                    client.Public,
+		"scopes":                    client.Scopes,
+		"redirect_uris":             client.RedirectURIs,
+		"post_logout_redirect_uris": client.PostLogoutRedirectURIs,
 	})
 
 	return client, returnedSecret, nil
@@ -456,10 +457,11 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OA
 	}
 
 	u.audit.Log(client.TenantID, "system", "management.client.oidc.create", actorIP, userAgent, map[string]interface{}{
-		"client_id":  client.ID,
-		"public":     client.Public,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+		"client_id":                 client.ID,
+		"public":                    client.Public,
+		"scopes":                    client.Scopes,
+		"redirect_uris":             client.RedirectURIs,
+		"post_logout_redirect_uris": client.PostLogoutRedirectURIs,
 	})
 
 	return client, returnedSecret, nil

@@ -39,3 +39,14 @@ func (r *oauth2SessionRepository) DeleteBySubjectAndClient(ctx context.Context, 
 	}
 	return nil
 }
+
+func (r *oauth2SessionRepository) DeleteBySubject(ctx context.Context, subject string) error {
+	result := r.db.WithContext(ctx).Where("subject = ?", subject).Delete(&models.OAuth2SessionGORM{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("oauth2 session connection not found")
+	}
+	return nil
+}

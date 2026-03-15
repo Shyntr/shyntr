@@ -582,7 +582,7 @@ const docTemplate = `{
                 "tags": [
                     "OAuth2 Clients"
                 ],
-                "summary": "Delete OIDC Client",
+                "summary": "DeleteByClient OIDC Client",
                 "parameters": [
                     {
                         "type": "string",
@@ -849,7 +849,7 @@ const docTemplate = `{
                 "tags": [
                     "OIDC Connections"
                 ],
-                "summary": "Delete OIDC Connection",
+                "summary": "DeleteByClient OIDC Connection",
                 "parameters": [
                     {
                         "type": "string",
@@ -1131,7 +1131,7 @@ const docTemplate = `{
                 "tags": [
                     "SAML Clients"
                 ],
-                "summary": "Delete SAML Client",
+                "summary": "DeleteByClient SAML Client",
                 "parameters": [
                     {
                         "type": "string",
@@ -1364,7 +1364,7 @@ const docTemplate = `{
                 "tags": [
                     "SAML Connections"
                 ],
-                "summary": "Delete SAML Connection",
+                "summary": "DeleteByClient SAML Connection",
                 "parameters": [
                     {
                         "type": "string",
@@ -1588,7 +1588,7 @@ const docTemplate = `{
                 "tags": [
                     "Tenants"
                 ],
-                "summary": "Delete Tenant",
+                "summary": "DeleteByClient Tenant",
                 "parameters": [
                     {
                         "type": "string",
@@ -1847,7 +1847,7 @@ const docTemplate = `{
                 "tags": [
                     "Scopes"
                 ],
-                "summary": "Delete Scope",
+                "summary": "DeleteByClient Scope",
                 "parameters": [
                     {
                         "type": "string",

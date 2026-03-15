@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 
@@ -136,7 +137,7 @@ func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *mode
 	u.audit.Log(conn.TenantID, "system", "management.connection.saml.create", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"entity_id":     conn.IdpEntityID,
-		"ip":            actorIP,
+		"metadata_url":  conn.MetadataURL,
 	})
 
 	return conn, nil
@@ -234,7 +235,8 @@ func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *mode
 
 	u.audit.Log(conn.TenantID, "system", "management.connection.saml.update", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
-		"ip":            actorIP,
+		"entity_id":     conn.IdpEntityID,
+		"metadata_url":  conn.MetadataURL,
 	})
 
 	return nil
@@ -247,7 +249,6 @@ func (u *samlConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 
 	u.audit.Log(tenantID, "system", "management.connection.saml.delete", actorIP, userAgent, map[string]interface{}{
 		"connection_id": id,
-		"ip":            actorIP,
 	})
 
 	return nil

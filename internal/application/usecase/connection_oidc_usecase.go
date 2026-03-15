@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 
@@ -66,7 +67,8 @@ func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *mode
 	u.audit.Log(conn.TenantID, "system", "management.connection.oidc.create", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"issuer_url":    conn.IssuerURL,
-		"ip":            actorIP,
+		"name":          conn.Name,
+		"scopes":        conn.Scopes,
 	})
 
 	return conn, nil
@@ -94,7 +96,8 @@ func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *mode
 	u.audit.Log(conn.TenantID, "system", "management.connection.oidc.update", actorIP, userAgent, map[string]interface{}{
 		"connection_id": conn.ID,
 		"issuer_url":    conn.IssuerURL,
-		"ip":            actorIP,
+		"name":          conn.Name,
+		"scopes":        conn.Scopes,
 	})
 
 	return nil

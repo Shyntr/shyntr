@@ -188,7 +188,7 @@ func main() {
 
 	var deleteTenantCmd = &cobra.Command{
 		Use:   "delete-tenant [id]",
-		Short: "Delete a tenant (Cannot delete 'default')",
+		Short: "DeleteByClient a tenant (Cannot delete 'default')",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			if args[0] == "default" {
@@ -201,7 +201,7 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			if err := db.Delete(&models.TenantGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("DeleteByClient failed: %v", err)
 			}
 			auditLogger.Log(args[0], "system_cli", "cli.tenant.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{
 				"tenant_id": args[0],
@@ -317,7 +317,7 @@ func main() {
 
 	var deleteScopeCmd = &cobra.Command{
 		Use:   "delete-scope [id]",
-		Short: "Delete a scope",
+		Short: "DeleteByClient a scope",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -334,7 +334,7 @@ func main() {
 			}
 
 			if err := db.Delete(&models.ScopeGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			log.Println("Scope deleted.")
 		},
@@ -518,7 +518,7 @@ func main() {
 
 	var deleteClientCmd = &cobra.Command{
 		Use:   "delete-client [client_id]",
-		Short: "Delete OIDC Client",
+		Short: "DeleteByClient OIDC Client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -530,7 +530,7 @@ func main() {
 			var client models.OAuth2ClientGORM
 			db.Select("tenant_id").First(&client, "id = ?", args[0])
 			if err := db.Delete(&models.OAuth2ClientGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("DeleteByClient failed: %v", err)
 			}
 			auditLogger.Log(client.TenantID, "system_cli", "cli.client.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client deleted.")
@@ -656,7 +656,7 @@ func main() {
 
 	var deleteSAMLClientCmd = &cobra.Command{
 		Use:   "delete-saml-client [entity_id]",
-		Short: "Delete SAML Client",
+		Short: "DeleteByClient SAML Client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -668,7 +668,7 @@ func main() {
 			var client models.SAMLClientGORM
 			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClientGORM{}).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(client.TenantID, "system_cli", "cli.client.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client deleted.")
@@ -763,7 +763,7 @@ func main() {
 
 	var deleteSAMLConnectionCmd = &cobra.Command{
 		Use:   "delete-saml-connection [id]",
-		Short: "Delete SAML Connection",
+		Short: "DeleteByClient SAML Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -775,7 +775,7 @@ func main() {
 			var conn models.SAMLConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.SAMLConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("SAML Connection deleted.")
@@ -854,7 +854,7 @@ func main() {
 
 	var deleteOIDCConnectionCmd = &cobra.Command{
 		Use:   "delete-oidc-connection [id]",
-		Short: "Delete OIDC Connection",
+		Short: "DeleteByClient OIDC Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -866,7 +866,7 @@ func main() {
 			var conn models.OIDCConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.OIDCConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("OIDC Connection deleted.")

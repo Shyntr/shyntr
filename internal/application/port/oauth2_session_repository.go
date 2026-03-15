@@ -9,4 +9,5 @@ import (
 type OAuth2SessionRepository interface {
 	GetBySubjectAndClient(ctx context.Context, subject, clientID string) (*model.OAuth2Session, error)
 	DeleteBySubjectAndClient(ctx context.Context, subject, clientID string) error
+	DeleteBySubject(ctx context.Context, subject string) error
 }

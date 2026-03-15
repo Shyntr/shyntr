@@ -219,7 +219,7 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 }
 
 // DeleteTenant godoc
-// @Summary Delete Tenant
+// @Summary DeleteByClient Tenant
 // @Description Performs a cascade delete of a tenant and all its associated resources. The default tenant cannot be deleted.
 // @Tags Tenants
 // @Produce json
@@ -440,7 +440,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 }
 
 // DeleteClient godoc
-// @Summary Delete OIDC Client
+// @Summary DeleteByClient OIDC Client
 // @Description Deletes an OAuth2/OIDC client from a specific tenant.
 // @Tags OAuth2 Clients
 // @Produce json
@@ -688,7 +688,7 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 }
 
 // DeleteSAMLClient godoc
-// @Summary Delete SAML Client
+// @Summary DeleteByClient SAML Client
 // @Description Removes a SAML Service Provider from a specific tenant.
 // @Tags SAML Clients
 // @Produce json
@@ -884,7 +884,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 }
 
 // DeleteSAMLConnection godoc
-// @Summary Delete SAML Connection
+// @Summary DeleteByClient SAML Connection
 // @Description Deletes a federated SAML Identity Provider from a tenant.
 // @Tags SAML Connections
 // @Produce json
@@ -1071,7 +1071,7 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 }
 
 // DeleteOIDCConnection godoc
-// @Summary Delete OIDC Connection
+// @Summary DeleteByClient OIDC Connection
 // @Description Deletes a federated OIDC Identity Provider from a tenant.
 // @Tags OIDC Connections
 // @Produce json

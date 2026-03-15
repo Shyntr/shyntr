@@ -633,7 +633,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 		subject := logoutReq.NameID.Value
 
-		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, spClient.ID)
+		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, tenantID, spClient.ID)
 		if err != nil {
 			logger.FromGin(c).Error("active session not found", zap.String("entity_id", logoutReq.NameID.Value),
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
@@ -647,8 +647,8 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 				}
 			}
 
-			err = h.OAuthSessionUse.DeleteBySubject(c.Request.Context(), subject, activeSession.ClientID)
-			h.OAuthSessionUse.RecordLogout(c.Request.Context(), spClient.ID, c.ClientIP(), c.Request.UserAgent(), false)
+			err = h.OAuthSessionUse.DeleteByClient(c.Request.Context(), subject, tenantID, activeSession.ClientID)
+			h.OAuthSessionUse.RecordLogout(c.Request.Context(), subject, tenantID, spClient.ID, c.ClientIP(), c.Request.UserAgent(), false)
 		}
 	}
 
@@ -823,7 +823,7 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 		}
 		if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 			subject := logoutReq.NameID.Value
-			_ = h.OAuthSessionUse.DeleteBySubject(c.Request.Context(), subject, "")
+			_ = h.OAuthSessionUse.Delete(c.Request.Context(), subject, tenantID)
 			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject", subject))
 		}
 		sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, conn)

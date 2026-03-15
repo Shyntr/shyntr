@@ -374,7 +374,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	h.OAuth2SessionUse.RecordAuthorization(ctx, ar.GetID(), clientID, c.ClientIP(), c.Request.UserAgent(), grantedScopes)
+	h.OAuth2SessionUse.RecordAuthorization(ctx, ar.GetID(), tenantID, clientID, c.ClientIP(), c.Request.UserAgent(), grantedScopes)
 	h.Provider.GetFosite(tenantID).WriteAuthorizeResponse(ctx, c.Writer, ar, response)
 }
 
@@ -428,7 +428,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, err)
 		return
 	}
-	h.OAuth2SessionUse.RecordTokenIssuance(ctx, ar.GetID(), ar.GetClient().GetID(), c.ClientIP(), c.Request.UserAgent(), ar.GetGrantedScopes())
+	h.OAuth2SessionUse.RecordTokenIssuance(ctx, ar.GetID(), tenantID, ar.GetClient().GetID(), c.ClientIP(), c.Request.UserAgent(), ar.GetGrantedScopes())
 	fositeEngine.WriteAccessResponse(ctx, c.Writer, ar, response)
 }
 
@@ -523,11 +523,11 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
 	if subject != "" {
-		err := h.OAuth2SessionUse.DeleteBySubject(ctx, subject, idTokenAudience)
+		err := h.OAuth2SessionUse.DeleteByClient(ctx, subject, tenantID, idTokenAudience)
 		if err != nil {
 			logger.LogFositeError(c, err, "Failed to delete session in TokenEndpoint")
 		}
-		h.OAuth2SessionUse.RecordLogout(ctx, subject, c.ClientIP(), c.Request.UserAgent(), idTokenHint != "")
+		h.OAuth2SessionUse.RecordLogout(ctx, subject, tenantID, idTokenAudience, c.ClientIP(), c.Request.UserAgent(), idTokenHint != "")
 	}
 
 	var idpSource string
@@ -709,7 +709,7 @@ func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
 
 	err := h.Provider.GetFosite(tenantID).NewRevocationRequest(ctx, c.Request)
-	h.OAuth2SessionUse.RecordRevocation(ctx, c.ClientIP(), c.Request.UserAgent(), err == nil)
+	h.OAuth2SessionUse.RecordRevocation(ctx, tenantID, c.ClientIP(), c.Request.UserAgent(), err == nil)
 	h.Provider.GetFosite(tenantID).WriteRevocationResponse(ctx, c.Writer, err)
 }
 
