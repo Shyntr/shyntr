@@ -51,7 +51,7 @@ Shyntr sits between applications and identity providers and **routes authenticat
 flowchart LR
     Application --> Shyntr
     Shyntr --> IdentityProvider
-    IdentityProvider --> LDAP (Soon)
+    IdentityProvider --> LDAP
     IdentityProvider --> SAML
     IdentityProvider --> OIDC
     IdentityProvider --> OAuth2
@@ -84,7 +84,7 @@ Instead of building one-off bridges, Shyntr enables **any-to-any routing** betwe
 flowchart LR
     SAML[SAML]
     OIDC[OIDC]
-    LDAP[LDAP (Soon)]
+    LDAP[LDAP]
     LOCAL[Local User Store]
     OAUTH[OAuth2 APIs]
 
@@ -134,7 +134,7 @@ flowchart TD
 
     Router -->|Route| OIDC[OIDC Provider]
     Router -->|Route| SAML[SAML Provider]
-    Router -->|Route| LDAP[LDAP (Soon)]
+    Router -->|Route| LDAP[LDAP]
     Router -->|Route| LOCAL[Local User Store]
     Router -->|Route| OAUTH[OAuth2 APIs]
 ```
