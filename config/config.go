@@ -9,19 +9,20 @@ import (
 )
 
 type Config struct {
-	DEVELOPMENT         string   `mapstructure:"DEVELOPMENT"`
-	DSN                 string   `mapstructure:"DSN"`
-	DatabaseURL         string   `mapstructure:"DATABASE_URL"`
-	Port                string   `mapstructure:"PORT"`
-	AdminPort           string   `mapstructure:"ADMIN_PORT"`
-	SwaggerPort         string   `mapstructure:"SWAGGER_PORT"`
-	AppSecret           string   `mapstructure:"APP_SECRET"`
-	BaseIssuerURL       string   `mapstructure:"ISSUER_URL"`
-	CookieSecure        bool     `mapstructure:"COOKIE_SECURE"`
-	AllowedOrigins      []string `mapstructure:"CORS_ALLOWED_ORIGINS"`
-	AdminAllowedOrigins []string `mapstructure:"ADMIN_CORS_ALLOWED_ORIGINS"`
-	RSAPrivateKeyBase64 string   `mapstructure:"APP_PRIVATE_KEY_BASE64"`
-	LogLevel            string   `mapstructure:"LOG_LEVEL"`
+	DEVELOPMENT            string   `mapstructure:"DEVELOPMENT"`
+	DSN                    string   `mapstructure:"DSN"`
+	DatabaseURL            string   `mapstructure:"DATABASE_URL"`
+	Port                   string   `mapstructure:"PORT"`
+	AdminPort              string   `mapstructure:"ADMIN_PORT"`
+	SwaggerPort            string   `mapstructure:"SWAGGER_PORT"`
+	AppSecret              string   `mapstructure:"APP_SECRET"`
+	BaseIssuerURL          string   `mapstructure:"ISSUER_URL"`
+	CookieSecure           bool     `mapstructure:"COOKIE_SECURE"`
+	AllowedOrigins         []string `mapstructure:"CORS_ALLOWED_ORIGINS"`
+	AdminAllowedOrigins    []string `mapstructure:"ADMIN_CORS_ALLOWED_ORIGINS"`
+	RSAPrivateKeyBase64    string   `mapstructure:"APP_PRIVATE_KEY_BASE64"`
+	LogLevel               string   `mapstructure:"LOG_LEVEL"`
+	AutoKeyRotationEnabled bool     `mapstructure:"AUTO_KEY_ROTATION_ENABLED"`
 
 	// Security Tuning
 	SkipTLSVerify bool `mapstructure:"SKIP_TLS_VERIFY"`
@@ -55,6 +56,7 @@ func LoadConfig() *Config {
 	viper.SetDefault("COOKIE_SECURE", false)
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", []string{"*"})
 	viper.SetDefault("ADMIN_CORS_ALLOWED_ORIGINS", []string{"http://localhost:3010", "http://localhost:3000", "http://localhost:3274", "http://localhost:7497"})
+	viper.SetDefault("AUTO_KEY_ROTATION_ENABLED", false)
 
 	viper.SetDefault("EXTERNAL_LOGIN_URL", "http://localhost:3000/login")
 	viper.SetDefault("EXTERNAL_CONSENT_URL", "http://localhost:3000/consent")
@@ -83,6 +85,7 @@ func LoadConfig() *Config {
 	mustBind("CORS_ALLOWED_ORIGINS")
 	mustBind("ADMIN_CORS_ALLOWED_ORIGINS")
 	mustBind(consts.EnvRSAPrivateKey)
+	mustBind("AUTO_KEY_ROTATION_ENABLED")
 	mustBind("EXTERNAL_LOGIN_URL")
 	mustBind("EXTERNAL_CONSENT_URL")
 	mustBind("DEFAULT_TENANT_ID")

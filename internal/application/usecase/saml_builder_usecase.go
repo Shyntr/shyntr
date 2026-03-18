@@ -58,12 +58,12 @@ type samlBuilderUseCase struct {
 	clientRepo port.SAMLClientRepository
 	connRepo   port.SAMLConnectionRepository
 	replayRepo port.SAMLReplayRepository
-	KeyMgr     *utils.KeyManager
+	KeyMgr     utils.KeyManager
 	Config     *config.Config
 }
 
 func NewSamlBuilderUseCase(clientRepo port.SAMLClientRepository, connRepo port.SAMLConnectionRepository,
-	replayRepo port.SAMLReplayRepository, km *utils.KeyManager, cfg *config.Config) SamlBuilderUseCase {
+	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config) SamlBuilderUseCase {
 	return &samlBuilderUseCase{
 		clientRepo: clientRepo,
 		connRepo:   connRepo,
@@ -97,6 +97,7 @@ func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID 
 
 	var privKey *rsa.PrivateKey
 	var cert *x509.Certificate
+	var err error
 
 	if conn != nil && conn.SPPrivateKey != "" {
 		block, _ := pem.Decode([]byte(conn.SPPrivateKey))
@@ -121,7 +122,10 @@ func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID 
 			}
 		}
 	} else {
-		privKey, cert = s.KeyMgr.GetActiveKeys()
+		privKey, cert, _, err = s.KeyMgr.GetActiveKeys(ctx, "sig")
+		if err != nil {
+			return nil, errors.New("failed to load active SAML crypto keys")
+		}
 	}
 
 	if cert == nil || privKey == nil {
@@ -342,7 +346,7 @@ func (s *samlBuilderUseCase) GetIdentityProvider(ctx context.Context, tenantID s
 	ssoURL, _ := url.Parse(baseURLStr + "/idp/sso")
 	logoutURL, _ := url.Parse(baseURLStr + "/idp/slo")
 
-	privKey := s.KeyMgr.GetActivePrivateKey()
+	privKey, _, _ := s.KeyMgr.GetActivePrivateKey(ctx, "sig")
 	cert, err := s.generateSelfSignedCert(privKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate idp cert: %w", err)

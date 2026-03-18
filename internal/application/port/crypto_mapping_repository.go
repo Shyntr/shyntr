@@ -6,10 +6,11 @@ import (
 	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
-type SigningKeyRepository interface {
-	Save(ctx context.Context, key *model.SigningKey) error
-	GetActiveKeysByTenant(ctx context.Context, tenantID, use string) ([]*model.SigningKey, error)
-	Delete(ctx context.Context, id string) error
+type CryptoKeyRepository interface {
+	Save(ctx context.Context, key *model.CryptoKey) error
+	GetActiveKey(ctx context.Context, use string) (*model.CryptoKey, error)
+	GetKeysByStates(ctx context.Context, use string, states []model.KeyState) ([]*model.CryptoKey, error)
+	DeleteKey(ctx context.Context, id string) error
 }
 
 type BlacklistedJTIRepository interface {

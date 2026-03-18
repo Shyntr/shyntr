@@ -1,8 +1,11 @@
 package iam
 
 import (
+	"encoding/json"
+
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/go-jose/go-jose/v3"
+	josev3 "github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/ory/fosite"
 )
 
@@ -10,6 +13,12 @@ type ExtendedClient struct {
 	*fosite.DefaultClient
 
 	JSONWebKeys *jose.JSONWebKeySet `json:"jwks,omitempty"`
+
+	JwksURI string `json:"jwks_uri,omitempty"`
+
+	IDTokenEncryptedResponseAlg string `json:"id_token_encrypted_response_alg,omitempty"`
+
+	IDTokenEncryptedResponseEnc string `json:"id_token_encrypted_response_enc,omitempty"`
 
 	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
 
@@ -21,12 +30,26 @@ type ExtendedClient struct {
 var _ fosite.Client = (*ExtendedClient)(nil)
 var _ fosite.OpenIDConnectClient = (*ExtendedClient)(nil)
 
-func (c *ExtendedClient) GetJSONWebKeys() *jose.JSONWebKeySet {
-	return c.JSONWebKeys
+func (c *ExtendedClient) GetJSONWebKeys() *josev3.JSONWebKeySet {
+	if c.JSONWebKeys == nil {
+		return nil
+	}
+
+	b, err := json.Marshal(c.JSONWebKeys)
+	if err != nil {
+		return nil
+	}
+
+	var v3jwks josev3.JSONWebKeySet
+	if err := json.Unmarshal(b, &v3jwks); err != nil {
+		return nil
+	}
+
+	return &v3jwks
 }
 
 func (c *ExtendedClient) GetJSONWebKeysURI() string {
-	return ""
+	return c.JwksURI
 }
 
 func (c *ExtendedClient) GetTokenEndpointAuthSigningAlgorithm() string {
@@ -83,9 +106,12 @@ func ToFositeClient(c *model.OAuth2Client) fosite.Client {
 			Audience:      c.Audience,
 			Public:        c.Public,
 		},
-		JSONWebKeys:             c.JSONWebKeys,
-		PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
-		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
-		ResponseModes:           toResponseModeTypes(c.ResponseModes),
+		JSONWebKeys:                 c.JSONWebKeys,
+		JwksURI:                     c.JwksURI,
+		IDTokenEncryptedResponseAlg: c.IDTokenEncryptedResponseAlg,
+		IDTokenEncryptedResponseEnc: c.IDTokenEncryptedResponseEnc,
+		PostLogoutRedirectURIs:      c.PostLogoutRedirectURIs,
+		TokenEndpointAuthMethod:     c.TokenEndpointAuthMethod,
+		ResponseModes:               toResponseModeTypes(c.ResponseModes),
 	}
 }

@@ -1,23 +1,35 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
 )
 
-type SigningKey struct {
-	ID        string
-	Algorithm string
-	KeyData   string
-	CertData  string
-	IsActive  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ExpiresAt time.Time
+type KeyState string
+
+const (
+	KeyStatePending KeyState = "PENDING"
+	KeyStateActive  KeyState = "ACTIVE"
+	KeyStatePassive KeyState = "PASSIVE"
+	KeyStateRevoked KeyState = "REVOKED"
+)
+
+type CryptoKey struct {
+	ID        string     `json:"id" example:"sig-5f8a9b2"`
+	Use       string     `json:"use" example:"sig"` // 'sig' or 'enc'
+	State     KeyState   `json:"state" example:"ACTIVE"`
+	Algorithm string     `json:"algorithm" example:"RS256"`
+	KeyData   []byte     `json:"-"`
+	CertData  string     `json:"cert_data,omitempty" example:"-----BEGIN CERTIFICATE..."`
+	CreatedAt time.Time  `json:"created_at" example:"2026-03-18T12:00:00Z"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty" example:"2027-03-18T12:00:00Z"`
 }
 
 type BlacklistedJTI struct {
@@ -103,4 +115,65 @@ func (s *JWTSession) Clone() fosite.Session {
 	}
 
 	return cloned
+}
+
+var (
+	AllowedJWEAlgs = []jose.KeyAlgorithm{
+		jose.RSA_OAEP_256, // Minimum acceptable RSA
+		jose.ECDH_ES,      // Preferred for Forward Secrecy
+		jose.A256GCMKW,    // Symmetric fallback
+	}
+
+	AllowedJWEEncs = []jose.ContentEncryption{
+		jose.A256GCM,       // Standard high-assurance
+		jose.A128CBC_HS256, // Acceptable fallback
+	}
+)
+
+// ValidateCipherSuite ensures the client configuration does not request weak cryptography.
+func ValidateCipherSuite(alg, enc string) error {
+	validAlg := false
+	for _, a := range AllowedJWEAlgs {
+		if string(a) == alg {
+			validAlg = true
+			break
+		}
+	}
+	if alg != "" && !validAlg {
+		return fmt.Errorf("insecure or unsupported JWE algorithm requested: %s. Must use RSA-OAEP-256, ECDH-ES, or A256GCMKW", alg)
+	}
+
+	validEnc := false
+	for _, e := range AllowedJWEEncs {
+		if string(e) == enc {
+			validEnc = true
+			break
+		}
+	}
+	if enc != "" && !validEnc {
+		return fmt.Errorf("insecure or unsupported JWE encryption requested: %s. Must use A256GCM or A128CBC-HS256", enc)
+	}
+
+	return nil
+}
+
+// ValidateIncomingJWEHeader prevents Asymmetric Crypto DoS and Zip Bomb attacks
+func ValidateIncomingJWEHeader(header jose.Header) error {
+	if header.Algorithm == "none" {
+		return errors.New("critical security violation: 'none' algorithm is prohibited")
+	}
+
+	if header.Algorithm == string(jose.RSA1_5) {
+		return errors.New("critical security violation: RSA1_5 is vulnerable to padding oracles and is prohibited")
+	}
+
+	// CVE-2024-28180 Protection: Reject compressed payloads unless you have updated go-jose
+	// and explicitly configured maximum decompression bounds.
+	if header.ExtraHeaders != nil {
+		if _, hasZip := header.ExtraHeaders["zip"]; hasZip {
+			return errors.New("security violation: JWE compression (zip) is disabled to prevent resource exhaustion (Zip Bomb) attacks")
+		}
+	}
+
+	return nil
 }

@@ -9,7 +9,10 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"encoding/xml"
 	"fmt"
 	"log"
@@ -344,9 +347,9 @@ func main() {
 	// ==========================================
 
 	var (
-		clientID, clientName, clientSecret                         string
-		redirectURIs, postLogoutURIs, clientScopes, clientAudience []string
-		isPublic, skipConsent                                      bool
+		clientID, clientName, clientSecret, authMethod                         string
+		redirectURIs, postLogoutURIs, clientScopes, clientAudience, grantTypes []string
+		isPublic, skipConsent                                                  bool
 	)
 	var createClientCmd = &cobra.Command{
 		Use:   "create-client",
@@ -383,9 +386,15 @@ func main() {
 				hashedSecret, _ = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 			}
 
-			authMethod := "client_secret_basic"
+			if authMethod == "" {
+				authMethod = "client_secret_basic"
+			}
 			if isPublic {
 				authMethod = "none"
+			}
+
+			if len(grantTypes) == 0 {
+				grantTypes = []string{"authorization_code", "client_credentials"}
 			}
 
 			client := models.OAuth2ClientGORM{
@@ -396,7 +405,7 @@ func main() {
 				RedirectURIs:            redirectURIs,
 				PostLogoutRedirectURIs:  postLogoutURIs,
 				Audience:                clientAudience,
-				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials"},
+				GrantTypes:              grantTypes,
 				ResponseTypes:           []string{"code"},
 				ResponseModes:           []string{"query", "form_post"},
 				Scopes:                  clientScopes,
@@ -422,12 +431,16 @@ func main() {
 	createClientCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID (Auto-generated if empty)")
 	createClientCmd.Flags().StringVar(&clientName, "name", "", "Client Name")
 	createClientCmd.Flags().StringVar(&clientSecret, "secret", "", "Client Secret (Auto-generated if empty)")
+	createClientCmd.Flags().StringVar(&clientSecret, "auth-method", "", "Token endpoint authentication method")
 	createClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "Comma separated Redirect URIs")
 	createClientCmd.Flags().StringSliceVar(&postLogoutURIs, "post-logout-uris", nil, "Comma separated Post Logout URIs")
 	createClientCmd.Flags().StringSliceVar(&clientScopes, "scopes", nil, "Comma separated scopes")
 	createClientCmd.Flags().StringSliceVar(&clientAudience, "audience", nil, "Comma separated audiences")
 	createClientCmd.Flags().BoolVar(&isPublic, "public", false, "Is Public Client (SPA/Mobile)")
 	createClientCmd.Flags().BoolVar(&skipConsent, "skip-consent", false, "Skip user consent screen")
+
+	createScopeCmd.MarkFlagRequired("name")
+	createScopeCmd.MarkFlagRequired("redirect-uris")
 
 	var injectJWKSCmd = &cobra.Command{
 		Use:   "inject-jwks [client_id] [jwks_file]",
@@ -542,9 +555,9 @@ func main() {
 	// ==========================================
 
 	var (
-		samlEntityID, samlACSURL, samlSLOURL string
-		samlAllowedScopes                    []string
-		samlForceAuthn                       bool
+		samlEntityID, samlACSURL, samlSLOURL        string
+		samlAllowedScopes                           []string
+		samlForceAuthn, signResponse, signAssertion bool
 	)
 	var createSAMLClientCmd = &cobra.Command{
 		Use:   "create-saml-client",
@@ -575,8 +588,8 @@ func main() {
 				AllowedScopes: pq.StringArray(samlAllowedScopes),
 				ForceAuthn:    samlForceAuthn,
 				Active:        true,
-				SignResponse:  true,
-				SignAssertion: true,
+				SignResponse:  signResponse,
+				SignAssertion: signAssertion,
 			}
 
 			if err := db.Create(&client).Error; err != nil {
@@ -592,6 +605,11 @@ func main() {
 	createSAMLClientCmd.Flags().StringVar(&samlSLOURL, "slo-url", "", "SLO URL")
 	createSAMLClientCmd.Flags().StringSliceVar(&samlAllowedScopes, "allowed-scopes", nil, "Comma separated allowed scopes")
 	createSAMLClientCmd.Flags().BoolVar(&samlForceAuthn, "force-authn", false, "Force Authentication (ForceAuthn)")
+	createSAMLClientCmd.Flags().BoolVar(&signResponse, "sign-response", false, "Sign response")
+	createSAMLClientCmd.Flags().BoolVar(&signAssertion, "sign-assertion", false, "Sign Assertions")
+
+	_ = createSAMLClientCmd.MarkFlagRequired("entity-id")
+	_ = createSAMLClientCmd.MarkFlagRequired("acs-url")
 
 	var getSAMLClientCmd = &cobra.Command{
 		Use:   "get-saml-client [entity_id]",
@@ -834,6 +852,10 @@ func main() {
 	createOIDCConnectionCmd.Flags().StringVar(&clientSecret, "client-secret", "", "Client Secret")
 	createOIDCConnectionCmd.Flags().StringSliceVar(&oidcScopes, "scopes", nil, "Comma separated scopes")
 
+	_ = createOIDCConnectionCmd.MarkFlagRequired("issuer")
+	_ = createOIDCConnectionCmd.MarkFlagRequired("client-id")
+	_ = createOIDCConnectionCmd.MarkFlagRequired("client-secret")
+
 	var getOIDCConnectionCmd = &cobra.Command{
 		Use:   "get-oidc-connection [id]",
 		Short: "Get OIDC Connection",
@@ -873,6 +895,75 @@ func main() {
 		},
 	}
 
+	var importKeyCmd = &cobra.Command{
+		Use:   "import-key",
+		Short: "Inject a CA-signed keypair into the Identity Hub",
+		Long:  "Used in High-Assurance (PKI) environments to manually rotate keys bypassing AutoRollover.",
+		Run: func(cmd *cobra.Command, args []string) {
+			use, _ := cmd.Flags().GetString("use")
+			certPath, _ := cmd.Flags().GetString("cert")
+			keyPath, _ := cmd.Flags().GetString("key")
+
+			if use != "sig" && use != "enc" {
+				log.Fatal("Invalid use type. Must be 'sig' or 'enc'.")
+			}
+
+			cfg := config.LoadConfig()
+			logger.InitLogger(cfg.LogLevel)
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Connection failed: %v", err)
+			}
+
+			keyRepo := repository.NewCryptoKeyRepository(db)
+			keyMgr := utils2.NewKeyManager(keyRepo, cfg)
+
+			certBytes, err := os.ReadFile(certPath)
+			if err != nil {
+				log.Fatalf("Failed to read certificate file: %v", err)
+			}
+
+			keyBytes, err := os.ReadFile(keyPath)
+			if err != nil {
+				log.Fatalf("Failed to read private key file: %v", err)
+			}
+
+			block, _ := pem.Decode(keyBytes)
+			if block == nil {
+				log.Fatal("Failed to decode PEM block from private key file")
+			}
+
+			privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+			if err != nil {
+				parsedKey, err8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+				if err8 != nil {
+					log.Fatalf("Failed to parse private key: %v", err8)
+				}
+				var ok bool
+				privKey, ok = parsedKey.(*rsa.PrivateKey)
+				if !ok {
+					log.Fatal("Provided key is not a valid RSA Private Key")
+				}
+			}
+
+			ctx := context.Background()
+			if _, err := keyMgr.ImportKey(ctx, use, privKey, certBytes); err != nil {
+				log.Fatalf("CRITICAL: Failed to import key: %v", err)
+			}
+
+			log.Printf("SUCCESS: CA-signed key successfully injected for use '%s'.", use)
+		},
+	}
+
+	importKeyCmd.Flags().String("use", "sig", "Key usage type ('sig' or 'enc')")
+	importKeyCmd.Flags().String("cert", "", "Path to the CA-signed X.509 certificate (PEM)")
+	importKeyCmd.Flags().String("key", "", "Path to the unencrypted RSA private key (PEM)")
+	err := importKeyCmd.MarkFlagRequired("cert")
+	err = importKeyCmd.MarkFlagRequired("key")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// ==========================================
 	// SERVER START
 	// ==========================================
@@ -893,7 +984,7 @@ func main() {
 		createSAMLClientCmd, getSAMLClientCmd, updateSAMLClientCmd, deleteSAMLClientCmd,
 		createSAMLConnectionCmd, getSAMLConnectionCmd, deleteSAMLConnectionCmd,
 		createOIDCConnectionCmd, getOIDCConnectionCmd, deleteOIDCConnectionCmd,
-		serveCmd,
+		serveCmd, importKeyCmd,
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -915,10 +1006,6 @@ func runServer() {
 		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
 		persistence.SeedDefaultTenant(db, cfg)
 	}
-	worker.StartCleanupJob(db)
-
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
@@ -927,7 +1014,11 @@ func runServer() {
 		RefreshTokenLifespan:       30 * 24 * time.Hour, // 30 Days
 		GlobalSecret:               []byte(cfg.AppSecret),
 		IDTokenIssuer:              cfg.BaseIssuerURL,
-		SendDebugMessagesToClients: true,
+		SendDebugMessagesToClients: true, //TODO, Make it false for Production
+
+		EnforcePKCE:                    true,
+		EnforcePKCEForPublicClients:    true,
+		EnablePKCEPlainChallengeMethod: false,
 	}
 
 	//Repository
@@ -945,13 +1036,24 @@ func runServer() {
 	eventRepository := repository.NewWebhookEventRepository(db)
 	healthRepository := repository.NewHealthRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
+	keyRepository := repository.NewCryptoKeyRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
-	//UseCase
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+
+	startupCtx := context.Background()
+	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "sig"); err != nil {
+		logger.Log.Fatal("Failed to seed/load signing (sig) key", zap.Error(err))
+	}
+	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "enc"); err != nil {
+		logger.Log.Fatal("Failed to seed/load encryption (enc) key", zap.Error(err))
+	}
+
+	// UseCase
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
@@ -971,6 +1073,7 @@ func runServer() {
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
 		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
 
+	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()
 
 	publicSrv := &http.Server{

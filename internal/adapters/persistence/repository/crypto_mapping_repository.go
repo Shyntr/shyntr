@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -9,37 +10,56 @@ import (
 	"gorm.io/gorm"
 )
 
-// --- SIGNING KEY REPO ---
-
-type signingKeyRepository struct{ db *gorm.DB }
-
-func NewSigningKeyRepository(db *gorm.DB) port.SigningKeyRepository {
-	return &signingKeyRepository{db: db}
+type cryptoKeyRepository struct {
+	db *gorm.DB
 }
 
-func (r *signingKeyRepository) Save(ctx context.Context, key *model.SigningKey) error {
-	dbModel := models.FromDomainSigningKey(key)
-	return r.db.WithContext(ctx).Create(dbModel).Error
+func NewCryptoKeyRepository(db *gorm.DB) port.CryptoKeyRepository {
+	return &cryptoKeyRepository{db: db}
 }
 
-func (r *signingKeyRepository) GetActiveKeysByTenant(ctx context.Context, tenantID, use string) ([]*model.SigningKey, error) {
-	var dbModels []models.SigningKeyGORM
-	query := r.db.WithContext(ctx).Where("tenant_id = ? AND is_active = ?", tenantID, true)
-	if use != "" {
-		query = query.Where("use = ?", use)
-	}
-	if err := query.Find(&dbModels).Error; err != nil {
+func (r *cryptoKeyRepository) Save(ctx context.Context, key *model.CryptoKey) error {
+	gormModel := models.FromDomainCryptoKey(key)
+	return r.db.WithContext(ctx).Save(gormModel).Error
+}
+
+func (r *cryptoKeyRepository) GetActiveKey(ctx context.Context, use string) (*model.CryptoKey, error) {
+	var gormModel models.CryptoKeyGORM
+
+	err := r.db.WithContext(ctx).
+		Where("use = ? AND state = ?", use, model.KeyStateActive).
+		First(&gormModel).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("critical: no active key found for use type " + use)
+		}
 		return nil, err
 	}
-	var entities []*model.SigningKey
-	for _, m := range dbModels {
-		entities = append(entities, m.ToDomain())
-	}
-	return entities, nil
+
+	return gormModel.ToDomain(), nil
 }
 
-func (r *signingKeyRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.SigningKeyGORM{}).Error
+func (r *cryptoKeyRepository) GetKeysByStates(ctx context.Context, use string, states []model.KeyState) ([]*model.CryptoKey, error) {
+	var gormModels []models.CryptoKeyGORM
+	err := r.db.WithContext(ctx).
+		Where("use = ? AND state IN ?", use, states).
+		Find(&gormModels).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	var domainModels []*model.CryptoKey
+	for _, m := range gormModels {
+		domainModels = append(domainModels, m.ToDomain())
+	}
+
+	return domainModels, nil
+}
+
+func (r *cryptoKeyRepository) DeleteKey(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Unscoped().Where("id = ?", id).Delete(&models.CryptoKeyGORM{}).Error
 }
 
 // --- BLACKLISTED JTI REPO ---

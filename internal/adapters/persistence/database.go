@@ -46,7 +46,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.SAMLReplayCache{},
 		&models.OIDCConnectionGORM{},
 		&models.OAuth2SessionGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 		&models.LoginRequestGORM{},
 		&models.ConsentRequestGORM{},
 		&models.BlacklistedJTIGORM{},
