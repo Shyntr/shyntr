@@ -83,18 +83,16 @@ Instead of building one-off bridges, Shyntr enables **any-to-any routing** betwe
 ```mermaid
 flowchart LR
     SAML[SAML]
-    OIDC[OIDC]
+    OIDC[OpenID Connect]
     LDAP[LDAP]
     LOCAL[Local User Store]
-    OAUTH[OAuth2 APIs]
 
     SAML <-->|Route| OIDC
-    SAML <-->|Route| LDAP
-    SAML <-->|Route| LOCAL
-    OIDC <-->|Route| LDAP
-    OIDC <-->|Route| LOCAL
-    OIDC <-->|Route| OAUTH
-    LDAP <-->|Route| LOCAL
+    OIDC <-->|Route| SAML
+    SAML -->|Route| LDAP
+    SAML -->|Route| LOCAL
+    OIDC -->|Route| LDAP
+    OIDC -->|Route| LOCAL
 ```
 
 This is not a static bridge model.
@@ -127,16 +125,14 @@ Examples include:
 flowchart TD
     Clients[Identity Clients]
     Router[Shyntr Routing Engine]
-    Targets[Identity Targets]
 
-    Clients -->|SAML Client| Router
-    Clients -->|OIDC Client| Router
+    Clients <-->|SAML Client| Router
+    Clients <-->|OIDC Client| Router
 
-    Router -->|Route| OIDC[OIDC Provider]
-    Router -->|Route| SAML[SAML Provider]
-    Router -->|Route| LDAP[LDAP]
-    Router -->|Route| LOCAL[Local User Store]
-    Router -->|Route| OAUTH[OAuth2 APIs]
+    Router <-->|Route| OIDC[OIDC Provider]
+    Router <-->|Route| SAML[SAML Provider]
+    Router <-->|Route| LDAP[LDAP]
+    Router <-->|Route| LOCAL[Local User Store]
 ```
 
 This gives you a unified identity layer without forcing every system to speak the same protocol.
@@ -169,12 +165,11 @@ while Shyntr handles:
 flowchart LR
     User --> App
     App --> Shyntr
-    Shyntr --> LoginUI[Your Login UI]
-    LoginUI --> ShyntrAdmin[Shyntr Admin Challenge APIs]
-    ShyntrAdmin --> Shyntr
-    Shyntr --> ConsentUI[Your Consent UI]
-    ConsentUI --> ShyntrAdmin
-    Shyntr --> Target[OIDC / SAML / Local User Store]
+    Shyntr --> |Redirect| LoginUI[Your Login UI]
+    LoginUI --> |Request| ShyntrAdmin[Shyntr Admin APIs]
+    Shyntr --> |Redirect| ConsentUI[Your Consent UI]
+    ConsentUI --> |Request| ShyntrAdmin
+    Shyntr --> |Route| Target[OIDC / SAML / Local User Store]
 ```
 
 ---
@@ -230,13 +225,12 @@ Examples:
 
 ```mermaid
 flowchart LR
-    Client --> Shyntr
-    Shyntr --> LoginUI[Custom Login UI]
-    LoginUI --> UserBackend[Your User Backend]
-    UserBackend --> LocalStore[Local User Store]
-    UserBackend --> ShyntrAdmin[Login/Consent Admin APIs]
-    ShyntrAdmin --> Shyntr
-    Shyntr --> Tokens[OIDC / OAuth2 / SAML Output]
+    Client --> |Request| Shyntr
+    Shyntr --> |Redirect| LoginUI[Custom Login UI]
+    LoginUI --> |Request| UserBackend[Your User Backend]
+    UserBackend --> |Request| LocalStore[Local User Store]
+    UserBackend --> |Request| ShyntrAdmin[Login/Consent Admin APIs]
+    Shyntr --> |Route| Tokens[OIDC / OAuth2 / SAML Providers]
 ```
 
 **Your Application Owns The Users,
@@ -265,15 +259,6 @@ Shyntr Owns The Identity Routing Layer.**
 * Token Issuance
 * Claim Transformation
 * Trust Enforcement
-
-```mermaid
-flowchart LR
-    AdminUI[Your Admin UI] --> AdminAPI[Shyntr Admin API]
-    AdminAPI --> Router[Shyntr Identity Router]
-
-    Apps[Apps / APIs] --> Router
-    Router --> IdSources[OIDC / SAML / LDAP / Local User Store]
-```
 
 This is why Shyntr should be understood not as a simple bridge, but as an **identity routing and orchestration platform**.
 
