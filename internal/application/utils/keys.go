@@ -88,13 +88,13 @@ func (km *DefaultKeyManager) loadOrGenerateActiveKey(ctx context.Context, use st
 	}
 
 	if newKey == nil {
-		logger.Log.Info("Generating and caching a new random stable key pair for use '" + use + "'...")
-		generatedKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		logger.Log.Info("Generating and caching a new High-Assurance (4096-bit) random stable key pair for use '" + use + "'...")
+		generatedKey, err := rsa.GenerateKey(rand.Reader, 4096)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate random RSA key: %w", err)
+			return nil, fmt.Errorf("failed to generate random 4096-bit RSA key: %w", err)
 		}
 		newKey = generatedKey
-		keySource = "random"
+		keySource = "random_4096"
 	}
 
 	template := x509.Certificate{
@@ -136,6 +136,7 @@ func (km *DefaultKeyManager) loadOrGenerateActiveKey(ctx context.Context, use st
 		return nil, fmt.Errorf("failed to save %s key to repository: %w", keySource, err)
 	}
 
+	logger.Log.Info("Saved newly initialized key to database", zap.String("source", keySource), zap.String("use", use), zap.String("kid", kid))
 	return newCryptoKey, nil
 }
 
@@ -260,12 +261,12 @@ func (km *DefaultKeyManager) GetPublicJWKS(ctx context.Context) (*jose.JSONWebKe
 func parseBase64PEM(b64 string) (*rsa.PrivateKey, error) {
 	pemBytes, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode base64: %w", err)
 	}
 
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
-		return nil, errors.New("failed to decode PEM block")
+		return nil, errors.New("failed to decode PEM block from decoded base64 string")
 	}
 
 	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
@@ -275,12 +276,12 @@ func parseBase64PEM(b64 string) (*rsa.PrivateKey, error) {
 
 	parsedKey, errPKCS8 := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if errPKCS8 != nil {
-		return nil, fmt.Errorf("PKCS#1 error: %v, PKCS#8 error: %v", err, errPKCS8)
+		return nil, fmt.Errorf("failed parsing as PKCS#1 (%v) and PKCS#8 (%v)", err, errPKCS8)
 	}
 
 	rsaPrivKey, ok := parsedKey.(*rsa.PrivateKey)
 	if !ok {
-		return nil, errors.New("not a valid RSA private key")
+		return nil, errors.New("parsed PKCS#8 key is not a valid RSA private key")
 	}
 
 	return rsaPrivKey, nil
@@ -449,7 +450,7 @@ func (km *DefaultKeyManager) processRotationForUse(ctx context.Context, use stri
 }
 
 func (km *DefaultKeyManager) generateKeyInternal(ctx context.Context, use string, state model.KeyState) (*model.CryptoKey, error) {
-	newKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	newKey, _ := rsa.GenerateKey(rand.Reader, 4096)
 
 	template := x509.Certificate{
 		SerialNumber:          big.NewInt(time.Now().UnixNano()),
