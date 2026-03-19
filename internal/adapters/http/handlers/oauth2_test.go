@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"crypto/rsa"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +20,8 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/go-jose/go-jose/v3"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
@@ -40,7 +41,7 @@ func setupTestDB() *gorm.DB {
 		&models.LoginRequestGORM{},
 		&models.ConsentRequestGORM{},
 		&models.AuditLogGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 	)
 	return db
 }
@@ -58,7 +59,7 @@ func generateMockIDToken(privateKey *rsa.PrivateKey, subject, audience string) (
 		Expiry:   jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
 	}
 
-	return jwt.Signed(signer).Claims(cl).CompactSerialize()
+	return jwt.Signed(signer).Claims(cl).Serialize()
 }
 
 func TestOAuth2Handler_Logout(t *testing.T) {
@@ -77,8 +78,9 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 		Secret:                 "secret",
 		PostLogoutRedirectURIs: pq.StringArray{logoutURI},
 	})
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	activePrivKey := keyMgr.GetActivePrivateKey()
+	keyRepository := repository.NewCryptoKeyRepository(db)
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	activePrivKey, _, _ := keyMgr.GetActivePrivateKey(context.Background(), "sig")
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
@@ -104,6 +106,8 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
+	jwksCache := utils2.NewJWKSCache()
+
 	//UseCase
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
@@ -113,7 +117,7 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,
-		connectionUseCase, tenantUseCase, scopeUseCase)
+		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 	gin.SetMode(gin.TestMode)
 
 	t.Run("Valid Logout with Redirect", func(t *testing.T) {

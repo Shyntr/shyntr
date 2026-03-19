@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -18,7 +19,8 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
@@ -28,7 +30,7 @@ import (
 
 type OAuth2Handler struct {
 	Provider         *utils2.Provider
-	KeyMgr           *utils2.KeyManager
+	KeyMgr           utils2.KeyManager
 	Config           *config.Config
 	OAuth2ClientUse  usecase.OAuth2ClientUseCase
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
@@ -36,13 +38,14 @@ type OAuth2Handler struct {
 	OIDCConnUse      usecase.OIDCConnectionUseCase
 	TenantUse        usecase.TenantUseCase
 	ScopeUse         usecase.ScopeUseCase
+	JWKSCache        *utils2.JWKSCache
 }
 
-func NewOAuth2Handler(p *utils2.Provider, km *utils2.KeyManager, cfg *config.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase,
+func NewOAuth2Handler(p *utils2.Provider, km utils2.KeyManager, cfg *config.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase,
 	AuthReq usecase.AuthUseCase, OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
-	TenantUse usecase.TenantUseCase, ScopeUse usecase.ScopeUseCase) *OAuth2Handler {
+	TenantUse usecase.TenantUseCase, ScopeUse usecase.ScopeUseCase, jwksCache *utils2.JWKSCache) *OAuth2Handler {
 	return &OAuth2Handler{Provider: p, KeyMgr: km, Config: cfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
-		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse, ScopeUse: ScopeUse}
+		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse, ScopeUse: ScopeUse, JWKSCache: jwksCache}
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -454,9 +457,13 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	var idTokenAudience string
 
 	if idTokenHint != "" {
-		token, err := jwt.ParseSigned(idTokenHint)
+		allowedAlgs := []jose.SignatureAlgorithm{jose.RS256}
+		token, err := jwt.ParseSigned(idTokenHint, allowedAlgs)
 		if err == nil {
-			_, cert := h.KeyMgr.GetActiveKeys()
+			_, cert, _, err := h.KeyMgr.GetActiveKeys(c.Request.Context(), "sig")
+			if err != nil {
+				logger.FromGin(c).Error("failed to load active crypto keys")
+			}
 			if cert != nil {
 				type CustomClaims struct {
 					jwt.Claims
@@ -666,7 +673,73 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 
 	safeClaims := utils2.MapClaims(subject, userCtx, scopeEntities)
 
-	c.JSON(http.StatusOK, safeClaims)
+	if _, exists := safeClaims["sub"]; !exists {
+		safeClaims["sub"] = subject
+	}
+
+	client, isExtended := accessRequest.GetClient().(*iam.ExtendedClient)
+	if !isExtended {
+		c.JSON(http.StatusOK, safeClaims)
+		return
+	}
+
+	alg := client.IDTokenEncryptedResponseAlg
+	enc := client.IDTokenEncryptedResponseEnc
+
+	if alg == "" {
+		c.JSON(http.StatusOK, safeClaims)
+		return
+	}
+	if enc == "" {
+		enc = "A256GCM"
+	}
+
+	privKey, _, _, err := h.KeyMgr.GetActiveKeys(c.Request.Context(), "sig")
+	if err != nil {
+		logger.FromGin(c).Error("failed to load active crypto keys")
+	}
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: privKey}, nil)
+	if err != nil {
+		logger.FromGin(c).Error("Failed to initialize userinfo signer", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+
+	jwsToken, err := jwt.Signed(signer).Claims(safeClaims).Serialize()
+	if err != nil {
+		logger.FromGin(c).Error("Failed to sign userinfo", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+
+	pubKey, err := h.JWKSCache.GetEncryptionKey(c.Request.Context(), client.JwksURI, alg)
+	if err != nil || pubKey == nil {
+		logger.FromGin(c).Warn("Cannot retrieve client encryption key for UserInfo", zap.String("client_id", client.GetID()), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "encryption_key_missing"})
+		return
+	}
+
+	recipient := jose.Recipient{
+		Algorithm: jose.KeyAlgorithm(alg),
+		Key:       pubKey,
+	}
+
+	encrypter, err := jose.NewEncrypter(jose.ContentEncryption(enc), recipient, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+
+	jweObject, err := encrypter.Encrypt([]byte(jwsToken))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "encryption_failed"})
+		return
+	}
+
+	jweToken, _ := jweObject.CompactSerialize()
+
+	c.Header("Content-Type", "application/jwt")
+	c.String(http.StatusOK, jweToken)
 }
 
 // Introspect godoc
@@ -722,8 +795,14 @@ func (h *OAuth2Handler) Revoke(c *gin.Context) {
 // @Router /.well-known/jwks.json [get]
 // @Router /t/{tenant_id}/.well-known/jwks.json [get]
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
-	privKey := h.KeyMgr.GetActivePrivateKey()
-	jwks := utils2.GeneratePublicJWKS(privKey)
+	jwks, err := h.KeyMgr.GetPublicJWKS(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "server_error",
+			"message": "failed to generate JWKS document",
+		})
+		return
+	}
 	c.JSON(http.StatusOK, jwks)
 }
 
@@ -772,6 +851,9 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"RS256"},
+
+		"id_token_encryption_alg_values_supported": []string{"RSA-OAEP", "RSA-OAEP-256"},
+		"id_token_encryption_enc_values_supported": []string{"A256GCM", "A128GCM"},
 
 		"scopes_supported": []string{"openid", "offline_access", "profile", "email", "address", "phone"},
 

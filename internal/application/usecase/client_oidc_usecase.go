@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,8 +25,8 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/go-jose/go-jose/v3"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
@@ -36,7 +37,7 @@ type OAuth2ClientUseCase interface {
 	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error)
 	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
-	SendBackchannelLogout(clientID, logoutURI, subject, issuer string)
+	SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string)
 	CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
 	UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
 	GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error)
@@ -54,7 +55,7 @@ type oauth2ClientUseCase struct {
 	tenant   port.TenantRepository
 	audit    port.AuditLogger
 	hasher   port.SecretHasher
-	keyMgr   *utils2.KeyManager
+	keyMgr   utils2.KeyManager
 	Config   *config.Config
 }
 
@@ -68,7 +69,7 @@ type oidcDiscovery struct {
 }
 
 func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDCConnectionRepository, tenant port.TenantRepository,
-	audit port.AuditLogger, hasher port.SecretHasher, keyMgr *utils2.KeyManager, cfg *config.Config) OAuth2ClientUseCase {
+	audit port.AuditLogger, hasher port.SecretHasher, keyMgr utils2.KeyManager, cfg *config.Config) OAuth2ClientUseCase {
 	return &oauth2ClientUseCase{
 		repo:     repo,
 		connRepo: connRepo,
@@ -215,6 +216,21 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if ok && expectedNonce != "" {
+
+		tokenParts := strings.Split(rawIDToken, ".")
+		if len(tokenParts) == 5 {
+			privKey, _, err := u.keyMgr.GetActivePrivateKey(ctx, "enc")
+			if err != nil {
+				return nil, errors.New("no active private key available to decrypt ID token")
+			}
+
+			decryptedToken, err := ParseAndDecryptJWE(rawIDToken, privKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse encrypted ID token: %w", err)
+			}
+			rawIDToken = decryptedToken
+		}
+
 		provider, err := oidc.NewProvider(ctx, conn.IssuerURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize oidc provider for verification: %w", err)
@@ -245,19 +261,35 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 		return nil, fmt.Errorf("userinfo endpoint returned status: %d", resp.StatusCode)
 	}
 
+	contentType := resp.Header.Get("Content-Type")
 	var userInfo map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
-		return nil, fmt.Errorf("failed to decode userinfo: %w", err)
+
+	if strings.Contains(contentType, "application/jwt") {
+		// Yanıt bir JWT (veya JWE). Body'yi okuyup yukarıdaki gibi deşifre/doğrulama yapmalıyız
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		jwtStr := string(bodyBytes)
+
+		if len(strings.Split(jwtStr, ".")) == 5 {
+			//TODO
+		}
+
+		return nil, errors.New("encrypted/signed jwt userinfo is currently unsupported, expecting application/json")
+
+	} else {
+		if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+			return nil, fmt.Errorf("failed to decode userinfo: %w", err)
+		}
 	}
+
 	return userInfo, nil
 }
 
-func (u *oauth2ClientUseCase) SendBackchannelLogout(clientID, logoutURI, subject, issuer string) {
+func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string) {
 	if logoutURI == "" {
 		return
 	}
 
-	privKey, _ := u.keyMgr.GetActiveKeys()
+	privKey, _, _, err := u.keyMgr.GetActiveKeys(ctx, "sig")
 	if privKey == nil {
 		logger.Log.Error("No active private key for backchannel logout")
 		return
@@ -281,7 +313,7 @@ func (u *oauth2ClientUseCase) SendBackchannelLogout(clientID, logoutURI, subject
 	}
 
 	builder := jwt.Signed(signer).Claims(claims)
-	logoutToken, err := builder.CompactSerialize()
+	logoutToken, err := builder.Serialize()
 	if err != nil {
 		logger.Log.Error("Failed to serialize logout token", zap.Error(err))
 		return
@@ -503,4 +535,18 @@ func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) 
 		return nil, err
 	}
 	return payload.FromDomainOAuth2Clients(clients), nil
+}
+
+func ParseAndDecryptJWE(rawToken string, privateKey interface{}) (string, error) {
+	jweToken, err := jose.ParseEncrypted(rawToken, model.AllowedJWEAlgs, model.AllowedJWEEncs)
+	if err != nil {
+		return "", errors.New("jwe parse failed or weak cryptography detected: " + err.Error())
+	}
+
+	decryptedBytes, err := jweToken.Decrypt(privateKey)
+	if err != nil {
+		return "", err
+	}
+
+	return string(decryptedBytes), nil
 }

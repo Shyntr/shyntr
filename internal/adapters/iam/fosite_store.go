@@ -13,7 +13,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/constants"
-	"github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
 	"gorm.io/gorm"

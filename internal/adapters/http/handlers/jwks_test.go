@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
@@ -31,7 +32,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
-	db.AutoMigrate(&models.SigningKeyGORM{})
+	db.AutoMigrate(&models.CryptoKeyGORM{})
 
 	cfg := &config.Config{
 		AppSecret: "12345678901234567890123456789012",
@@ -45,8 +46,9 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		IDTokenIssuer:              cfg.BaseIssuerURL,
 		SendDebugMessagesToClients: true,
 	}
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
+	keyRepository := repository.NewCryptoKeyRepository(db)
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	keyMgr.GetActivePrivateKey(context.Background(), "sig")
 	requestRepository := repository.NewAuthRequestRepository(db)
 	jtiRepository := repository.NewBlacklistedJTIRepository(db)
 	tenantRepository := repository.NewTenantRepository(db)
@@ -60,6 +62,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
+	cache := utils2.NewJWKSCache()
 	//UseCase
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
@@ -70,7 +73,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 
 	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,
-		connectionUseCase, tenantUseCase, scopeUseCase)
+		connectionUseCase, tenantUseCase, scopeUseCase, cache)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

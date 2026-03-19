@@ -1,22 +1,41 @@
 package worker
 
 import (
+	"context"
 	"time"
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 // StartCleanupJob starts a background ticker to remove expired data.
-func StartCleanupJob(db *gorm.DB) {
+func StartCleanupJob(db *gorm.DB, manager utils.KeyManager) {
 	ticker := time.NewTicker(1 * time.Hour)
 	go func() {
 		for range ticker.C {
 			cleanupExpiredData(db)
 		}
 	}()
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			logger.Log.Debug("Running Key Rotation check...")
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+
+			if err := manager.RotateKeys(ctx); err != nil {
+				logger.Log.Error("Key Rotation Worker encountered an error", zap.Error(err))
+			}
+
+			cancel()
+		}
+	}()
+
 	logger.Log.Info("Background cleanup job started")
 }
 

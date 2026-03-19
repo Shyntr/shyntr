@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		&models.TenantGORM{},
 		&models.OAuth2ClientGORM{},
 		&models.AuditLogGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 	)
 
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
@@ -49,8 +50,9 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		AppSecret:     "12345678901234567890123456789012",
 		BaseIssuerURL: "http://localhost:7496",
 	}
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
+	keyRepository := repository.NewCryptoKeyRepository(db)
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	keyMgr.GetActivePrivateKey(context.Background(), "sig")
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,

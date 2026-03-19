@@ -36,9 +36,11 @@ func SetupRouter(
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
-	km *utils2.KeyManager,
+	km utils2.KeyManager,
 ) (*gin.Engine, *gin.Engine) {
 	attrMapper := mapper.New()
+
+	jwksCache := utils2.NewJWKSCache()
 
 	// Handlers
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
@@ -46,7 +48,7 @@ func SetupRouter(
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
 	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
-		connectionUseCase, tenantUseCase, scopeUseCase)
+		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
 	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,

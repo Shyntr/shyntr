@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -33,7 +34,7 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	db.AutoMigrate(
 		&models.ConsentRequestGORM{},
 		&models.AuditLogGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 		&models.OAuth2ClientGORM{},
 		&models.TenantGORM{},
 	)
@@ -50,8 +51,9 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		RequestedAudience: pq.StringArray{"https://api.example.com", "https://api.hacker.com"},
 		Active:            true,
 	})
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
+	keyRepository := repository.NewCryptoKeyRepository(db)
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	keyMgr.GetActivePrivateKey(context.Background(), "sig")
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
 		AuthorizeCodeLifespan:      10 * time.Minute,

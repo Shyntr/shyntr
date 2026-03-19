@@ -52,7 +52,7 @@ Creates a new isolated tenant environment.
 
 ---
 
-## 3. Scope Management (New)
+## 3. Scope Management
 
 Scopes define the permissions and claims that can be requested by applications.
 
@@ -88,17 +88,17 @@ Registers a new OIDC client.
 * **Flags:**
 
 | Flag | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--tenant-id` | No | `default` | The ID of the tenant this client belongs to. |
-| `--client-id` | No | *Auto-generated 8-byte hex* | The unique Client ID. |
-| `--name` | No | `New Client <id>` | The descriptive name of the application. |
-| `--secret` | No | *Auto-generated 16-byte hex* | The Client Secret (ignored if `--public` is true). |
-| `--redirect-uris` | No | `http://localhost:8080/callback` | Comma-separated list of allowed callback URLs. |
-| `--post-logout-uris` | No | - | Comma-separated exact URIs allowed for redirection after logout. |
-| `--scopes` | No | `openid, profile, email, offline_access` | Comma-separated scopes allowed for this client. |
-| `--audience` | No | - | Comma-separated requested audiences. |
-| `--public` | No | `false` | Set to true for SPA/Mobile apps (disables secret, enforces PKCE). |
-| `--skip-consent` | No | `false` | Skip the user consent screen during authorization. |
+| :--- |:---------| :--- | :--- |
+| `--tenant-id` | No       | `default` | The ID of the tenant this client belongs to. |
+| `--client-id` | No      | *Auto-generated 8-byte hex* | The unique Client ID. |
+| `--name` | Yes      | `New Client <id>` | The descriptive name of the application. |
+| `--secret` | No       | *Auto-generated 16-byte hex* | The Client Secret (ignored if `--public` is true). |
+| `--redirect-uris` | Yes      | `http://localhost:8080/callback` | Comma-separated list of allowed callback URLs. |
+| `--post-logout-uris` | No       | - | Comma-separated exact URIs allowed for redirection after logout. |
+| `--scopes` | No       | `openid, profile, email, offline_access` | Comma-separated scopes allowed for this client. |
+| `--audience` | No       | - | Comma-separated requested audiences. |
+| `--public` | No       | `false` | Set to true for SPA/Mobile apps (disables secret, enforces PKCE). |
+| `--skip-consent` | No       | `false` | Skip the user consent screen during authorization. |
 
 ### `get-client`, `update-client`, `delete-client`
 * **Get Usage:** `./shyntr get-client [client_id]`
@@ -182,3 +182,62 @@ Registers a new external OIDC Provider.
 ### `get-oidc-connection`, `delete-oidc-connection`
 * **Get Usage:** `./shyntr get-oidc-connection [id]`
 * **Delete Usage:** `./shyntr delete-oidc-connection [id]`
+
+---
+
+## 8. Cryptographic Key Management
+
+The Shyntr Identity Hub features a Zero-Downtime Key Rotation engine. By default, it operates in **Auto-Rollover** mode, automatically generating and rotating self-signed X.509 certificates and RSA keys.
+
+For High-Assurance (PKI) environments where a central Certificate Authority (CA) must sign all SAML/OIDC keys, administrators must disable `AUTO_KEY_ROTATION_ENABLED` in the environment configuration and manually inject CA-signed keys using the CLI.
+
+### `import-key`
+Injects a CA-signed keypair into the Identity Hub. This command safely demotes the currently active key to a `PASSIVE` state (to decrypt inflight tokens) and immediately activates the new CA-signed key.
+
+* **Usage:** `./shyntr import-key [flags]`
+* **Flags:**
+
+| Flag | Required | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--use` | **Yes** | `sig` | The cryptographic purpose of the key. Use `sig` for Signing (JWTs/SAML) or `enc` for Decryption (JWE). |
+| `--cert` | **Yes** | - | Local file path to the CA-signed X.509 certificate (in PEM format). |
+| `--key` | **Yes** | - | Local file path to the unencrypted RSA private key (in PEM format). |
+
+#### Command Example (High-Assurance NATO/PKI Workflow)
+```bash
+# Inject a CA-signed key for Token Signing (SAML Assertions & OIDC ID Tokens)
+./shyntr import-key --use sig --cert /etc/pki/tls/certs/nato-idp-signed.pem --key /etc/pki/tls/private/nato-idp-private.key
+
+# Inject a CA-signed key for Token Decryption (Incoming JWEs)
+./shyntr import-key --use enc --cert /etc/pki/tls/certs/nato-enc-signed.pem --key /etc/pki/tls/private/nato-enc-private.key
+```
+
+(Note: The imported private key is immediately encrypted with AES-256-GCM before being stored in the database. The raw file is only read once and is never stored in plaintext).
+
+#### Expected File Formats
+The CLI strictly expects PEM-encoded Base64 files. Binary formats (like DER or PFX) are not supported directly and must be converted using OpenSSL prior to import.
+
+1. **Private Key File (.key):**
+   Must be an unencrypted PKCS#1 or PKCS#8 RSA Private Key.
+
+```plaintext
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEA0iN5yD87W8bWhzss5Uz4B13JM/XHbdbpyXppUGkbp1WBrLWR
+lPPZTXGE7rCbZs6mZAQPWVTYr3pBU2u0NbLWmPPIVY+e+sGfPvMfiP117kW9xbEN
+... (base64 encoded private key data) ...
+x3jUrEqOaqQu1WgUWnFXOAvI/GA4TuZT1FAmD0XoRE4qZCX/94II+w==
+-----END RSA PRIVATE KEY-----
+```
+
+2. **Certificate File (.pem or .crt):**
+   Must be a valid X.509 Certificate signed by your trusted Certificate Authority.
+
+```plaintext
+-----BEGIN CERTIFICATE-----
+MIIDBTCCAe2gAwIBAgIIGJ34EZ8uUkgwDQYJKoZIhvcNAQELBQAwJzElMCMGA1UE
+AxMcU2h5bnRyIEdsb2JhbCBJZGVudGl0eSAtIHNpZzAeFw0yNjAzMTgxNTA4NDJa
+... (base64 encoded certificate data) ...
+aTgWweshVJVnmdgQtL/0Z4wBlMwunQmJ1cM9WeKmnRV0Z9vHr0Lyat3xm25D9/m+
+jEEFmQ0y+PiwcH1B4xfu64t7ZO5GSOvh0Cmd+VQWg0NEGL+WY5Pp2cWiobVN5FDC
+-----END CERTIFICATE-----
+```

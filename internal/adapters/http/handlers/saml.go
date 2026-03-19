@@ -31,7 +31,8 @@ import (
 	utils2 "github.com/Shyntr/shyntr/pkg/utils"
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"go.uber.org/zap"
 )
 
@@ -45,12 +46,12 @@ type SAMLHandler struct {
 	OIDCClientUse      usecase.OAuth2ClientUseCase
 	OAuthSessionUse    usecase.OAuth2SessionUseCase
 	Mapper             *mapper.Mapper
-	KeyMgr             *utils.KeyManager
+	KeyMgr             utils.KeyManager
 	wh                 usecase.WebhookUseCase
 	ScopeUse           usecase.ScopeUseCase
 }
 
-func NewSAMLHandler(Config *config.Config, KeyMgr *utils.KeyManager, samlBuilderUseCase usecase.SamlBuilderUseCase, ClientUseCase usecase.OAuth2ClientUseCase, m *mapper.Mapper,
+func NewSAMLHandler(Config *config.Config, KeyMgr utils.KeyManager, samlBuilderUseCase usecase.SamlBuilderUseCase, ClientUseCase usecase.OAuth2ClientUseCase, m *mapper.Mapper,
 	AuthUse usecase.AuthUseCase, SAMLUse usecase.SAMLConnectionUseCase, OAuthSessionUse usecase.OAuth2SessionUseCase,
 	SAMLClientUse usecase.SAMLClientUseCase, OIDCClientUse usecase.OAuth2ClientUseCase, wh usecase.WebhookUseCase, ScopeUse usecase.ScopeUseCase) *SAMLHandler {
 	return &SAMLHandler{Config: Config, KeyMgr: KeyMgr, samlBuilderUseCase: samlBuilderUseCase, ClientUseCase: ClientUseCase, Mapper: m, AuthUse: AuthUse, SAMLUse: SAMLUse,
@@ -357,7 +358,10 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 		return
 	}
 
-	privKey, cert := h.KeyMgr.GetActiveKeys()
+	privKey, cert, _, err := h.KeyMgr.GetActiveKeys(c.Request.Context(), "sig")
+	if err != nil {
+		logger.FromGin(c).Error("failed to load active SAML crypto keys")
+	}
 	if privKey != nil && cert != nil {
 		idp.Key = privKey
 		idp.Certificate = cert
@@ -659,7 +663,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
 			if clientErr == nil {
 				if oidcClient.BackchannelLogoutURI != "" {
-					h.ClientUseCase.SendBackchannelLogout(oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
+					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
 				}
 			}
 
@@ -963,9 +967,13 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 
 	idTokenHint := c.Query("id_token_hint")
 	if idTokenHint != "" {
-		token, err := jwt.ParseSigned(idTokenHint)
+		allowedAlgs := []jose.SignatureAlgorithm{jose.RS256}
+		token, err := jwt.ParseSigned(idTokenHint, allowedAlgs)
 		if err == nil {
-			_, cert := h.KeyMgr.GetActiveKeys()
+			_, cert, _, err := h.KeyMgr.GetActiveKeys(c.Request.Context(), "sig")
+			if err != nil {
+				logger.FromGin(c).Error("failed to load active SAML crypto keys")
+			}
 			if cert != nil {
 				claims := &jwt.Claims{}
 				if err := token.Claims(cert.PublicKey, claims); err == nil {
