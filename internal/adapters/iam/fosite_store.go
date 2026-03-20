@@ -12,7 +12,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/constants"
+	"github.com/Shyntr/shyntr/pkg/tenant"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
@@ -36,9 +36,9 @@ func NewFositeStore(db *gorm.DB, clientRepo port.OAuth2ClientRepository, jtiRepo
 // --- CLIENT MANAGER IMPLEMENTATION ---
 
 func (s *FositeStore) GetClient(ctx context.Context, id string) (fosite.Client, error) {
-	tenantID, ok := ctx.Value(constants.ContextKeyTenantID).(string)
-	if !ok || tenantID == "" {
-		return nil, errors.New("tenant context is missing in Fosite Store")
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	clientDomain, err := s.clientRepo.GetByTenantAndID(ctx, tenantID, id)
@@ -162,27 +162,10 @@ func newTokenFamilyID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (s *FositeStore) getOrCreateRefreshFamilyID(ctx context.Context, requestID string) (string, error) {
-	var existing models.OAuth2SessionGORM
-	err := s.db.WithContext(ctx).
-		Select("token_family_id").
-		Where("request_id = ? AND token_type = ? AND token_family_id <> ''", requestID, "refresh_token").
-		Order("created_at DESC").
-		Limit(1).
-		Find(&existing).Error
-	if err != nil {
-		return "", err
-	}
-	if existing.TokenFamilyID != "" {
-		return existing.TokenFamilyID, nil
-	}
-	return newTokenFamilyID()
-}
-
 func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, familyID string, req fosite.Requester) error {
-	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
-	if tenantID == "" {
-		return errors.New("tenant context missing for session creation")
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return err
 	}
 
 	sessionData, err := json.Marshal(req.GetSession())
@@ -212,14 +195,6 @@ func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, f
 		subject = sg.GetSubject()
 	}
 
-	var tokenFamilyID string
-	if tokenType == "refresh_token" {
-		tokenFamilyID, err = s.getOrCreateRefreshFamilyID(ctx, req.GetID())
-		if err != nil {
-			return err
-		}
-	}
-
 	sess := models.OAuth2SessionGORM{
 		Signature:     signature,
 		RequestID:     req.GetID(),
@@ -227,7 +202,7 @@ func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, f
 		ClientID:      req.GetClient().GetID(),
 		Subject:       subject,
 		TokenType:     tokenType,
-		TokenFamilyID: tokenFamilyID,
+		TokenFamilyID: familyID,
 		RequestData:   requestJSON,
 		SessionData:   sessionData,
 		GrantedScopes: pq.StringArray(req.GetGrantedScopes()),
@@ -239,7 +214,10 @@ func (s *FositeStore) createSession(ctx context.Context, signature, tokenType, f
 }
 
 func (s *FositeStore) getSession(ctx context.Context, signature, tokenType string, session fosite.Session) (fosite.Requester, error) {
-	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var sess models.OAuth2SessionGORM
 
 	query := s.db.WithContext(ctx).Where("signature = ? AND token_type = ?", signature, tokenType)
@@ -297,7 +275,7 @@ func (s *FositeStore) getSession(ctx context.Context, signature, tokenType strin
 	}
 
 	if session == nil {
-		session = model.NewJWTSession("")
+		session = model.NewJWTSession("", "")
 	}
 
 	if err := json.Unmarshal(sess.SessionData, session); err != nil {
@@ -391,21 +369,34 @@ func (s *FositeStore) RevokeAccessToken(ctx context.Context, requestID string) e
 // --- REFRESH TOKEN & REPLAY DETECTION ---
 
 func (s *FositeStore) CreateRefreshTokenSession(ctx context.Context, signature string, req fosite.Requester) (err error) {
-	familyID, _ := ctx.Value("token_family_id").(string)
-	if familyID == "" {
-		familyID = req.GetID()
+	var familyID string
+
+	if jwtSess, ok := req.GetSession().(*model.JWTSession); ok && jwtSess.TokenFamilyID != "" {
+		familyID = jwtSess.TokenFamilyID
 	}
+
+	if familyID == "" {
+		familyID, _ = newTokenFamilyID()
+		if familyID == "" {
+			familyID = req.GetID() // Fallback
+		}
+
+		if jwtSess, ok := req.GetSession().(*model.JWTSession); ok {
+			jwtSess.TokenFamilyID = familyID
+		}
+	}
+
 	return s.createSession(ctx, signature, "refresh_token", familyID, req)
 }
 
 func (s *FositeStore) GetRefreshTokenSession(ctx context.Context, signature string, session fosite.Session) (fosite.Requester, error) {
-	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
-	if tenantID == "" {
-		return nil, errors.New("tenant context missing")
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var dbModel models.OAuth2SessionGORM
 
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Where("signature = ? AND token_type = ?", signature, "refresh_token")
 		if tenantID != "" {
 			query = query.Where("tenant_id = ?", tenantID)
@@ -474,9 +465,9 @@ func (s *FositeStore) DeleteRefreshTokenSession(ctx context.Context, signature s
 }
 
 func (s *FositeStore) RevokeRefreshToken(ctx context.Context, requestID string) error {
-	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
-	if tenantID == "" {
-		return errors.New("tenant context missing")
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return err
 	}
 	return s.db.WithContext(ctx).Model(&models.OAuth2SessionGORM{}).
 		Where("request_id = ? AND token_type IN ? AND tenant_id = ?", requestID, []string{"access_token", "refresh_token"}, tenantID).
@@ -484,9 +475,9 @@ func (s *FositeStore) RevokeRefreshToken(ctx context.Context, requestID string) 
 }
 
 func (s *FositeStore) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, signature string) error {
-	tenantID, _ := ctx.Value(constants.ContextKeyTenantID).(string)
-	if tenantID == "" {
-		return errors.New("tenant context missing")
+	tenantID, err := tenant.FromContext(ctx)
+	if err != nil {
+		return err
 	}
 
 	graceExp := time.Now().UTC().Add(time.Minute * 5)
