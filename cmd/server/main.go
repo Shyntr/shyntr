@@ -1080,18 +1080,21 @@ func runServer() {
 	swaggerRouter := router.SetupSwaggerRouter()
 
 	publicSrv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: publicRouter,
+		Addr:        ":" + cfg.Port,
+		Handler:     publicRouter,
+		ReadTimeout: 5 * time.Second,
 	}
 
 	adminSrv := &http.Server{
-		Addr:    ":" + cfg.AdminPort,
-		Handler: adminRouter,
+		Addr:        ":" + cfg.AdminPort,
+		Handler:     adminRouter,
+		ReadTimeout: 5 * time.Second,
 	}
 
 	swaggerSrv := &http.Server{
-		Addr:    ":" + cfg.SwaggerPort,
-		Handler: swaggerRouter,
+		Addr:        ":" + cfg.SwaggerPort,
+		Handler:     swaggerRouter,
+		ReadTimeout: 5 * time.Second,
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())
