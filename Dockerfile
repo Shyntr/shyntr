@@ -17,7 +17,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o shyntr ./cmd/server/main.go
 
 # Stage 2: Runner
-FROM alpine:latest
+FROM alpine:3.23.3
 
 WORKDIR /app
 
@@ -32,6 +32,9 @@ COPY --from=builder /app/shyntr .
 
 # Expose port
 EXPOSE 7496 7497
+
+RUN adduser -D -u 1000 appuser && chown -R 1000:1000 /app
+USER 1000
 
 # Default command (can be overridden to 'migrate' or other CLI commands)
 CMD ["./shyntr", "serve"]
