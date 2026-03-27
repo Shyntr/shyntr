@@ -2,9 +2,12 @@ package port
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Shyntr/shyntr/internal/domain/model"
 )
+
+var ErrKeyNotFound = errors.New("critical: no active key found for use type ")
 
 type CryptoKeyRepository interface {
 	Save(ctx context.Context, key *model.CryptoKey) error

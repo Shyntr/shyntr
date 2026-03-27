@@ -67,11 +67,15 @@ func NewKeyManager(repo port.CryptoKeyRepository, cfg *config.Config) KeyManager
 
 func (km *DefaultKeyManager) loadOrGenerateActiveKey(ctx context.Context, use string) (*model.CryptoKey, error) {
 	dbKey, err := km.repo.GetActiveKey(ctx, use)
-	if err == nil && dbKey != nil {
+	if err != nil {
+		if errors.Is(err, port.ErrKeyNotFound) {
+			logger.Log.Info("No active key found for use '" + use + "' in DB. Initializing...")
+		} else {
+			return nil, fmt.Errorf("failed to query active key from repository: %w", err)
+		}
+	} else if dbKey != nil {
 		return dbKey, nil
 	}
-
-	logger.Log.Info("No active key found for use '" + use + "' in DB. Initializing...")
 
 	var newKey *rsa.PrivateKey
 	var keySource string
@@ -164,7 +168,7 @@ func (km *DefaultKeyManager) GetActivePrivateKey(ctx context.Context, use string
 	dbKey, err := km.loadOrGenerateActiveKey(ctx, use)
 	if err != nil {
 		if keyExists {
-			logger.Log.Warn("Failed to fetch active key from DB, falling back to stale cache for use " + use)
+			logger.Log.Warn("Failed to fetch active key from DB, falling back to stale cache for use "+use, zap.Error(err))
 			return cachedKey, cachedKID, nil
 		}
 		return nil, "", err
@@ -182,6 +186,7 @@ func (km *DefaultKeyManager) GetActivePrivateKey(ctx context.Context, use string
 
 	km.cachedKeys[use] = privKey
 	km.cachedKIDs[use] = dbKey.ID
+	delete(km.cachedCerts, use)
 	km.cacheRefreshTime[use] = time.Now()
 
 	logger.Log.Info("Refreshed active " + use + " key in memory cache from database")
@@ -235,8 +240,15 @@ func (km *DefaultKeyManager) GetPublicJWKS(ctx context.Context) (*jose.JSONWebKe
 	jwks := &jose.JSONWebKeySet{Keys: make([]jose.JSONWebKey, 0)}
 	states := []model.KeyState{model.KeyStatePending, model.KeyStateActive, model.KeyStatePassive}
 
-	sigKeys, _ := km.repo.GetKeysByStates(ctx, "sig", states)
-	encKeys, _ := km.repo.GetKeysByStates(ctx, "enc", states)
+	sigKeys, err := km.repo.GetKeysByStates(ctx, "sig", states)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve signature keys for JWKS: %w", err)
+	}
+
+	encKeys, err := km.repo.GetKeysByStates(ctx, "enc", states)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve encryption keys for JWKS: %w", err)
+	}
 
 	allKeys := append(sigKeys, encKeys...)
 
@@ -298,9 +310,10 @@ func (km *DefaultKeyManager) GetActiveKeys(ctx context.Context, use string) (*rs
 
 	km.mu.RLock()
 	cachedCert, certExists := km.cachedCerts[use]
+	lastRefresh := km.cacheRefreshTime[use]
 	km.mu.RUnlock()
 
-	if certExists && cachedCert != nil {
+	if certExists && cachedCert != nil && time.Since(lastRefresh) < 5*time.Minute {
 		return privKey, cachedCert, kid, nil
 	}
 
@@ -381,6 +394,7 @@ func (km *DefaultKeyManager) ImportKey(ctx context.Context, use string, privKey 
 
 	km.mu.Lock()
 	km.cacheRefreshTime[use] = time.Time{}
+	delete(km.cachedCerts, use) // Guarantee full eviction of stale certs upon new import
 	km.mu.Unlock()
 
 	logger.Log.Info("Successfully imported and activated CA-signed key for use '" + use + "' (KID: " + kid + ")")
@@ -433,6 +447,7 @@ func (km *DefaultKeyManager) processRotationForUse(ctx context.Context, use stri
 
 			km.mu.Lock()
 			km.cacheRefreshTime[use] = time.Time{}
+			delete(km.cachedCerts, use) // Evict cache to force consistent pair reload
 			km.mu.Unlock()
 
 			return nil

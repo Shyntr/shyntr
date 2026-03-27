@@ -265,6 +265,8 @@ func main() {
 	createScopeCmd.Flags().StringSliceVar(&scopeClaims, "claims", nil, "Comma separated claims (e.g. email,email_verified)")
 	createScopeCmd.Flags().BoolVar(&scopeIsSystem, "system", false, "Is System Scope?")
 
+	createScopeCmd.MarkFlagRequired("name")
+
 	var getScopeCmd = &cobra.Command{
 		Use:   "get-scope [id]",
 		Short: "Get scope details",
@@ -394,7 +396,10 @@ func main() {
 			}
 
 			if len(grantTypes) == 0 {
-				grantTypes = []string{"authorization_code", "client_credentials"}
+				grantTypes = []string{"authorization_code"}
+				if !isPublic {
+					grantTypes = append(grantTypes, "client_credentials")
+				}
 			}
 
 			client := models.OAuth2ClientGORM{
@@ -438,9 +443,6 @@ func main() {
 	createClientCmd.Flags().StringSliceVar(&clientAudience, "audience", nil, "Comma separated audiences")
 	createClientCmd.Flags().BoolVar(&isPublic, "public", false, "Is Public Client (SPA/Mobile)")
 	createClientCmd.Flags().BoolVar(&skipConsent, "skip-consent", false, "Skip user consent screen")
-
-	createScopeCmd.MarkFlagRequired("name")
-	createScopeCmd.MarkFlagRequired("redirect-uris")
 
 	var injectJWKSCmd = &cobra.Command{
 		Use:   "inject-jwks [client_id] [jwks_file]",

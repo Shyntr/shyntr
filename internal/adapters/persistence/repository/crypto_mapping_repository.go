@@ -32,7 +32,7 @@ func (r *cryptoKeyRepository) GetActiveKey(ctx context.Context, use string) (*mo
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("critical: no active key found for use type " + use)
+			return nil, port.ErrKeyNotFound
 		}
 		return nil, err
 	}

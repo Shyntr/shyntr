@@ -152,10 +152,25 @@ func (c *JWKSCache) fetchJWKS(ctx context.Context, uri string) (*jose.JSONWebKey
 }
 
 func (c *JWKSCache) findKeyByAlg(jwks *jose.JSONWebKeySet, alg string) (interface{}, error) {
+	var fallbackKey interface{}
+
 	for _, key := range jwks.Keys {
+		if key.Use != "" && key.Use != "enc" {
+			continue
+		}
+
 		if key.Algorithm == alg {
 			return key.Key, nil
 		}
+
+		if key.Algorithm == "" && fallbackKey == nil {
+			fallbackKey = key.Key
+		}
 	}
-	return nil, errors.New("no matching key found for the specified algorithm")
+
+	if fallbackKey != nil {
+		return fallbackKey, nil
+	}
+
+	return nil, errors.New("no matching encryption key found for the specified algorithm")
 }
