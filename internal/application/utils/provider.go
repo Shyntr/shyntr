@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
 	fositejwt "github.com/ory/fosite/token/jwt"
@@ -16,13 +16,13 @@ import (
 type Provider struct {
 	db           *gorm.DB
 	baseConfig   *fosite.Config
-	keyMgr       *KeyManager
+	keyMgr       KeyManager
 	clientRepo   port.OAuth2ClientRepository
 	jtiRepo      port.BlacklistedJTIRepository
 	tenantFosite sync.Map
 }
 
-func NewProvider(db *gorm.DB, baseConfig *fosite.Config, km *KeyManager, clientRepo port.OAuth2ClientRepository, jtiRepo port.BlacklistedJTIRepository) *Provider {
+func NewProvider(db *gorm.DB, baseConfig *fosite.Config, km KeyManager, clientRepo port.OAuth2ClientRepository, jtiRepo port.BlacklistedJTIRepository) *Provider {
 	return &Provider{
 		db:         db,
 		baseConfig: baseConfig,
@@ -44,9 +44,12 @@ func (p *Provider) GetFosite(tenantID string) fosite.OAuth2Provider {
 	tenantConfig.TokenURL = baseURL + "/t/" + tenantID + "/oauth2/token"
 
 	store := iam.NewFositeStore(p.db, p.clientRepo, p.jtiRepo)
-	privateKey := p.keyMgr.GetActivePrivateKey()
 	keyGetter := func(ctx context.Context) (interface{}, error) {
-		return privateKey, nil
+		privKey, _, err := p.keyMgr.GetActivePrivateKey(ctx, "sig")
+		if err != nil {
+			return nil, err
+		}
+		return privKey, nil
 	}
 	hmacStrategy := compose.NewOAuth2HMACStrategy(tenantConfig)
 	jwtStrategy := compose.NewOAuth2JWTStrategy(keyGetter, hmacStrategy, tenantConfig)
@@ -59,15 +62,12 @@ func (p *Provider) GetFosite(tenantID string) fosite.OAuth2Provider {
 			Signer:                     &fositejwt.DefaultSigner{GetPrivateKey: keyGetter},
 		},
 		compose.OAuth2AuthorizeExplicitFactory,
-		compose.OAuth2AuthorizeImplicitFactory,
 		compose.OAuth2ClientCredentialsGrantFactory,
 		compose.OAuth2RefreshTokenGrantFactory,
 		compose.OAuth2TokenIntrospectionFactory,
 		compose.OAuth2TokenRevocationFactory,
 		compose.OAuth2PKCEFactory,
 		compose.OpenIDConnectExplicitFactory,
-		compose.OpenIDConnectImplicitFactory,
-		compose.OpenIDConnectHybridFactory,
 		compose.OpenIDConnectRefreshFactory,
 	)
 

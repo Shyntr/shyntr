@@ -3,12 +3,12 @@ package usecase
 import (
 	"context"
 
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type AuditUseCase interface {
-	GetTenantLogs(ctx context.Context, tenantID string, limit, offset int) ([]*entity.AuditLog, error)
+	GetTenantLogs(ctx context.Context, tenantID string, limit, offset int) ([]*model.AuditLog, error)
 }
 
 type auditUseCase struct {
@@ -19,7 +19,7 @@ func NewAuditUseCase(repo port.AuditLogRepository) AuditUseCase {
 	return &auditUseCase{repo: repo}
 }
 
-func (u *auditUseCase) GetTenantLogs(ctx context.Context, tenantID string, limit, offset int) ([]*entity.AuditLog, error) {
+func (u *auditUseCase) GetTenantLogs(ctx context.Context, tenantID string, limit, offset int) ([]*model.AuditLog, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}

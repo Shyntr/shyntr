@@ -7,13 +7,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/mapper"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +31,19 @@ func NewOIDCHandler(Config *config.Config, clientUseCase usecase.OAuth2ClientUse
 	return &OIDCHandler{Config: Config, clientUseCase: clientUseCase, AuthUse: AuthUse, OIDCUse: OIDCUse, Mapper: m, wh: wh}
 }
 
+// Login godoc
+// @Summary Initiate OIDC Federation Login
+// @Description Starts the login flow with an external OIDC Identity Provider (e.g., Google, Okta) for a specific tenant and connection. Generates CSRF tokens and redirects the user.
+// @Tags OIDC Federation
+// @Produce html
+// @Param tenant_id path string true "Tenant ID"
+// @Param connection_id path string true "OIDC Connection ID"
+// @Param login_challenge query string true "The active cryptographic login challenge ID"
+// @Success 302 {string} string "Redirects the user agent to the external Identity Provider's authorization endpoint"
+// @Failure 400 {object} map[string]string "Bad Request (missing tenant_id or login_challenge)"
+// @Failure 404 {object} map[string]string "Not Found (login request not found)"
+// @Failure 500 {object} map[string]string "Internal Server Error (failed to initiate OIDC)"
+// @Router /t/{tenant_id}/oidc/login/{connection_id} [get]
 func (h *OIDCHandler) Login(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
@@ -65,6 +78,19 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
+// Callback godoc
+// @Summary OIDC Federation Callback
+// @Description Handles the callback from an external OIDC Identity Provider. Validates state and CSRF, exchanges the authorization code for tokens, fetches UserInfo, maps attributes, and resumes the original login flow.
+// @Tags OIDC Federation
+// @Produce html
+// @Param tenant_id path string true "Tenant ID"
+// @Param code query string true "Authorization code returned by the external IdP"
+// @Param state query string true "State parameter to mitigate CSRF and restore context"
+// @Success 302 {string} string "Redirects back to the original protocol handler (SAML or OAuth2) with a login_verifier"
+// @Failure 400 {object} map[string]string "Bad Request (invalid or missing callback parameters)"
+// @Failure 403 {object} map[string]string "Forbidden (CSRF validation failed, invalid state, or session expired)"
+// @Failure 500 {object} payload.AppError "Internal Server Error (connection not found or mapping failed)"
+// @Router /t/{tenant_id}/oidc/callback [get]
 func (h *OIDCHandler) Callback(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	code := c.Query("code")
@@ -148,10 +174,10 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 
 	existingCtx["login_claims"] = finalAttributes
-	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, existingCtx, c.ClientIP(), c.Request.UserAgent())
+	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, conn.Name, existingCtx, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"))
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to complete OIDC login", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to complete OIDC login", err))
 		return
 	}
 

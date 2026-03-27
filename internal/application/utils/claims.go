@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/nevzatcirak/shyntr/internal/domain/entity"
+import "github.com/Shyntr/shyntr/internal/domain/model"
 
 // Standard OIDC Claim Mappings
 var scopeToClaims = map[string][]string{
@@ -11,7 +11,7 @@ var scopeToClaims = map[string][]string{
 }
 
 // MapClaims filters the raw context map based on requested scopes and tenant context.
-func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes []*entity.Scope) map[string]interface{} {
+func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes []*model.Scope) map[string]interface{} {
 	finalClaims := make(map[string]interface{})
 	finalClaims["sub"] = subject
 

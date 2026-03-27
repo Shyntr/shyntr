@@ -5,17 +5,17 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type ScopeUseCase interface {
-	CreateScope(ctx context.Context, scope *entity.Scope, actorIP, userAgent string) (*entity.Scope, error)
-	GetScope(ctx context.Context, tenantID, id string) (*entity.Scope, error)
-	GetScopesByNames(ctx context.Context, tenantID string, names []string) ([]*entity.Scope, error)
-	ListScopes(ctx context.Context, tenantID string) ([]*entity.Scope, error)
-	UpdateScope(ctx context.Context, scope *entity.Scope, actorIP, userAgent string) error
+	CreateScope(ctx context.Context, scope *model.Scope, actorIP, userAgent string) (*model.Scope, error)
+	GetScope(ctx context.Context, tenantID, id string) (*model.Scope, error)
+	GetScopesByNames(ctx context.Context, tenantID string, names []string) ([]*model.Scope, error)
+	ListScopes(ctx context.Context, tenantID string) ([]*model.Scope, error)
+	UpdateScope(ctx context.Context, scope *model.Scope, actorIP, userAgent string) error
 	DeleteScope(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
 	AddClaimToScopes(ctx context.Context, tenantID string, claim string, scopeNames []string) error
 }
@@ -32,7 +32,7 @@ func NewScopeUseCase(repo port.ScopeRepository, audit port.AuditLogger) ScopeUse
 	}
 }
 
-func (u *scopeUseCase) CreateScope(ctx context.Context, scope *entity.Scope, actorIP, userAgent string) (*entity.Scope, error) {
+func (u *scopeUseCase) CreateScope(ctx context.Context, scope *model.Scope, actorIP, userAgent string) (*model.Scope, error) {
 	scope.Name = strings.ToLower(strings.TrimSpace(scope.Name))
 	scope.IsSystem = false
 
@@ -60,17 +60,17 @@ func (u *scopeUseCase) CreateScope(ctx context.Context, scope *entity.Scope, act
 	return scope, nil
 }
 
-func (u *scopeUseCase) GetScope(ctx context.Context, tenantID, id string) (*entity.Scope, error) {
+func (u *scopeUseCase) GetScope(ctx context.Context, tenantID, id string) (*model.Scope, error) {
 	return u.repo.GetByID(ctx, tenantID, id)
 }
 
-func (u *scopeUseCase) GetScopesByNames(ctx context.Context, tenantID string, names []string) ([]*entity.Scope, error) {
+func (u *scopeUseCase) GetScopesByNames(ctx context.Context, tenantID string, names []string) ([]*model.Scope, error) {
 	allScopes, err := u.repo.ListByTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []*entity.Scope
+	var result []*model.Scope
 	nameMap := make(map[string]bool)
 	for _, n := range names {
 		nameMap[n] = true
@@ -84,11 +84,11 @@ func (u *scopeUseCase) GetScopesByNames(ctx context.Context, tenantID string, na
 	return result, nil
 }
 
-func (u *scopeUseCase) ListScopes(ctx context.Context, tenantID string) ([]*entity.Scope, error) {
+func (u *scopeUseCase) ListScopes(ctx context.Context, tenantID string) ([]*model.Scope, error) {
 	return u.repo.ListByTenant(ctx, tenantID)
 }
 
-func (u *scopeUseCase) UpdateScope(ctx context.Context, scope *entity.Scope, actorIP, userAgent string) error {
+func (u *scopeUseCase) UpdateScope(ctx context.Context, scope *model.Scope, actorIP, userAgent string) error {
 	existing, err := u.repo.GetByID(ctx, scope.TenantID, scope.ID)
 	if err != nil {
 		return err

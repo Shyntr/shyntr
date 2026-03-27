@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"gorm.io/gorm"
 )
 
@@ -19,12 +19,12 @@ func NewTenantRepository(db *gorm.DB) port.TenantRepository {
 	return &tenantRepository{db: db}
 }
 
-func (r *tenantRepository) Create(ctx context.Context, tenant *entity.Tenant) error {
+func (r *tenantRepository) Create(ctx context.Context, tenant *model.Tenant) error {
 	dbModel := models.FromDomainTenant(tenant)
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
 
-func (r *tenantRepository) GetByID(ctx context.Context, id string) (*entity.Tenant, error) {
+func (r *tenantRepository) GetByID(ctx context.Context, id string) (*model.Tenant, error) {
 	var dbModel models.TenantGORM
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -35,7 +35,7 @@ func (r *tenantRepository) GetByID(ctx context.Context, id string) (*entity.Tena
 	return dbModel.ToDomain(), nil
 }
 
-func (r *tenantRepository) GetByName(ctx context.Context, name string) (*entity.Tenant, error) {
+func (r *tenantRepository) GetByName(ctx context.Context, name string) (*model.Tenant, error) {
 	var dbModel models.TenantGORM
 	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -53,7 +53,7 @@ func (r *tenantRepository) GetCount(ctx context.Context) (int64, error) {
 	}
 	return count, nil
 }
-func (r *tenantRepository) Update(ctx context.Context, tenant *entity.Tenant) error {
+func (r *tenantRepository) Update(ctx context.Context, tenant *model.Tenant) error {
 	dbModel := models.FromDomainTenant(tenant)
 	return r.db.WithContext(ctx).Model(&models.TenantGORM{}).Where("id = ?", tenant.ID).Updates(dbModel).Error
 }
@@ -87,12 +87,12 @@ func (r *tenantRepository) CascadeDelete(ctx context.Context, id string) error {
 	})
 }
 
-func (r *tenantRepository) List(ctx context.Context) ([]*entity.Tenant, error) {
+func (r *tenantRepository) List(ctx context.Context) ([]*model.Tenant, error) {
 	var dbModels []models.TenantGORM
 	if err := r.db.WithContext(ctx).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*entity.Tenant, 0)
+	entities := make([]*model.Tenant, 0)
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

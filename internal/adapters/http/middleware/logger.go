@@ -3,9 +3,9 @@ package middleware
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
 )
 

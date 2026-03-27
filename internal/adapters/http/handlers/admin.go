@@ -5,12 +5,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"go.uber.org/zap"
 )
 
@@ -31,33 +30,53 @@ func NewAdminHandler(TenantUse usecase.TenantUseCase, OAuth2ClientUse usecase.OA
 
 }
 
-// --- Login API ---
-
+// GetLoginRequest godoc
+// @Summary Get OAuth2 Login Request
+// @Description Retrieves the details of an active OAuth2 login challenge. Acts as an internal IdP trust boundary.
+// @Tags Auth-Admin
+// @Produce json
+// @Param login_challenge query string true "The cryptographic login challenge ID"
+// @Success 200 {object} map[string]interface{} "Returns the login request details"
+// @Failure 400 {object} payload.AppError "login_challenge is required"
+// @Failure 404 {object} payload.AppError "Login request not found"
+// @Router /admin/login [get]
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
 		return
 	}
 	req, err := h.AuthReqUseCase.GetLoginRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Login request not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "Login request not found", err))
 		return
 	}
 
 	c.JSON(http.StatusOK, req)
 }
 
+// AcceptLoginRequest godoc
+// @Summary Accept OAuth2 Login Request
+// @Description Accepts a login request and confirms the user's identity. Returns a redirection URL to continue the OAuth2 flow.
+// @Tags Auth-Admin
+// @Accept json
+// @Produce json
+// @Param login_challenge query string true "The cryptographic login challenge ID"
+// @Param request body payload.AcceptLoginRequest true "Login acceptance payload containing subject and session preferences"
+// @Success 200 {object} map[string]string "Returns redirect_to URL containing the login verifier"
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
+// @Failure 500 {object} payload.AppError "Failed to accept login request"
+// @Router /admin/login/accept [post]
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
 		return
 	}
 
-	var req dto.AcceptLoginRequest
+	var req payload.AcceptLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -72,7 +91,7 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to accept login request", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept login request", err))
 		return
 	}
 
@@ -84,16 +103,28 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
+// RejectLoginRequest godoc
+// @Summary Reject OAuth2 Login Request
+// @Description Rejects a login request (e.g., due to invalid credentials or user denial) and aborts the OAuth2 flow.
+// @Tags Auth-Admin
+// @Accept json
+// @Produce json
+// @Param login_challenge query string true "The cryptographic login challenge ID"
+// @Param request body payload.RejectRequestPayload true "Rejection payload containing error code and description"
+// @Success 200 {object} map[string]string "Returns redirect_to URL containing error details"
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
+// @Failure 500 {object} payload.AppError "Failed to reject login request"
+// @Router /admin/login/reject [post]
 func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
 		return
 	}
 
-	var req dto.RejectRequestPayload
+	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -106,7 +137,7 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
 		return
 	}
 	logger.FromGin(c).Info("Login request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))
@@ -118,23 +149,33 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
-// --- Consent API ---
+// GetConsentRequest godoc
+// @Summary Get OAuth2 Consent Request
+// @Description Retrieves the details of an active OAuth2 consent challenge, including requested scopes and client tenant context.
+// @Tags Auth-Admin
+// @Produce json
+// @Param consent_challenge query string true "The cryptographic consent challenge ID"
+// @Success 200 {object} map[string]interface{} "Returns consent request details along with client and tenant information"
+// @Failure 400 {object} payload.AppError "consent_challenge is required"
+// @Failure 404 {object} payload.AppError "Consent request not found"
+// @Failure 500 {object} payload.AppError "Failed to fetch client details"
+// @Router /admin/consent [get]
 func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
 	req, err := h.AuthReqUseCase.GetConsentRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Consent request not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "Consent request not found", err))
 		return
 	}
 
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.ClientID)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to fetch client details", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to fetch client details", err))
 		return
 	}
 
@@ -153,16 +194,28 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, responsePayload)
 }
 
+// AcceptConsentRequest godoc
+// @Summary Accept OAuth2 Consent Request
+// @Description Accepts a consent request, granting the requested scopes and audiences to the OAuth2 client.
+// @Tags Auth-Admin
+// @Accept json
+// @Produce json
+// @Param consent_challenge query string true "The cryptographic consent challenge ID"
+// @Param request body payload.AcceptConsentRequest true "Consent acceptance payload with granted scopes/audiences"
+// @Success 200 {object} map[string]string "Returns redirect_to URL containing the consent verifier"
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
+// @Failure 500 {object} payload.AppError "Failed to accept consent request"
+// @Router /admin/consent/accept [post]
 func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
-	var req dto.AcceptConsentRequest
+	var req payload.AcceptConsentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -178,7 +231,7 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to accept consent request", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept consent request", err))
 		return
 	}
 
@@ -190,16 +243,28 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
+// RejectConsentRequest godoc
+// @Summary Reject OAuth2 Consent Request
+// @Description Rejects a consent request (e.g., user denied access to scopes) and aborts the OAuth2 flow.
+// @Tags Auth-Admin
+// @Accept json
+// @Produce json
+// @Param consent_challenge query string true "The cryptographic consent challenge ID"
+// @Param request body payload.RejectRequestPayload true "Rejection payload containing error code and description"
+// @Success 200 {object} map[string]string "Returns redirect_to URL containing error details"
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
+// @Failure 500 {object} payload.AppError "Failed to reject consent request"
+// @Router /admin/consent/reject [post]
 func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
 		return
 	}
 
-	var req dto.RejectRequestPayload
+	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -212,7 +277,7 @@ func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
 		return
 	}
 	logger.FromGin(c).Info("Consent request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))

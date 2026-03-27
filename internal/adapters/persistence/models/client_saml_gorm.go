@@ -5,30 +5,30 @@ import (
 	"gorm.io/gorm"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 )
 
 type SAMLClientGORM struct {
-	ID                      string                                 `gorm:"primaryKey;type:varchar(255)"`
-	TenantID                string                                 `gorm:"type:varchar(255);not null;index"`
-	Name                    string                                 `gorm:"type:varchar(255);not null"`
-	EntityID                string                                 `gorm:"type:varchar(255);not null"`
-	ACSURL                  string                                 `gorm:"type:text;not null"`
-	SLOURL                  string                                 `gorm:"type:text"`
-	SPCertificate           string                                 `gorm:"type:text"`
-	SPEncryptionCertificate string                                 `gorm:"type:text"`
-	MetadataURL             string                                 `gorm:"type:text"`
-	AttributeMapping        map[string]entity.AttributeMappingRule `gorm:"serializer:json"`
-	AllowedScopes           pq.StringArray                         `gorm:"type:text[]"`
-	ForceAuthn              bool                                   `gorm:"default:false"`
-	SignResponse            bool                                   `gorm:"default:true"`
-	SignAssertion           bool                                   `gorm:"default:true"`
-	EncryptAssertion        bool                                   `gorm:"default:false"`
-	Active                  bool                                   `gorm:"default:true;index"`
-	CreatedAt               time.Time                              `gorm:"autoCreateTime"`
-	UpdatedAt               time.Time                              `gorm:"autoUpdateTime"`
-	DeletedAt               gorm.DeletedAt                         `gorm:"index"`
+	ID                      string                                `gorm:"primaryKey;type:varchar(255)"`
+	TenantID                string                                `gorm:"type:varchar(255);not null;index"`
+	Name                    string                                `gorm:"type:varchar(255);not null"`
+	EntityID                string                                `gorm:"type:varchar(255);not null"`
+	ACSURL                  string                                `gorm:"type:text;not null"`
+	SLOURL                  string                                `gorm:"type:text"`
+	SPCertificate           string                                `gorm:"type:text"`
+	SPEncryptionCertificate string                                `gorm:"type:text"`
+	MetadataURL             string                                `gorm:"type:text"`
+	AttributeMapping        map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AllowedScopes           pq.StringArray                        `gorm:"type:text[]"`
+	ForceAuthn              bool                                  `gorm:"default:false"`
+	SignResponse            bool                                  `gorm:"default:true"`
+	SignAssertion           bool                                  `gorm:"default:true"`
+	EncryptAssertion        bool                                  `gorm:"default:false"`
+	Active                  bool                                  `gorm:"default:true;index"`
+	CreatedAt               time.Time                             `gorm:"autoCreateTime"`
+	UpdatedAt               time.Time                             `gorm:"autoUpdateTime"`
+	DeletedAt               gorm.DeletedAt                        `gorm:"index"`
 }
 
 func (SAMLClientGORM) TableName() string { return "saml_clients" }
@@ -40,8 +40,8 @@ func (c *SAMLClientGORM) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-func (m *SAMLClientGORM) ToDomain() *entity.SAMLClient {
-	return &entity.SAMLClient{
+func (m *SAMLClientGORM) ToDomain() *model.SAMLClient {
+	return &model.SAMLClient{
 		ID:                      m.ID,
 		TenantID:                m.TenantID,
 		Name:                    m.Name,
@@ -63,7 +63,7 @@ func (m *SAMLClientGORM) ToDomain() *entity.SAMLClient {
 	}
 }
 
-func FromDomainSAMLClient(e *entity.SAMLClient) *SAMLClientGORM {
+func FromDomainSAMLClient(e *model.SAMLClient) *SAMLClientGORM {
 	return &SAMLClientGORM{
 		ID:                      e.ID,
 		TenantID:                e.TenantID,

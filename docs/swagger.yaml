@@ -1,0 +1,3107 @@
+definitions:
+  handlers.CreateWebhookRequest:
+    properties:
+      events:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      tenant_ids:
+        items:
+          type: string
+        type: array
+      url:
+        type: string
+    required:
+    - events
+    - name
+    - tenant_ids
+    - url
+    type: object
+  model.AttributeMappingRule:
+    properties:
+      fallback:
+        type: string
+      source:
+        type: string
+      target:
+        type: string
+      target_scopes:
+        items:
+          type: string
+        type: array
+      type:
+        type: string
+      value:
+        type: string
+    type: object
+  model.OAuth2Client:
+    properties:
+      access_token_lifespan:
+        type: string
+      allowed_cors_origins:
+        items:
+          type: string
+        type: array
+      app_id:
+        type: string
+      audience:
+        items:
+          type: string
+        type: array
+      backchannel_logout_uri:
+        type: string
+      client_id:
+        type: string
+      client_secret:
+        type: string
+      created_at:
+        type: string
+      enforce_pkce:
+        type: boolean
+      grant_types:
+        items:
+          type: string
+        type: array
+      id_token_lifespan:
+        type: string
+      name:
+        type: string
+      post_logout_redirect_uris:
+        items:
+          type: string
+        type: array
+      public:
+        type: boolean
+      redirect_uris:
+        items:
+          type: string
+        type: array
+      refresh_token_lifespan:
+        type: string
+      response_modes:
+        items:
+          type: string
+        type: array
+      response_types:
+        items:
+          type: string
+        type: array
+      scopes:
+        items:
+          type: string
+        type: array
+      skip_consent:
+        type: boolean
+      subject_type:
+        type: string
+      tenant_id:
+        type: string
+      token_endpoint_auth_method:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.OIDCConnection:
+    properties:
+      active:
+        type: boolean
+      attribute_mapping:
+        additionalProperties:
+          $ref: '#/definitions/model.AttributeMappingRule'
+        type: object
+      authorization_endpoint:
+        type: string
+      client_id:
+        type: string
+      client_secret:
+        type: string
+      created_at:
+        type: string
+      end_session_endpoint:
+        type: string
+      id:
+        type: string
+      issuer_url:
+        type: string
+      jwks_uri:
+        type: string
+      name:
+        type: string
+      scopes:
+        items:
+          type: string
+        type: array
+      tenant_id:
+        type: string
+      token_endpoint:
+        type: string
+      updated_at:
+        type: string
+      userinfo_endpoint:
+        type: string
+    type: object
+  model.SAMLClient:
+    properties:
+      acs_url:
+        type: string
+      active:
+        type: boolean
+      allowed_scopes:
+        items:
+          type: string
+        type: array
+      attribute_mapping:
+        additionalProperties:
+          $ref: '#/definitions/model.AttributeMappingRule'
+        type: object
+      created_at:
+        type: string
+      encrypt_assertion:
+        type: boolean
+      entity_id:
+        type: string
+      force_authn:
+        type: boolean
+      id:
+        type: string
+      metadata_url:
+        type: string
+      name:
+        type: string
+      sign_assertion:
+        type: boolean
+      sign_response:
+        type: boolean
+      slo_url:
+        type: string
+      tenant_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.SAMLConnection:
+    properties:
+      active:
+        type: boolean
+      attribute_mapping:
+        additionalProperties:
+          $ref: '#/definitions/model.AttributeMappingRule'
+        type: object
+      created_at:
+        type: string
+      force_authn:
+        type: boolean
+      id:
+        type: string
+      idp_certificate:
+        type: string
+      idp_encryption_certificate:
+        type: string
+      idp_entity_id:
+        type: string
+      idp_metadata_xml:
+        type: string
+      idp_single_sign_on:
+        type: string
+      idp_slo_url:
+        type: string
+      metadata_url:
+        type: string
+      name:
+        type: string
+      sign_request:
+        type: boolean
+      sp_private_key:
+        type: string
+      tenant_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.Scope:
+    properties:
+      active:
+        type: boolean
+      claims:
+        items:
+          type: string
+        type: array
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_system:
+        type: boolean
+      name:
+        type: string
+      tenant_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.Tenant:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      issuer_url:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.Webhook:
+    properties:
+      active:
+        type: boolean
+      created_at:
+        type: string
+      events:
+        items:
+          type: string
+        type: array
+      failure_count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      tenant_ids:
+        items:
+          type: string
+        type: array
+      updated_at:
+        type: string
+      url:
+        type: string
+    type: object
+  payload.AcceptConsentRequest:
+    properties:
+      grant_audience:
+        example:
+        - api.shyntr.internal
+        items:
+          type: string
+        type: array
+      grant_scope:
+        example:
+        - openid
+        - profile
+        - email
+        items:
+          type: string
+        type: array
+      remember:
+        example: true
+        type: boolean
+      remember_for:
+        example: 3600
+        type: integer
+      session:
+        type: object
+    type: object
+  payload.AcceptLoginRequest:
+    properties:
+      context:
+        type: object
+      remember:
+        example: false
+        type: boolean
+      remember_for:
+        example: 0
+        type: integer
+      subject:
+        example: usr_9f8b7c6d5e4a3b2c1
+        type: string
+    required:
+    - subject
+    type: object
+  payload.AppError:
+    properties:
+      status_code:
+        example: 400
+        type: integer
+      user_message:
+        example: Invalid input provided
+        type: string
+    type: object
+  payload.CreateOAuth2ClientRequest:
+    properties:
+      allowed_cors_origins:
+        example:
+        - https://app.example.com
+        items:
+          type: string
+        type: array
+      audience:
+        example:
+        - api-service
+        items:
+          type: string
+        type: array
+      backchannel_logout_uri:
+        example: https://api.example.com/backchannel-logout
+        type: string
+      client_id:
+        example: my-web-app
+        type: string
+      client_secret:
+        example: super-secure-secret-key
+        type: string
+      enforce_pkce:
+        example: true
+        type: boolean
+      grant_types:
+        example:
+        - authorization_code
+        - refresh_token
+        items:
+          type: string
+        type: array
+      jwks:
+        type: object
+      name:
+        example: My Frontend Application
+        type: string
+      post_logout_redirect_uris:
+        example:
+        - https://app.example.com/logout
+        items:
+          type: string
+        type: array
+      public:
+        example: false
+        type: boolean
+      redirect_uris:
+        example:
+        - https://app.example.com/callback
+        items:
+          type: string
+        type: array
+      response_modes:
+        example:
+        - query
+        - form_post
+        items:
+          type: string
+        type: array
+      response_types:
+        example:
+        - code
+        items:
+          type: string
+        type: array
+      scopes:
+        example:
+        - openid
+        - profile
+        - email
+        - offline_access
+        items:
+          type: string
+        type: array
+      subject_type:
+        example: public
+        type: string
+      tenant_id:
+        example: default
+        type: string
+      token_endpoint_auth_method:
+        example: client_secret_basic
+        type: string
+    required:
+    - grant_types
+    - name
+    - redirect_uris
+    - tenant_id
+    type: object
+  payload.CreateOIDCConnectionRequest:
+    properties:
+      attribute_mapping:
+        type: object
+      authorization_endpoint:
+        example: https://accounts.google.com/o/oauth2/v2/auth
+        type: string
+      client_id:
+        example: google-client-id.apps.googleusercontent.com
+        type: string
+      client_secret:
+        example: YOUR_SECURE_CLIENT_SECRET
+        type: string
+      end_session_endpoint:
+        example: https://oauth2.googleapis.com/revoke
+        type: string
+      id:
+        example: conn_oidc_123
+        type: string
+      issuer_url:
+        example: https://accounts.google.com
+        type: string
+      jwks_uri:
+        example: https://www.googleapis.com/oauth2/v3/certs
+        type: string
+      name:
+        example: Google Workspace SSO
+        type: string
+      scopes:
+        example:
+        - openid
+        - profile
+        - email
+        items:
+          type: string
+        type: array
+      tenant_id:
+        example: tnt_alpha01
+        type: string
+      token_endpoint:
+        example: https://oauth2.googleapis.com/token
+        type: string
+      user_info_endpoint:
+        example: https://openidconnect.googleapis.com/v1/userinfo
+        type: string
+    required:
+    - client_id
+    - issuer_url
+    - name
+    - scopes
+    - tenant_id
+    type: object
+  payload.CreateSAMLClientRequest:
+    properties:
+      acs_url:
+        example: https://finance.acme.corp/saml/acs
+        type: string
+      allowed_scopes:
+        example:
+        - email
+        - profile
+        - groups
+        items:
+          type: string
+        type: array
+      attribute_mapping:
+        type: object
+      encrypt_assertion:
+        example: false
+        type: boolean
+      entity_id:
+        example: https://finance.acme.corp/saml/metadata
+        type: string
+      force_authn:
+        example: true
+        type: boolean
+      metadata_url:
+        example: https://finance.acme.corp/saml/metadata.xml
+        type: string
+      name:
+        example: Acme Corp Finance App
+        type: string
+      sign_assertion:
+        example: true
+        type: boolean
+      sign_response:
+        example: true
+        type: boolean
+      slo_url:
+        example: https://finance.acme.corp/saml/slo
+        type: string
+      sp_certificate:
+        example: MIID...[Base64_Cert]...==
+        type: string
+      sp_encryption_certificate:
+        example: MIID...[Base64_Cert]...==
+        type: string
+      tenant_id:
+        example: tnt_alpha01
+        type: string
+    type: object
+  payload.CreateSAMLConnectionRequest:
+    properties:
+      attribute_mapping:
+        type: object
+      force_authn:
+        example: false
+        type: boolean
+      id:
+        example: conn_saml_123
+        type: string
+      idp_certificate:
+        example: MIID...[Base64_Cert]...==
+        type: string
+      idp_encryption_certificate:
+        type: string
+      idp_entity_id:
+        example: http://www.okta.com/exk12345
+        type: string
+      idp_metadata_xml:
+        example: <md:EntityDescriptor>...</md:EntityDescriptor>
+        type: string
+      idp_single_sign_on:
+        example: https://corp.okta.com/app/shyntr/exk12345/sso/saml
+        type: string
+      idp_slo_url:
+        example: https://corp.okta.com/app/shyntr/exk12345/slo/saml
+        type: string
+      metadata_url:
+        example: https://corp.okta.com/app/shyntr/exk12345/sso/saml/metadata
+        type: string
+      name:
+        example: Corporate Okta SSO
+        type: string
+      sign_request:
+        example: true
+        type: boolean
+      sp_private_key:
+        example: |-
+          -----BEGIN PRIVATE KEY-----
+          ...
+          -----END PRIVATE KEY-----
+        type: string
+      tenant_id:
+        example: tnt_alpha01
+        type: string
+    required:
+    - name
+    - tenant_id
+    type: object
+  payload.CreateTenantRequest:
+    properties:
+      description:
+        example: Main production environment for Alpha Corp
+        type: string
+      display_name:
+        example: Alpha Corp Production
+        type: string
+      id:
+        example: tnt_alpha01
+        type: string
+      name:
+        example: alpha-production
+        type: string
+    required:
+    - name
+    type: object
+  payload.RejectRequestPayload:
+    properties:
+      error:
+        example: access_denied
+        type: string
+      error_description:
+        example: The resource owner or authorization server denied the request.
+        type: string
+    required:
+    - error
+    type: object
+  payload.TenantResponse:
+    properties:
+      description:
+        example: Main production environment for Alpha Corp
+        type: string
+      display_name:
+        example: Alpha Corp Production
+        type: string
+      id:
+        example: tnt_alpha01
+        type: string
+      issuer_url:
+        example: https://api.shyntr.internal/t/tnt_alpha01
+        type: string
+      name:
+        example: alpha-production
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Protocol Agnostic Zero Trust Identity Broker
+  title: Shyntr Identity Hub API
+  version: "1.0"
+paths:
+  /.well-known/jwks.json:
+    get:
+      description: Returns the public keys used by the Authorization Server to sign
+        JWTs (like ID Tokens). Used by clients to verify signatures.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The JWKS document containing an array of keys
+          schema:
+            additionalProperties: true
+            type: object
+      summary: JSON Web Key Set (JWKS) Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /.well-known/openid-configuration:
+    get:
+      description: Returns the OIDC Provider Configuration Document. Details the supported
+        scopes, claims, and endpoints for a specific tenant.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The OIDC discovery metadata document
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Tenant not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: OpenID Connect Discovery Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /admin/consent:
+    get:
+      description: Retrieves the details of an active OAuth2 consent challenge, including
+        requested scopes and client tenant context.
+      parameters:
+      - description: The cryptographic consent challenge ID
+        in: query
+        name: consent_challenge
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns consent request details along with client and tenant
+            information
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: consent_challenge is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "404":
+          description: Consent request not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to fetch client details
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Get OAuth2 Consent Request
+      tags:
+      - Auth-Admin
+  /admin/consent/accept:
+    post:
+      consumes:
+      - application/json
+      description: Accepts a consent request, granting the requested scopes and audiences
+        to the OAuth2 client.
+      parameters:
+      - description: The cryptographic consent challenge ID
+        in: query
+        name: consent_challenge
+        required: true
+        type: string
+      - description: Consent acceptance payload with granted scopes/audiences
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.AcceptConsentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns redirect_to URL containing the consent verifier
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload or missing challenge
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to accept consent request
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Accept OAuth2 Consent Request
+      tags:
+      - Auth-Admin
+  /admin/consent/reject:
+    post:
+      consumes:
+      - application/json
+      description: Rejects a consent request (e.g., user denied access to scopes)
+        and aborts the OAuth2 flow.
+      parameters:
+      - description: The cryptographic consent challenge ID
+        in: query
+        name: consent_challenge
+        required: true
+        type: string
+      - description: Rejection payload containing error code and description
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.RejectRequestPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns redirect_to URL containing error details
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload or missing challenge
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to reject consent request
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Reject OAuth2 Consent Request
+      tags:
+      - Auth-Admin
+  /admin/login:
+    get:
+      description: Retrieves the details of an active OAuth2 login challenge. Acts
+        as an internal IdP trust boundary.
+      parameters:
+      - description: The cryptographic login challenge ID
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns the login request details
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: login_challenge is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "404":
+          description: Login request not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Get OAuth2 Login Request
+      tags:
+      - Auth-Admin
+  /admin/login/accept:
+    post:
+      consumes:
+      - application/json
+      description: Accepts a login request and confirms the user's identity. Returns
+        a redirection URL to continue the OAuth2 flow.
+      parameters:
+      - description: The cryptographic login challenge ID
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      - description: Login acceptance payload containing subject and session preferences
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.AcceptLoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns redirect_to URL containing the login verifier
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload or missing challenge
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to accept login request
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Accept OAuth2 Login Request
+      tags:
+      - Auth-Admin
+  /admin/login/reject:
+    post:
+      consumes:
+      - application/json
+      description: Rejects a login request (e.g., due to invalid credentials or user
+        denial) and aborts the OAuth2 flow.
+      parameters:
+      - description: The cryptographic login challenge ID
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      - description: Rejection payload containing error code and description
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.RejectRequestPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns redirect_to URL containing error details
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload or missing challenge
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to reject login request
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Reject OAuth2 Login Request
+      tags:
+      - Auth-Admin
+  /admin/management/clients:
+    get:
+      description: Lists all OAuth2/OIDC clients across the system. Secrets are masked.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OAuth2Client'
+            type: array
+        "500":
+          description: Failed to retrieve clients
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List All OIDC Clients
+      tags:
+      - OAuth2 Clients
+    post:
+      consumes:
+      - application/json
+      description: Registers a new OAuth2/OIDC client under the specified tenant enforcing
+        OAuth 2.1 standards.
+      parameters:
+      - description: Client Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateOAuth2ClientRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.CreateOAuth2ClientRequest'
+        "400":
+          description: Invalid request payload or tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create OIDC req
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create OIDC Client
+      tags:
+      - OAuth2 Clients
+  /admin/management/clients/{id}:
+    get:
+      description: Retrieves details of a specific OAuth2/OIDC client. Secrets are
+        masked.
+      parameters:
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.OAuth2Client'
+        "404":
+          description: OIDC Client not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get OIDC Client
+      tags:
+      - OAuth2 Clients
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing OAuth2/OIDC client. Pass "*****" or empty string
+        to keep the existing secret.
+      parameters:
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Client Update Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateOAuth2ClientRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "404":
+          description: OIDC Client not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update OIDC client
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update OIDC Client
+      tags:
+      - OAuth2 Clients
+  /admin/management/clients/{tenant_id}/{id}:
+    delete:
+      description: Deletes an OAuth2/OIDC client from a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete OIDC client
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete OIDC Client
+      tags:
+      - OAuth2 Clients
+  /admin/management/dashboard/stats:
+    get:
+      description: Retrieves global or tenant-specific usage statistics and active
+        connection counts.
+      parameters:
+      - description: Tenant ID (for filtering)
+        in: query
+        name: tenant_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns system statistics and recent activity
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get Dashboard Statistics
+      tags:
+      - Dashboard
+  /admin/management/oidc-connections:
+    get:
+      description: Lists all federated OIDC Identity Providers.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OIDCConnection'
+            type: array
+        "500":
+          description: Failed to retrieve OIDC connections
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List All OIDC Connections
+      tags:
+      - OIDC Connections
+    post:
+      consumes:
+      - application/json
+      description: Registers an external OpenID Connect Identity Provider for federated
+        authentication.
+      parameters:
+      - description: OIDC Connection Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateOIDCConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.CreateOIDCConnectionRequest'
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create OIDC connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create OIDC Connection (IdP)
+      tags:
+      - OIDC Connections
+  /admin/management/oidc-connections/{id}:
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing OIDC Identity Provider.
+      parameters:
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: OIDC Connection Update Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateOIDCConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update OIDC connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update OIDC Connection
+      tags:
+      - OIDC Connections
+  /admin/management/oidc-connections/{tenant_id}/{id}:
+    delete:
+      description: Deletes a federated OIDC Identity Provider from a tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete OIDC connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete OIDC Connection
+      tags:
+      - OIDC Connections
+    get:
+      description: Retrieves details of a specific OIDC Identity Provider.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.OIDCConnection'
+        "404":
+          description: OIDC Connection not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get OIDC Connection
+      tags:
+      - OIDC Connections
+  /admin/management/saml-clients:
+    get:
+      description: Lists all SAML Service Providers globally across the hub.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLClient'
+            type: array
+        "500":
+          description: Failed to retrieve SAML clients
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List All SAML Clients
+      tags:
+      - SAML Clients
+    post:
+      consumes:
+      - application/json
+      description: Registers a legacy SAML Service Provider in the system for federation.
+      parameters:
+      - description: SAML Client Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateSAMLClientRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.CreateSAMLClientRequest'
+        "400":
+          description: Invalid request payload or tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create SAML client
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create SAML Client
+      tags:
+      - SAML Clients
+  /admin/management/saml-clients/{id}:
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing SAML Service Provider. Automatically pulls
+        metadata if MetadataURL is provided.
+      parameters:
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: SAML Client Update Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateSAMLClientRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload or missing required fields
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update SAML client
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update SAML Client
+      tags:
+      - SAML Clients
+  /admin/management/saml-clients/{tenant_id}/{id}:
+    delete:
+      description: Removes a SAML Service Provider from a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete SAML client
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete SAML Client
+      tags:
+      - SAML Clients
+    get:
+      description: Retrieves details of a specific SAML Service Provider.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.SAMLClient'
+        "404":
+          description: SAML Client not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get SAML Client
+      tags:
+      - SAML Clients
+  /admin/management/saml-clients/tenant/{tenant_id}:
+    get:
+      description: Lists all SAML Service Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLClient'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve SAML clients for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List SAML Clients By Tenant
+      tags:
+      - SAML Clients
+  /admin/management/saml-connections:
+    get:
+      description: Lists all federated SAML Identity Providers.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLConnection'
+            type: array
+        "500":
+          description: Failed to retrieve SAML connections
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List All SAML Connections
+      tags:
+      - SAML Connections
+    post:
+      consumes:
+      - application/json
+      description: Registers an external SAML Identity Provider for federated authentication.
+      parameters:
+      - description: SAML Connection Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateSAMLConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.CreateSAMLConnectionRequest'
+        "400":
+          description: Invalid request payload or missing metadata
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create SAML connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create SAML Connection (IdP)
+      tags:
+      - SAML Connections
+  /admin/management/saml-connections/{id}:
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing SAML Identity Provider.
+      parameters:
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: SAML Connection Update Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateSAMLConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update SAML connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update SAML Connection
+      tags:
+      - SAML Connections
+  /admin/management/saml-connections/{tenant_id}/{id}:
+    delete:
+      description: Deletes a federated SAML Identity Provider from a tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete SAML connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete SAML Connection
+      tags:
+      - SAML Connections
+    get:
+      description: Retrieves details of a specific SAML Identity Provider.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.SAMLConnection'
+        "404":
+          description: SAML Connection not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get SAML Connection
+      tags:
+      - SAML Connections
+  /admin/management/tenants:
+    get:
+      description: Lists all tenants configured within the identity hub.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.TenantResponse'
+            type: array
+        "500":
+          description: Failed to retrieve tenants
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List Tenants
+      tags:
+      - Tenants
+    post:
+      consumes:
+      - application/json
+      description: Creates a new isolated tenant environment with strict data boundaries.
+      parameters:
+      - description: Tenant Information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateTenantRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Tenant'
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create Tenant
+      tags:
+      - Tenants
+  /admin/management/tenants/{id}:
+    delete:
+      description: Performs a cascade delete of a tenant and all its associated resources.
+        The default tenant cannot be deleted.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Tenant and all associated resources deleted successfully'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Cannot delete the default tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to cascade delete tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete Tenant
+      tags:
+      - Tenants
+    get:
+      description: Retrieves a specific tenant by its ID.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Tenant'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get Tenant
+      tags:
+      - Tenants
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing tenant's details.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Tenant Update Information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateTenantRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update Tenant
+      tags:
+      - Tenants
+  /admin/management/tenants/{id}/scopes:
+    get:
+      description: Retrieves all authorization scopes associated with a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of scopes
+          schema:
+            items:
+              $ref: '#/definitions/model.Scope'
+            type: array
+        "500":
+          description: Failed to retrieve scopes
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List Scopes
+      tags:
+      - Scopes
+    post:
+      consumes:
+      - application/json
+      description: Creates a new authorization scope for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Scope configuration payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/model.Scope'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Scope created successfully
+          schema:
+            $ref: '#/definitions/model.Scope'
+        "400":
+          description: Invalid payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create scope
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create Scope
+      tags:
+      - Scopes
+  /admin/management/tenants/{id}/scopes/{scope_id}:
+    delete:
+      description: Removes an authorization scope from a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Scope ID
+        in: path
+        name: scope_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete scope
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete Scope
+      tags:
+      - Scopes
+    get:
+      description: Retrieves the details of a specific authorization scope within
+        a tenant boundary.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Scope ID
+        in: path
+        name: scope_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scope details
+          schema:
+            $ref: '#/definitions/model.Scope'
+        "404":
+          description: Scope not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get Scope
+      tags:
+      - Scopes
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing authorization scope configuration.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Scope ID
+        in: path
+        name: scope_id
+        required: true
+        type: string
+      - description: Scope update payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/model.Scope'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update scope
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update Scope
+      tags:
+      - Scopes
+  /admin/management/tenants/{tenant_id}/clients:
+    get:
+      description: Lists all OAuth2/OIDC clients for a specific tenant. Secrets are
+        masked.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OAuth2Client'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve clients for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List OIDC Clients By Tenant
+      tags:
+      - OAuth2 Clients
+  /admin/management/tenants/{tenant_id}/oidc-connections:
+    get:
+      description: Lists all federated OIDC Identity Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OIDCConnection'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve OIDC connections for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List OIDC Connections By Tenant
+      tags:
+      - OIDC Connections
+  /admin/management/tenants/{tenant_id}/saml-connections:
+    get:
+      description: Lists all federated SAML Identity Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLConnection'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve SAML connections for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List SAML Connections By Tenant
+      tags:
+      - SAML Connections
+  /audit/{tenant_id}:
+    get:
+      description: Retrieves paginated audit logs for a specific tenant.
+      parameters:
+      - description: Tenant ID for isolation boundary
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - default: 100
+        description: Number of records to return
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Number of records to skip
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of tenant audit logs
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: error - Failed to get audit logs
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get Tenant Audit Logs
+      tags:
+      - Audit
+  /auth/methods:
+    get:
+      description: Retrieves available identity providers and authentication methods
+        for a given cryptographic login challenge. This discovery endpoint establishes
+        the initial context for the user authentication journey.
+      parameters:
+      - description: The cryptographic login challenge ID
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns the challenge ID, tenant ID, and a list of available
+            login methods
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: missing_login_challenge or invalid challenge
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: Get Login Methods
+      tags:
+      - Auth-Login
+  /health:
+    get:
+      description: Evaluates the health of the Shyntr service and its underlying database
+        connection. This is a public endpoint used for observability and orchestration
+        readiness probes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns service and database connection status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health Check
+      tags:
+      - Health
+  /oauth2/auth:
+    get:
+      description: Handles the initial step of the OAuth 2.1 authorization code flow.
+        Enforces PKCE, tenant boundaries, and redirects the user agent to the login
+        or consent UI.
+      parameters:
+      - description: OAuth2 Client ID
+        in: query
+        name: client_id
+        required: true
+        type: string
+      - description: Must be 'code'
+        in: query
+        name: response_type
+        required: true
+        type: string
+      - description: Registered redirect URI
+        in: query
+        name: redirect_uri
+        required: true
+        type: string
+      - description: Requested space-separated scopes
+        in: query
+        name: scope
+        type: string
+      - description: Opaque value used to maintain state between the request and the
+          callback
+        in: query
+        name: state
+        type: string
+      - description: PKCE code challenge (Required if client enforces PKCE)
+        in: query
+        name: code_challenge
+        type: string
+      - description: PKCE method, e.g., 'S256'
+        in: query
+        name: code_challenge_method
+        type: string
+      - description: Forces login or consent (e.g., 'login', 'consent', 'none')
+        in: query
+        name: prompt
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects to login UI, consent UI, or the client's redirect
+            URI with an authorization code
+          schema:
+            type: string
+        "400":
+          description: Bad Request (e.g., missing PKCE, invalid redirect URI)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden (e.g., client not found in tenant)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: OAuth2 Authorization Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /oauth2/introspect:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Allows a protected resource (e.g., an API gateway) to query the
+        active state and metadata of a given token.
+      parameters:
+      - description: The token to introspect
+        in: formData
+        name: token
+        required: true
+        type: string
+      - description: OAuth2 Client ID
+        in: formData
+        name: client_id
+        type: string
+      - description: OAuth2 Client Secret
+        in: formData
+        name: client_secret
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Introspection response (active boolean and token metadata)
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Token Introspection Endpoint (RFC 7662)
+      tags:
+      - OAuth2/OIDC Core
+  /oauth2/logout:
+    get:
+      description: Terminates the user's session. Supports id_token_hint for validation
+        and post_logout_redirect_uri for safe redirection. Also propagates logout
+        to federated IdPs if applicable.
+      parameters:
+      - description: Previously issued ID Token to validate the logout request
+        in: query
+        name: id_token_hint
+        type: string
+      - description: Registered URI to redirect after successful logout
+        in: query
+        name: post_logout_redirect_uri
+        type: string
+      - description: Opaque value to maintain state
+        in: query
+        name: state
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Returns a success message if no redirect URI is provided
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "302":
+          description: Redirects to post_logout_redirect_uri
+          schema:
+            type: string
+      summary: OpenID Connect RP-Initiated Logout
+      tags:
+      - OAuth2/OIDC Core
+  /oauth2/revoke:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Allows clients to notify the authorization server that a previously
+        obtained refresh or access token is no longer needed.
+      parameters:
+      - description: The token to revoke
+        in: formData
+        name: token
+        required: true
+        type: string
+      - description: Hint about the token type (e.g., 'refresh_token' or 'access_token')
+        in: formData
+        name: token_type_hint
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Empty response on successful revocation (or if token didn't
+            exist)
+      summary: Token Revocation Endpoint (RFC 7009)
+      tags:
+      - OAuth2/OIDC Core
+  /oauth2/token:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Issues access tokens, ID tokens, and refresh tokens based on the
+        provided grant type (e.g., authorization_code, client_credentials, refresh_token).
+        Enforces tenant isolation.
+      parameters:
+      - description: Grant Type (e.g., 'authorization_code', 'client_credentials')
+        in: formData
+        name: grant_type
+        required: true
+        type: string
+      - description: OAuth2 Client ID
+        in: formData
+        name: client_id
+        type: string
+      - description: OAuth2 Client Secret (for basic/post auth)
+        in: formData
+        name: client_secret
+        type: string
+      - description: Authorization code (if grant_type=authorization_code)
+        in: formData
+        name: code
+        type: string
+      - description: Registered redirect URI (must match the one in the auth request)
+        in: formData
+        name: redirect_uri
+        type: string
+      - description: PKCE code verifier (if PKCE was used)
+        in: formData
+        name: code_verifier
+        type: string
+      - description: Refresh token (if grant_type=refresh_token)
+        in: formData
+        name: refresh_token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns access_token, id_token, refresh_token, and expires_in
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request (e.g., invalid grant, invalid client)
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OAuth2 Token Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/.well-known/jwks.json:
+    get:
+      description: Returns the public keys used by the Authorization Server to sign
+        JWTs (like ID Tokens). Used by clients to verify signatures.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The JWKS document containing an array of keys
+          schema:
+            additionalProperties: true
+            type: object
+      summary: JSON Web Key Set (JWKS) Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/.well-known/openid-configuration:
+    get:
+      description: Returns the OIDC Provider Configuration Document. Details the supported
+        scopes, claims, and endpoints for a specific tenant.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The OIDC discovery metadata document
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Tenant not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: OpenID Connect Discovery Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oauth2/auth:
+    get:
+      description: Handles the initial step of the OAuth 2.1 authorization code flow.
+        Enforces PKCE, tenant boundaries, and redirects the user agent to the login
+        or consent UI.
+      parameters:
+      - description: OAuth2 Client ID
+        in: query
+        name: client_id
+        required: true
+        type: string
+      - description: Must be 'code'
+        in: query
+        name: response_type
+        required: true
+        type: string
+      - description: Registered redirect URI
+        in: query
+        name: redirect_uri
+        required: true
+        type: string
+      - description: Requested space-separated scopes
+        in: query
+        name: scope
+        type: string
+      - description: Opaque value used to maintain state between the request and the
+          callback
+        in: query
+        name: state
+        type: string
+      - description: PKCE code challenge (Required if client enforces PKCE)
+        in: query
+        name: code_challenge
+        type: string
+      - description: PKCE method, e.g., 'S256'
+        in: query
+        name: code_challenge_method
+        type: string
+      - description: Forces login or consent (e.g., 'login', 'consent', 'none')
+        in: query
+        name: prompt
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects to login UI, consent UI, or the client's redirect
+            URI with an authorization code
+          schema:
+            type: string
+        "400":
+          description: Bad Request (e.g., missing PKCE, invalid redirect URI)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden (e.g., client not found in tenant)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: OAuth2 Authorization Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oauth2/introspect:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Allows a protected resource (e.g., an API gateway) to query the
+        active state and metadata of a given token.
+      parameters:
+      - description: The token to introspect
+        in: formData
+        name: token
+        required: true
+        type: string
+      - description: OAuth2 Client ID
+        in: formData
+        name: client_id
+        type: string
+      - description: OAuth2 Client Secret
+        in: formData
+        name: client_secret
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Introspection response (active boolean and token metadata)
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Token Introspection Endpoint (RFC 7662)
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oauth2/logout:
+    get:
+      description: Terminates the user's session. Supports id_token_hint for validation
+        and post_logout_redirect_uri for safe redirection. Also propagates logout
+        to federated IdPs if applicable.
+      parameters:
+      - description: Previously issued ID Token to validate the logout request
+        in: query
+        name: id_token_hint
+        type: string
+      - description: Registered URI to redirect after successful logout
+        in: query
+        name: post_logout_redirect_uri
+        type: string
+      - description: Opaque value to maintain state
+        in: query
+        name: state
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Returns a success message if no redirect URI is provided
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "302":
+          description: Redirects to post_logout_redirect_uri
+          schema:
+            type: string
+      summary: OpenID Connect RP-Initiated Logout
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oauth2/revoke:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Allows clients to notify the authorization server that a previously
+        obtained refresh or access token is no longer needed.
+      parameters:
+      - description: The token to revoke
+        in: formData
+        name: token
+        required: true
+        type: string
+      - description: Hint about the token type (e.g., 'refresh_token' or 'access_token')
+        in: formData
+        name: token_type_hint
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Empty response on successful revocation (or if token didn't
+            exist)
+      summary: Token Revocation Endpoint (RFC 7009)
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oauth2/token:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Issues access tokens, ID tokens, and refresh tokens based on the
+        provided grant type (e.g., authorization_code, client_credentials, refresh_token).
+        Enforces tenant isolation.
+      parameters:
+      - description: Grant Type (e.g., 'authorization_code', 'client_credentials')
+        in: formData
+        name: grant_type
+        required: true
+        type: string
+      - description: OAuth2 Client ID
+        in: formData
+        name: client_id
+        type: string
+      - description: OAuth2 Client Secret (for basic/post auth)
+        in: formData
+        name: client_secret
+        type: string
+      - description: Authorization code (if grant_type=authorization_code)
+        in: formData
+        name: code
+        type: string
+      - description: Registered redirect URI (must match the one in the auth request)
+        in: formData
+        name: redirect_uri
+        type: string
+      - description: PKCE code verifier (if PKCE was used)
+        in: formData
+        name: code_verifier
+        type: string
+      - description: Refresh token (if grant_type=refresh_token)
+        in: formData
+        name: refresh_token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns access_token, id_token, refresh_token, and expires_in
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request (e.g., invalid grant, invalid client)
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OAuth2 Token Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /t/{tenant_id}/oidc/callback:
+    get:
+      description: Handles the callback from an external OIDC Identity Provider. Validates
+        state and CSRF, exchanges the authorization code for tokens, fetches UserInfo,
+        maps attributes, and resumes the original login flow.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Authorization code returned by the external IdP
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter to mitigate CSRF and restore context
+        in: query
+        name: state
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects back to the original protocol handler (SAML or OAuth2)
+            with a login_verifier
+          schema:
+            type: string
+        "400":
+          description: Bad Request (invalid or missing callback parameters)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden (CSRF validation failed, invalid state, or session
+            expired)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error (connection not found or mapping failed)
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      summary: OIDC Federation Callback
+      tags:
+      - OIDC Federation
+  /t/{tenant_id}/oidc/login/{connection_id}:
+    get:
+      description: Starts the login flow with an external OIDC Identity Provider (e.g.,
+        Google, Okta) for a specific tenant and connection. Generates CSRF tokens
+        and redirects the user.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: OIDC Connection ID
+        in: path
+        name: connection_id
+        required: true
+        type: string
+      - description: The active cryptographic login challenge ID
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects the user agent to the external Identity Provider's
+            authorization endpoint
+          schema:
+            type: string
+        "400":
+          description: Bad Request (missing tenant_id or login_challenge)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found (login request not found)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error (failed to initiate OIDC)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Initiate OIDC Federation Login
+      tags:
+      - OIDC Federation
+  /t/{tenant_id}/saml/idp/metadata:
+    get:
+      description: Returns the XML metadata document describing Shyntr's capabilities
+        as a SAML Identity Provider (IdP) for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - text/xml
+      responses:
+        "200":
+          description: SAML IdP Metadata XML
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get SAML Identity Provider Metadata
+      tags:
+      - SAML Core
+  /t/{tenant_id}/saml/idp/slo:
+    get:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Handles IdP-initiated or SP-initiated Single Logout requests. Clears
+        the local session and potentially notifies other connected applications.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: SAML LogoutRequest (SP-initiated)
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutResponse
+        in: query
+        name: SAMLResponse
+        type: string
+      - description: Relay state
+        in: query
+        name: RelayState
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML form posting the LogoutResponse
+          schema:
+            type: string
+        "400":
+          description: Invalid logout request or missing issuer
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Signature verification failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML IdP Single Logout
+      tags:
+      - SAML Core
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Handles IdP-initiated or SP-initiated Single Logout requests. Clears
+        the local session and potentially notifies other connected applications.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: SAML LogoutRequest (SP-initiated)
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutResponse
+        in: query
+        name: SAMLResponse
+        type: string
+      - description: Relay state
+        in: query
+        name: RelayState
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML form posting the LogoutResponse
+          schema:
+            type: string
+        "400":
+          description: Invalid logout request or missing issuer
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Signature verification failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML IdP Single Logout
+      tags:
+      - SAML Core
+  /t/{tenant_id}/saml/idp/sso:
+    get:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Receives an AuthnRequest from a Service Provider. Challenges the
+        user for authentication and issues a SAMLResponse containing assertions.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Deflated and Base64 encoded AuthnRequest (HTTP-Redirect)
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: Base64 encoded AuthnRequest (HTTP-POST)
+        in: formData
+        name: SAMLRequest
+        type: string
+      - description: Opaque state passed back to the SP
+        in: query
+        name: RelayState
+        type: string
+      - description: Internal verifier after a successful login challenge
+        in: query
+        name: login_verifier
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML form auto-posting the SAMLResponse to the SP
+          schema:
+            type: string
+        "302":
+          description: Redirects to login UI if unauthenticated
+          schema:
+            type: string
+        "400":
+          description: Invalid SAMLRequest or Login Verifier
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Unknown Service Provider
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML IdP Single Sign-On
+      tags:
+      - SAML Core
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Receives an AuthnRequest from a Service Provider. Challenges the
+        user for authentication and issues a SAMLResponse containing assertions.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Deflated and Base64 encoded AuthnRequest (HTTP-Redirect)
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: Base64 encoded AuthnRequest (HTTP-POST)
+        in: formData
+        name: SAMLRequest
+        type: string
+      - description: Opaque state passed back to the SP
+        in: query
+        name: RelayState
+        type: string
+      - description: Internal verifier after a successful login challenge
+        in: query
+        name: login_verifier
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML form auto-posting the SAMLResponse to the SP
+          schema:
+            type: string
+        "302":
+          description: Redirects to login UI if unauthenticated
+          schema:
+            type: string
+        "400":
+          description: Invalid SAMLRequest or Login Verifier
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Unknown Service Provider
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML IdP Single Sign-On
+      tags:
+      - SAML Core
+  /t/{tenant_id}/saml/login/{connection_id}:
+    get:
+      description: Starts the SAML SSO flow as a Service Provider against an external
+        Identity Provider. Generates an AuthnRequest and redirects the user.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: SAML Connection ID (IdP Reference)
+        in: path
+        name: connection_id
+        required: true
+        type: string
+      - description: Active login challenge
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects or posts an HTML form to the external IdP
+          schema:
+            type: string
+        "400":
+          description: Missing login challenge
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Login request not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: SSO initiation failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Initiate SAML SP Login
+      tags:
+      - SAML Federation
+  /t/{tenant_id}/saml/resume:
+    get:
+      description: Resumes the SAML SSO flow after a successful internal authentication
+        event.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Active login challenge identifier
+        in: query
+        name: login_challenge
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML form posting the SAMLResponse
+          schema:
+            type: string
+        "401":
+          description: Authentication pending
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Login request not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resume SAML Flow
+      tags:
+      - SAML Core
+  /t/{tenant_id}/saml/sp/acs:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Receives and validates the SAMLResponse from an external Identity
+        Provider. Prevents XML Signature Wrapping (XSW) and CSRF attacks.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Base64 encoded SAML Response
+        in: formData
+        name: SAMLResponse
+        required: true
+        type: string
+      - description: Relay state containing the login challenge
+        in: formData
+        name: RelayState
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects back to the originating protocol flow (OIDC or SAML)
+          schema:
+            type: string
+        "400":
+          description: Missing relay state
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Signature or Issuer validation failed (XSW blocked)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: CSRF validation failed or invalid session
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML Assertion Consumer Service (ACS)
+      tags:
+      - SAML Federation
+  /t/{tenant_id}/saml/sp/metadata:
+    get:
+      description: Returns the XML metadata document describing Shyntr's capabilities
+        as a SAML Service Provider (SP) for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - text/xml
+      responses:
+        "200":
+          description: SAML SP Metadata XML
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get SAML Service Provider Metadata
+      tags:
+      - SAML Core
+  /t/{tenant_id}/saml/sp/slo:
+    get:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Handles logout requests acting as a Service Provider against an
+        external IdP.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: SAML LogoutRequest
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutResponse
+        in: query
+        name: SAMLResponse
+        type: string
+      - description: IdP Connection ID for SP-initiated SLO
+        in: query
+        name: connection_id
+        type: string
+      - description: Relay state
+        in: query
+        name: RelayState
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Logout successful message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "302":
+          description: Redirects to external IdP or RelayState
+          schema:
+            type: string
+        "400":
+          description: Invalid logout request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML SP Single Logout
+      tags:
+      - SAML Federation
+  /t/{tenant_id}/userinfo:
+    get:
+      description: Returns Claims about the authenticated End-User. Requires a valid
+        Access Token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User claims (e.g., sub, email, name) scoped by RBAC rules
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized (missing or invalid token)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: OIDC UserInfo Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /userinfo:
+    get:
+      description: Returns Claims about the authenticated End-User. Requires a valid
+        Access Token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User claims (e.g., sub, email, name) scoped by RBAC rules
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized (missing or invalid token)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: OIDC UserInfo Endpoint
+      tags:
+      - OAuth2/OIDC Core
+  /webhooks:
+    post:
+      consumes:
+      - application/json
+      description: Registers a new webhook endpoint for event dispatching. Includes
+        strict SSRF protection to prevent internal network scanning.
+      parameters:
+      - description: Webhook configuration payload including target URL, events, and
+          bound tenants
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Successfully created webhook (returns secret ONLY ONCE for
+            signature verification)
+          schema:
+            $ref: '#/definitions/model.Webhook'
+        "400":
+          description: error - Invalid payload or SSRF blocked (resolves to internal
+            IP)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: error - Failed to create webhook
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create Webhook Destination
+      tags:
+      - Webhook
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

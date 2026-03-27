@@ -3,10 +3,10 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
 )
 
 type LoginHandler struct {
@@ -18,16 +18,25 @@ func NewLoginHandler(cfg *config.Config, MUC usecase.ManagementUseCase) *LoginHa
 	return &LoginHandler{Config: cfg, MUC: MUC}
 }
 
+// GetLoginMethods godoc
+// @Summary Get Login Methods
+// @Description Retrieves available identity providers and authentication methods for a given cryptographic login challenge. This discovery endpoint establishes the initial context for the user authentication journey.
+// @Tags Auth-Login
+// @Produce json
+// @Param login_challenge query string true "The cryptographic login challenge ID"
+// @Success 200 {object} map[string]interface{} "Returns the challenge ID, tenant ID, and a list of available login methods"
+// @Failure 400 {object} payload.AppError "missing_login_challenge or invalid challenge"
+// @Router /auth/methods [get]
 func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "missing_login_challenge", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "missing_login_challenge", nil))
 		return
 	}
 
 	methods, loginReq, err := h.MUC.GetLoginMethods(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, err.Error(), nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, err.Error(), nil))
 		return
 	}
 

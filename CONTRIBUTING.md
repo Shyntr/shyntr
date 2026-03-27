@@ -14,7 +14,7 @@ It is designed to be protocol-agnostic, supporting OAuth2, OIDC, and SAML native
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/nevzatcirak/shyntr.git](https://github.com/nevzatcirak/shyntr.git)
+    git clone [https://github.com/Shyntr/shyntr.git](https://github.com/Shyntr/shyntr.git)
     cd shyntr
     ```
 

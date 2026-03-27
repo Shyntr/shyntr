@@ -3,16 +3,20 @@ package http
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
+	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
+	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/handlers"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/middleware"
-	"github.com/nevzatcirak/shyntr/internal/application/mapper"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
 	"github.com/ory/fosite"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+
+	_ "github.com/Shyntr/shyntr/docs"
 )
 
 func SetupRouter(
@@ -32,9 +36,11 @@ func SetupRouter(
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
-	km *utils2.KeyManager,
+	km utils2.KeyManager,
 ) (*gin.Engine, *gin.Engine) {
 	attrMapper := mapper.New()
+
+	jwksCache := utils2.NewJWKSCache()
 
 	// Handlers
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
@@ -42,7 +48,7 @@ func SetupRouter(
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
 	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
-		connectionUseCase, tenantUseCase, scopeUseCase)
+		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
 	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,
@@ -216,12 +222,20 @@ func SetupRouter(
 			mgmtGroup.DELETE("/oidc-connections/:tenant_id/:id", mgmtHandler.DeleteOIDCConnection)
 
 			//Webhook
-			mgmtGroup.POST("/webhook", webhookHandler.Create)
+			mgmtGroup.POST("/webhooks", webhookHandler.Create)
 
 			//Audit
-			mgmtGroup.GET("/audit", auditHandler.Get)
+			mgmtGroup.GET("/audit/:tenant_id", auditHandler.Get)
 		}
 	}
 
 	return public, admin
+}
+
+func SetupSwaggerRouter() *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.StructuredLogger())
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	return r
 }

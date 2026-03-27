@@ -27,28 +27,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/beevik/etree"
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	"github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
 	goxmldsig "github.com/russellhaering/goxmldsig"
 )
 
 type SamlBuilderUseCase interface {
-	BuildServiceProvider(ctx context.Context, tenantID string, conn *entity.SAMLConnection) (*crewjamsaml.ServiceProvider, error)
+	BuildServiceProvider(ctx context.Context, tenantID string, conn *model.SAMLConnection) (*crewjamsaml.ServiceProvider, error)
 	InitiateSSO(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, string, error)
 	HandleACS(ctx context.Context, tenantID string, req *http.Request, possibleRequestID string) (*crewjamsaml.Assertion, string, error)
 	GetIdentityProvider(ctx context.Context, tenantID string) (*crewjamsaml.IdentityProvider, error)
 	GetServiceProvider(r *http.Request, serviceProviderID string) (*crewjamsaml.EntityDescriptor, error)
 	ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*crewjamsaml.AuthnRequest, error)
-	GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *entity.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error)
-	RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*entity.SAMLConnection, error)
+	GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error)
+	RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*model.SAMLConnection, error)
 	ParseLogoutRequest(req *http.Request) (*crewjamsaml.LogoutRequest, error)
-	GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *entity.SAMLClient, relayState string) (string, error)
+	GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *model.SAMLClient, relayState string) (string, error)
 	signElementXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error)
 	generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error)
 	VerifyRelayState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
@@ -58,12 +58,12 @@ type samlBuilderUseCase struct {
 	clientRepo port.SAMLClientRepository
 	connRepo   port.SAMLConnectionRepository
 	replayRepo port.SAMLReplayRepository
-	KeyMgr     *utils.KeyManager
+	KeyMgr     utils.KeyManager
 	Config     *config.Config
 }
 
 func NewSamlBuilderUseCase(clientRepo port.SAMLClientRepository, connRepo port.SAMLConnectionRepository,
-	replayRepo port.SAMLReplayRepository, km *utils.KeyManager, cfg *config.Config) SamlBuilderUseCase {
+	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config) SamlBuilderUseCase {
 	return &samlBuilderUseCase{
 		clientRepo: clientRepo,
 		connRepo:   connRepo,
@@ -88,7 +88,7 @@ type persistentAssertionMaker struct {
 func (s *SingleCertStore) Certificates() ([]*x509.Certificate, error) {
 	return []*x509.Certificate{s.Cert}, nil
 }
-func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID string, conn *entity.SAMLConnection) (*crewjamsaml.ServiceProvider, error) {
+func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID string, conn *model.SAMLConnection) (*crewjamsaml.ServiceProvider, error) {
 	baseURLStr := fmt.Sprintf("%s/t/%s/saml", s.Config.BaseIssuerURL, tenantID)
 
 	metadataURL, _ := url.Parse(baseURLStr + "/sp/metadata")
@@ -97,6 +97,7 @@ func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID 
 
 	var privKey *rsa.PrivateKey
 	var cert *x509.Certificate
+	var err error
 
 	if conn != nil && conn.SPPrivateKey != "" {
 		block, _ := pem.Decode([]byte(conn.SPPrivateKey))
@@ -121,7 +122,10 @@ func (s *samlBuilderUseCase) BuildServiceProvider(ctx context.Context, tenantID 
 			}
 		}
 	} else {
-		privKey, cert = s.KeyMgr.GetActiveKeys()
+		privKey, cert, _, err = s.KeyMgr.GetActiveKeys(ctx, "sig")
+		if err != nil {
+			return nil, errors.New("failed to load active SAML crypto keys")
+		}
 	}
 
 	if cert == nil || privKey == nil {
@@ -342,7 +346,13 @@ func (s *samlBuilderUseCase) GetIdentityProvider(ctx context.Context, tenantID s
 	ssoURL, _ := url.Parse(baseURLStr + "/idp/sso")
 	logoutURL, _ := url.Parse(baseURLStr + "/idp/slo")
 
-	privKey := s.KeyMgr.GetActivePrivateKey()
+	privKey, _, err := s.KeyMgr.GetActivePrivateKey(ctx, "sig")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load active signing key: %w", err)
+	}
+	if privKey == nil {
+		return nil, errors.New("active signing key is nil")
+	}
 	cert, err := s.generateSelfSignedCert(privKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate idp cert: %w", err)
@@ -510,7 +520,7 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 	return &authReq, nil
 }
 
-func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *entity.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error) {
+func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error) {
 	idp, err := s.GetIdentityProvider(ctx, tenantID)
 	if err != nil {
 		return "", err
@@ -749,14 +759,14 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
 }
 
-func (s *samlBuilderUseCase) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*entity.SAMLConnection, error) {
+func (s *samlBuilderUseCase) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*model.SAMLConnection, error) {
 	meta := &crewjamsaml.EntityDescriptor{}
 	if err := xml.Unmarshal([]byte(metadataXML), meta); err != nil {
 		return nil, err
 	}
 
 	//TODO
-	conn := &entity.SAMLConnection{
+	conn := &model.SAMLConnection{
 		TenantID:       tenantID,
 		Name:           name,
 		IdpMetadataXML: metadataXML,
@@ -802,8 +812,11 @@ func (s *samlBuilderUseCase) ParseLogoutRequest(req *http.Request) (*crewjamsaml
 	return &logoutReq, nil
 }
 
-func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *entity.SAMLClient, relayState string) (string, error) {
-	idp, _ := s.GetIdentityProvider(ctx, tenantID)
+func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *model.SAMLClient, relayState string) (string, error) {
+	idp, err := s.GetIdentityProvider(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 
 	resp := &crewjamsaml.LogoutResponse{
@@ -823,15 +836,24 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 		},
 	}
 
-	respBytes, _ := xml.Marshal(resp)
+	respBytes, err := xml.Marshal(resp)
+	if err != nil {
+		return "", err
+	}
 	docResp := etree.NewDocument()
 	if err := docResp.ReadFromBytes(respBytes); err != nil {
 		return "", err
 	}
-	finalXMLBytes, _ := docResp.WriteToBytes()
+	finalXMLBytes, err := docResp.WriteToBytes()
+	if err != nil {
+		return "", err
+	}
 
 	if sp.SignResponse {
-		finalXMLBytes, _ = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		finalXMLBytes, err = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign logout response: %w", err)
+		}
 	}
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)

@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/nevzatcirak/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"gorm.io/gorm"
 )
 

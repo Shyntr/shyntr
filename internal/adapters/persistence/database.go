@@ -1,12 +1,12 @@
-package data
+package persistence
 
 import (
 	"log"
 	"time"
 
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -46,7 +46,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.SAMLReplayCache{},
 		&models.OIDCConnectionGORM{},
 		&models.OAuth2SessionGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 		&models.LoginRequestGORM{},
 		&models.ConsentRequestGORM{},
 		&models.BlacklistedJTIGORM{},

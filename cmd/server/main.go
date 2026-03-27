@@ -1,8 +1,18 @@
 package main
 
+// @title Shyntr Identity Hub API
+// @version 1.0
+// @description Protocol Agnostic Zero Trust Identity Broker
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"encoding/xml"
 	"fmt"
 	"log"
@@ -13,22 +23,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/audit"
+	router "github.com/Shyntr/shyntr/internal/adapters/http"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	persistence "github.com/Shyntr/shyntr/internal/adapters/persistence"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/application/worker"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/audit"
-	router "github.com/nevzatcirak/shyntr/internal/adapters/http"
-	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
-	persistence "github.com/nevzatcirak/shyntr/internal/adapters/persistence"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/repository"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/application/worker"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	shcrypto "github.com/nevzatcirak/shyntr/pkg/crypto"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"github.com/ory/fosite"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -62,6 +72,14 @@ func main() {
 			if err := persistence.MigrateDB(db); err != nil {
 				log.Fatalf("Migration failed: %v", err)
 			}
+
+			logger.Log.Info("Running OAuth 2.1 security enforcements on existing data...")
+			if err := db.Exec("UPDATE o_auth2_clients SET enforce_pkce = true WHERE enforce_pkce = false").Error; err != nil {
+				logger.Log.Error("Failed to enforce PKCE on existing clients", zap.Error(err))
+			} else {
+				logger.Log.Info("PKCE enforced for all existing clients.")
+			}
+
 			logger.Log.Info("Database migration completed successfully.")
 			scopeRepo := repository.NewScopeRepository(db)
 			if err := utils2.SeedSystemScopesForTenant(context.Background(), scopeRepo, cfg.DefaultTenantID); err != nil {
@@ -76,7 +94,6 @@ func main() {
 	// TENANT COMMANDS
 	// ==========================================
 
-	// CREATE TENANT
 	var (
 		tenantID, tenantName, tenantDisplay, tenantDesc string
 	)
@@ -187,7 +204,7 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			if err := db.Delete(&models.TenantGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("DeleteByClient failed: %v", err)
 			}
 			auditLogger.Log(args[0], "system_cli", "cli.tenant.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{
 				"tenant_id": args[0],
@@ -248,6 +265,8 @@ func main() {
 	createScopeCmd.Flags().StringSliceVar(&scopeClaims, "claims", nil, "Comma separated claims (e.g. email,email_verified)")
 	createScopeCmd.Flags().BoolVar(&scopeIsSystem, "system", false, "Is System Scope?")
 
+	createScopeCmd.MarkFlagRequired("name")
+
 	var getScopeCmd = &cobra.Command{
 		Use:   "get-scope [id]",
 		Short: "Get scope details",
@@ -303,7 +322,7 @@ func main() {
 
 	var deleteScopeCmd = &cobra.Command{
 		Use:   "delete-scope [id]",
-		Short: "Delete a scope",
+		Short: "DeleteByClient a scope",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -320,7 +339,7 @@ func main() {
 			}
 
 			if err := db.Delete(&models.ScopeGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			log.Println("Scope deleted.")
 		},
@@ -330,9 +349,9 @@ func main() {
 	// ==========================================
 
 	var (
-		clientID, clientName, clientSecret                         string
-		redirectURIs, postLogoutURIs, clientScopes, clientAudience []string
-		isPublic, skipConsent                                      bool
+		clientID, clientName, clientSecret, authMethod                         string
+		redirectURIs, postLogoutURIs, clientScopes, clientAudience, grantTypes []string
+		isPublic, skipConsent                                                  bool
 	)
 	var createClientCmd = &cobra.Command{
 		Use:   "create-client",
@@ -369,9 +388,18 @@ func main() {
 				hashedSecret, _ = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
 			}
 
-			authMethod := "client_secret_basic"
+			if authMethod == "" {
+				authMethod = "client_secret_basic"
+			}
 			if isPublic {
 				authMethod = "none"
+			}
+
+			if len(grantTypes) == 0 {
+				grantTypes = []string{"authorization_code"}
+				if !isPublic {
+					grantTypes = append(grantTypes, "client_credentials")
+				}
 			}
 
 			client := models.OAuth2ClientGORM{
@@ -382,13 +410,13 @@ func main() {
 				RedirectURIs:            redirectURIs,
 				PostLogoutRedirectURIs:  postLogoutURIs,
 				Audience:                clientAudience,
-				GrantTypes:              []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
-				ResponseTypes:           []string{"code", "token", "id_token", "code id_token", "code token", "code id_token token"},
-				ResponseModes:           []string{"query", "fragment", "form_post"},
+				GrantTypes:              grantTypes,
+				ResponseTypes:           []string{"code"},
+				ResponseModes:           []string{"query", "form_post"},
 				Scopes:                  clientScopes,
 				TokenEndpointAuthMethod: authMethod,
 				Public:                  isPublic,
-				EnforcePKCE:             isPublic,
+				EnforcePKCE:             true, // OAuth 2.1 Requirement
 				SkipConsent:             skipConsent,
 			}
 
@@ -408,6 +436,7 @@ func main() {
 	createClientCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID (Auto-generated if empty)")
 	createClientCmd.Flags().StringVar(&clientName, "name", "", "Client Name")
 	createClientCmd.Flags().StringVar(&clientSecret, "secret", "", "Client Secret (Auto-generated if empty)")
+	createClientCmd.Flags().StringVar(&authMethod, "auth-method", "", "Token endpoint authentication method")
 	createClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "Comma separated Redirect URIs")
 	createClientCmd.Flags().StringSliceVar(&postLogoutURIs, "post-logout-uris", nil, "Comma separated Post Logout URIs")
 	createClientCmd.Flags().StringSliceVar(&clientScopes, "scopes", nil, "Comma separated scopes")
@@ -504,7 +533,7 @@ func main() {
 
 	var deleteClientCmd = &cobra.Command{
 		Use:   "delete-client [client_id]",
-		Short: "Delete OIDC Client",
+		Short: "DeleteByClient OIDC Client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -516,7 +545,7 @@ func main() {
 			var client models.OAuth2ClientGORM
 			db.Select("tenant_id").First(&client, "id = ?", args[0])
 			if err := db.Delete(&models.OAuth2ClientGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete failed: %v", err)
+				log.Fatalf("DeleteByClient failed: %v", err)
 			}
 			auditLogger.Log(client.TenantID, "system_cli", "cli.client.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"client_id": args[0]})
 			log.Println("Client deleted.")
@@ -528,9 +557,9 @@ func main() {
 	// ==========================================
 
 	var (
-		samlEntityID, samlACSURL, samlSLOURL string
-		samlAllowedScopes                    []string
-		samlForceAuthn                       bool
+		samlEntityID, samlACSURL, samlSLOURL        string
+		samlAllowedScopes                           []string
+		samlForceAuthn, signResponse, signAssertion bool
 	)
 	var createSAMLClientCmd = &cobra.Command{
 		Use:   "create-saml-client",
@@ -561,8 +590,8 @@ func main() {
 				AllowedScopes: pq.StringArray(samlAllowedScopes),
 				ForceAuthn:    samlForceAuthn,
 				Active:        true,
-				SignResponse:  true,
-				SignAssertion: true,
+				SignResponse:  signResponse,
+				SignAssertion: signAssertion,
 			}
 
 			if err := db.Create(&client).Error; err != nil {
@@ -578,6 +607,11 @@ func main() {
 	createSAMLClientCmd.Flags().StringVar(&samlSLOURL, "slo-url", "", "SLO URL")
 	createSAMLClientCmd.Flags().StringSliceVar(&samlAllowedScopes, "allowed-scopes", nil, "Comma separated allowed scopes")
 	createSAMLClientCmd.Flags().BoolVar(&samlForceAuthn, "force-authn", false, "Force Authentication (ForceAuthn)")
+	createSAMLClientCmd.Flags().BoolVar(&signResponse, "sign-response", false, "Sign response")
+	createSAMLClientCmd.Flags().BoolVar(&signAssertion, "sign-assertion", false, "Sign Assertions")
+
+	_ = createSAMLClientCmd.MarkFlagRequired("entity-id")
+	_ = createSAMLClientCmd.MarkFlagRequired("acs-url")
 
 	var getSAMLClientCmd = &cobra.Command{
 		Use:   "get-saml-client [entity_id]",
@@ -642,7 +676,7 @@ func main() {
 
 	var deleteSAMLClientCmd = &cobra.Command{
 		Use:   "delete-saml-client [entity_id]",
-		Short: "Delete SAML Client",
+		Short: "DeleteByClient SAML Client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -654,7 +688,7 @@ func main() {
 			var client models.SAMLClientGORM
 			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClientGORM{}).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(client.TenantID, "system_cli", "cli.client.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"entity_id": args[0]})
 			log.Println("SAML Client deleted.")
@@ -749,7 +783,7 @@ func main() {
 
 	var deleteSAMLConnectionCmd = &cobra.Command{
 		Use:   "delete-saml-connection [id]",
-		Short: "Delete SAML Connection",
+		Short: "DeleteByClient SAML Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -761,7 +795,7 @@ func main() {
 			var conn models.SAMLConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.SAMLConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.saml.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("SAML Connection deleted.")
@@ -820,6 +854,10 @@ func main() {
 	createOIDCConnectionCmd.Flags().StringVar(&clientSecret, "client-secret", "", "Client Secret")
 	createOIDCConnectionCmd.Flags().StringSliceVar(&oidcScopes, "scopes", nil, "Comma separated scopes")
 
+	_ = createOIDCConnectionCmd.MarkFlagRequired("issuer")
+	_ = createOIDCConnectionCmd.MarkFlagRequired("client-id")
+	_ = createOIDCConnectionCmd.MarkFlagRequired("client-secret")
+
 	var getOIDCConnectionCmd = &cobra.Command{
 		Use:   "get-oidc-connection [id]",
 		Short: "Get OIDC Connection",
@@ -840,7 +878,7 @@ func main() {
 
 	var deleteOIDCConnectionCmd = &cobra.Command{
 		Use:   "delete-oidc-connection [id]",
-		Short: "Delete OIDC Connection",
+		Short: "DeleteByClient OIDC Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.LoadConfig()
@@ -852,11 +890,81 @@ func main() {
 			var conn models.OIDCConnectionGORM
 			db.Select("tenant_id").First(&conn, "id = ?", args[0])
 			if err := db.Delete(&models.OIDCConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
-				log.Fatalf("Delete Failed: %v", err)
+				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
 			auditLogger.Log(conn.TenantID, "system_cli", "cli.connection.oidc.delete", "127.0.0.1", "shyntr-cli", map[string]interface{}{"connection_id": args[0]})
 			log.Println("OIDC Connection deleted.")
 		},
+	}
+
+	var importKeyCmd = &cobra.Command{
+		Use:   "import-key",
+		Short: "Inject a CA-signed keypair into the Identity Hub",
+		Long:  "Used in High-Assurance (PKI) environments to manually rotate keys bypassing AutoRollover.",
+		Run: func(cmd *cobra.Command, args []string) {
+			use, _ := cmd.Flags().GetString("use")
+			certPath, _ := cmd.Flags().GetString("cert")
+			keyPath, _ := cmd.Flags().GetString("key")
+
+			if use != "sig" && use != "enc" {
+				log.Fatal("Invalid use type. Must be 'sig' or 'enc'.")
+			}
+
+			cfg := config.LoadConfig()
+			logger.InitLogger(cfg.LogLevel)
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Connection failed: %v", err)
+			}
+
+			keyRepo := repository.NewCryptoKeyRepository(db)
+			keyMgr := utils2.NewKeyManager(keyRepo, cfg)
+
+			certBytes, err := os.ReadFile(certPath)
+			if err != nil {
+				log.Fatalf("Failed to read certificate file: %v", err)
+			}
+
+			keyBytes, err := os.ReadFile(keyPath)
+			if err != nil {
+				log.Fatalf("Failed to read private key file: %v", err)
+			}
+
+			block, _ := pem.Decode(keyBytes)
+			if block == nil {
+				log.Fatal("Failed to decode PEM block from private key file")
+			}
+
+			privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+			if err != nil {
+				parsedKey, err8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+				if err8 != nil {
+					log.Fatalf("Failed to parse private key: %v", err8)
+				}
+				var ok bool
+				privKey, ok = parsedKey.(*rsa.PrivateKey)
+				if !ok {
+					log.Fatal("Provided key is not a valid RSA Private Key")
+				}
+			}
+
+			ctx := context.Background()
+			if _, err := keyMgr.ImportKey(ctx, use, privKey, certBytes); err != nil {
+				log.Fatalf("CRITICAL: Failed to import key: %v", err)
+			}
+
+			log.Printf("SUCCESS: CA-signed key successfully injected for use '%s'.", use)
+		},
+	}
+
+	importKeyCmd.Flags().String("use", "sig", "Key usage type ('sig' or 'enc')")
+	importKeyCmd.Flags().String("cert", "", "Path to the CA-signed X.509 certificate (PEM)")
+	importKeyCmd.Flags().String("key", "", "Path to the unencrypted RSA private key (PEM)")
+	if err := importKeyCmd.MarkFlagRequired("cert"); err != nil {
+		log.Fatal(err)
+	}
+	if err := importKeyCmd.MarkFlagRequired("key"); err != nil {
+		log.Fatal(err)
 	}
 
 	// ==========================================
@@ -879,7 +987,7 @@ func main() {
 		createSAMLClientCmd, getSAMLClientCmd, updateSAMLClientCmd, deleteSAMLClientCmd,
 		createSAMLConnectionCmd, getSAMLConnectionCmd, deleteSAMLConnectionCmd,
 		createOIDCConnectionCmd, getOIDCConnectionCmd, deleteOIDCConnectionCmd,
-		serveCmd,
+		serveCmd, importKeyCmd,
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -897,14 +1005,10 @@ func runServer() {
 	}
 
 	var count int64
-	if err := db.Model(&entity.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
+	if err := db.Model(&model.Tenant{}).Where("id = ?", cfg.DefaultTenantID).Count(&count).Error; err == nil && count == 0 {
 		logger.Log.Info("Default tenant not found, creating...", zap.String("id", cfg.DefaultTenantID))
 		persistence.SeedDefaultTenant(db, cfg)
 	}
-	worker.StartCleanupJob(db)
-
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
@@ -913,7 +1017,11 @@ func runServer() {
 		RefreshTokenLifespan:       30 * 24 * time.Hour, // 30 Days
 		GlobalSecret:               []byte(cfg.AppSecret),
 		IDTokenIssuer:              cfg.BaseIssuerURL,
-		SendDebugMessagesToClients: true,
+		SendDebugMessagesToClients: true, //TODO, Make it false for Production
+
+		EnforcePKCE:                    true,
+		EnforcePKCEForPublicClients:    true,
+		EnablePKCEPlainChallengeMethod: false,
 	}
 
 	//Repository
@@ -931,13 +1039,24 @@ func runServer() {
 	eventRepository := repository.NewWebhookEventRepository(db)
 	healthRepository := repository.NewHealthRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
+	keyRepository := repository.NewCryptoKeyRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
 	iam.NewFositeStore(db, clientRepository, jtiRepository)
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
-	//UseCase
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+
+	startupCtx := context.Background()
+	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "sig"); err != nil {
+		logger.Log.Fatal("Failed to seed/load signing (sig) key", zap.Error(err))
+	}
+	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "enc"); err != nil {
+		logger.Log.Fatal("Failed to seed/load encryption (enc) key", zap.Error(err))
+	}
+
+	// UseCase
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
@@ -957,6 +1076,9 @@ func runServer() {
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
 		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
 
+	worker.StartCleanupJob(db, keyMgr)
+	swaggerRouter := router.SetupSwaggerRouter()
+
 	publicSrv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: publicRouter,
@@ -965,6 +1087,11 @@ func runServer() {
 	adminSrv := &http.Server{
 		Addr:    ":" + cfg.AdminPort,
 		Handler: adminRouter,
+	}
+
+	swaggerSrv := &http.Server{
+		Addr:    ":" + cfg.SwaggerPort,
+		Handler: swaggerRouter,
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())
@@ -980,6 +1107,14 @@ func runServer() {
 	g.Go(func() error {
 		logger.Log.Info("Starting Admin Server", zap.String("port", cfg.AdminPort))
 		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		logger.Log.Info("Starting Swagger Documentation Server", zap.String("port", cfg.SwaggerPort))
+		if err := swaggerSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
 		}
 		return nil
@@ -1004,6 +1139,9 @@ func runServer() {
 		}
 		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
 			logger.Log.Error("Admin server forced to shutdown", zap.Error(err))
+		}
+		if err := swaggerSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Log.Error("Swagger server forced to shutdown", zap.Error(err))
 		}
 		return nil
 	})

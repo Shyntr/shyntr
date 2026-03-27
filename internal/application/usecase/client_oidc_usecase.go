@@ -10,23 +10,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	"github.com/Shyntr/shyntr/pkg/crypto"
+	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/go-jose/go-jose/v3"
-	"github.com/go-jose/go-jose/v3/jwt"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
-	"github.com/nevzatcirak/shyntr/internal/application/port"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
-	"github.com/nevzatcirak/shyntr/pkg/utils"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
@@ -36,16 +37,16 @@ type OAuth2ClientUseCase interface {
 	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error)
 	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
-	SendBackchannelLogout(clientID, logoutURI, subject, issuer string)
-	CreateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
-	UpdateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error)
-	GetClient(ctx context.Context, clientID string) (*entity.OAuth2Client, error)
+	SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string)
+	CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
+	UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
+	GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error)
 	GetClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetPublicClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetConfidentialClientCount(ctx context.Context, tenantID string) (int64, error)
-	GetClientByTenant(ctx context.Context, tenantID, clientID string) (*entity.OAuth2Client, error)
+	GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error)
 	DeleteClient(ctx context.Context, tenantID, clientID string, actorIP, userAgent string) error
-	ListClients(ctx context.Context, tenantID string) ([]*dto.OAuth2ClientResponse, error)
+	ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error)
 }
 
 type oauth2ClientUseCase struct {
@@ -54,7 +55,7 @@ type oauth2ClientUseCase struct {
 	tenant   port.TenantRepository
 	audit    port.AuditLogger
 	hasher   port.SecretHasher
-	keyMgr   *utils2.KeyManager
+	keyMgr   utils2.KeyManager
 	Config   *config.Config
 }
 
@@ -68,7 +69,7 @@ type oidcDiscovery struct {
 }
 
 func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDCConnectionRepository, tenant port.TenantRepository,
-	audit port.AuditLogger, hasher port.SecretHasher, keyMgr *utils2.KeyManager, cfg *config.Config) OAuth2ClientUseCase {
+	audit port.AuditLogger, hasher port.SecretHasher, keyMgr utils2.KeyManager, cfg *config.Config) OAuth2ClientUseCase {
 	return &oauth2ClientUseCase{
 		repo:     repo,
 		connRepo: connRepo,
@@ -215,6 +216,21 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if ok && expectedNonce != "" {
+
+		tokenParts := strings.Split(rawIDToken, ".")
+		if len(tokenParts) == 5 {
+			privKey, _, err := u.keyMgr.GetActivePrivateKey(ctx, "enc")
+			if err != nil {
+				return nil, errors.New("no active private key available to decrypt ID token")
+			}
+
+			decryptedToken, err := ParseAndDecryptJWE(rawIDToken, privKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse encrypted ID token: %w", err)
+			}
+			rawIDToken = decryptedToken
+		}
+
 		provider, err := oidc.NewProvider(ctx, conn.IssuerURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize oidc provider for verification: %w", err)
@@ -245,19 +261,35 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 		return nil, fmt.Errorf("userinfo endpoint returned status: %d", resp.StatusCode)
 	}
 
+	contentType := resp.Header.Get("Content-Type")
 	var userInfo map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
-		return nil, fmt.Errorf("failed to decode userinfo: %w", err)
+
+	if strings.Contains(contentType, "application/jwt") {
+		// Yanıt bir JWT (veya JWE). Body'yi okuyup yukarıdaki gibi deşifre/doğrulama yapmalıyız
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		jwtStr := string(bodyBytes)
+
+		if len(strings.Split(jwtStr, ".")) == 5 {
+			//TODO
+		}
+
+		return nil, errors.New("encrypted/signed jwt userinfo is currently unsupported, expecting application/json")
+
+	} else {
+		if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+			return nil, fmt.Errorf("failed to decode userinfo: %w", err)
+		}
 	}
+
 	return userInfo, nil
 }
 
-func (u *oauth2ClientUseCase) SendBackchannelLogout(clientID, logoutURI, subject, issuer string) {
+func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string) {
 	if logoutURI == "" {
 		return
 	}
 
-	privKey, _ := u.keyMgr.GetActiveKeys()
+	privKey, _, _, err := u.keyMgr.GetActiveKeys(ctx, "sig")
 	if privKey == nil {
 		logger.Log.Error("No active private key for backchannel logout")
 		return
@@ -281,7 +313,7 @@ func (u *oauth2ClientUseCase) SendBackchannelLogout(clientID, logoutURI, subject
 	}
 
 	builder := jwt.Signed(signer).Claims(claims)
-	logoutToken, err := builder.CompactSerialize()
+	logoutToken, err := builder.Serialize()
 	if err != nil {
 		logger.Log.Error("Failed to serialize logout token", zap.Error(err))
 		return
@@ -348,7 +380,7 @@ func (u *oauth2ClientUseCase) discoverEndpoints(ctx context.Context, issuer stri
 	return &disc, nil
 }
 
-func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error) {
+func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error) {
 	if client.TenantID == "" {
 		client.TenantID = "default"
 	}
@@ -399,16 +431,17 @@ func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *entity.O
 	}
 
 	u.audit.Log(client.TenantID, "system", "management.client.oidc.create", actorIP, userAgent, map[string]interface{}{
-		"client_id":  client.ID,
-		"public":     client.Public,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+		"client_id":                 client.ID,
+		"public":                    client.Public,
+		"scopes":                    client.Scopes,
+		"redirect_uris":             client.RedirectURIs,
+		"post_logout_redirect_uris": client.PostLogoutRedirectURIs,
 	})
 
 	return client, returnedSecret, nil
 }
 
-func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *entity.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*entity.OAuth2Client, string, error) {
+func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error) {
 	if client.TenantID == "" {
 		client.TenantID = "default"
 	}
@@ -456,16 +489,17 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *entity.O
 	}
 
 	u.audit.Log(client.TenantID, "system", "management.client.oidc.create", actorIP, userAgent, map[string]interface{}{
-		"client_id":  client.ID,
-		"public":     client.Public,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+		"client_id":                 client.ID,
+		"public":                    client.Public,
+		"scopes":                    client.Scopes,
+		"redirect_uris":             client.RedirectURIs,
+		"post_logout_redirect_uris": client.PostLogoutRedirectURIs,
 	})
 
 	return client, returnedSecret, nil
 }
 
-func (u *oauth2ClientUseCase) GetClient(ctx context.Context, clientID string) (*entity.OAuth2Client, error) {
+func (u *oauth2ClientUseCase) GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error) {
 	return u.repo.GetByID(ctx, clientID)
 }
 
@@ -481,7 +515,7 @@ func (u *oauth2ClientUseCase) GetConfidentialClientCount(ctx context.Context, te
 	return u.repo.GetConfidentialClientCount(ctx, tenantID)
 }
 
-func (u *oauth2ClientUseCase) GetClientByTenant(ctx context.Context, tenantID, clientID string) (*entity.OAuth2Client, error) {
+func (u *oauth2ClientUseCase) GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error) {
 	return u.repo.GetByTenantAndID(ctx, tenantID, clientID)
 }
 
@@ -489,18 +523,30 @@ func (u *oauth2ClientUseCase) DeleteClient(ctx context.Context, tenantID, client
 	if err := u.repo.Delete(ctx, tenantID, clientID); err != nil {
 		return err
 	}
-	u.audit.LogWithoutIP(tenantID, "system", "management.client.oidc.delete", map[string]interface{}{
-		"client_id":  clientID,
-		"ip":         actorIP,
-		"user_agent": userAgent,
+	u.audit.Log(tenantID, "system", "management.client.oidc.delete", actorIP, userAgent, map[string]interface{}{
+		"client_id": clientID,
 	})
 	return nil
 }
 
-func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*dto.OAuth2ClientResponse, error) {
+func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error) {
 	clients, err := u.repo.ListByTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	return dto.FromDomainOAuth2Clients(clients), nil
+	return payload.FromDomainOAuth2Clients(clients), nil
+}
+
+func ParseAndDecryptJWE(rawToken string, privateKey interface{}) (string, error) {
+	jweToken, err := jose.ParseEncrypted(rawToken, model.AllowedJWEAlgs, model.AllowedJWEEncs)
+	if err != nil {
+		return "", errors.New("jwe parse failed or weak cryptography detected: " + err.Error())
+	}
+
+	decryptedBytes, err := jweToken.Decrypt(privateKey)
+	if err != nil {
+		return "", err
+	}
+
+	return string(decryptedBytes), nil
 }

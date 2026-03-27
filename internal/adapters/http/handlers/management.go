@@ -3,14 +3,13 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/dto"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/response"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	shyntrsaml "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
 	"go.uber.org/zap"
 )
@@ -37,7 +36,7 @@ func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAut
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
 	if inputID == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Tenant ID is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Tenant ID is required", nil))
 		return "", false
 	}
 
@@ -50,10 +49,19 @@ func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (str
 		return tenant.ID, true
 	}
 
-	c.Error(response.NewAppError(http.StatusNotFound, "The specified tenant does not exist", nil))
+	c.Error(payload.NewAppError(http.StatusNotFound, "The specified tenant does not exist", nil))
 	return "", false
 }
 
+// GetDashboardStats godoc
+// @Summary Get Dashboard Statistics
+// @Description Retrieves global or tenant-specific usage statistics and active connection counts.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id query string false "Tenant ID (for filtering)"
+// @Success 200 {object} map[string]interface{} "Returns system statistics and recent activity"
+// @Router /admin/management/dashboard/stats [get]
 func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	tenantID := c.Query("tenant_id")
 	ctx := c.Request.Context()
@@ -102,33 +110,64 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// ListTenants godoc
+// @Summary List Tenants
+// @Description Lists all tenants configured within the identity hub.
+// @Tags Tenants
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} payload.TenantResponse
+// @Failure 500 {object} payload.AppError "Failed to retrieve tenants"
+// @Router /admin/management/tenants [get]
 func (h *ManagementHandler) ListTenants(c *gin.Context) {
 	tenants, err := h.TenantUse.ListTenants(c.Request.Context())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve tenants", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve tenants", err))
 		return
 	}
 	c.JSON(http.StatusOK, tenants)
 }
 
+// GetTenant godoc
+// @Summary Get Tenant
+// @Description Retrieves a specific tenant by its ID.
+// @Tags Tenants
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} model.Tenant
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id} [get]
 func (h *ManagementHandler) GetTenant(c *gin.Context) {
 	id := c.Param("id")
 	tenant, err := h.TenantUse.GetTenant(c.Request.Context(), id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "Tenant not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "Tenant not found", err))
 		return
 	}
 	c.JSON(http.StatusOK, tenant)
 }
 
+// CreateTenant godoc
+// @Summary Create Tenant
+// @Description Creates a new isolated tenant environment with strict data boundaries.
+// @Tags Tenants
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateTenantRequest true "Tenant Information"
+// @Success 201 {object} model.Tenant
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to create tenant"
+// @Router /admin/management/tenants [post]
 func (h *ManagementHandler) CreateTenant(c *gin.Context) {
-	var tenantReq dto.CreateTenantRequest
+	var tenantReq payload.CreateTenantRequest
 	if err := c.ShouldBindJSON(&tenantReq); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
-	tenant := &entity.Tenant{
+	tenant := &model.Tenant{
 		ID:          tenantReq.ID,
 		Name:        tenantReq.Name,
 		DisplayName: tenantReq.DisplayName,
@@ -136,22 +175,35 @@ func (h *ManagementHandler) CreateTenant(c *gin.Context) {
 	}
 	tenant, err := h.TenantUse.CreateTenant(c.Request.Context(), tenant, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create tenant", err))
 		return
 	}
 	logger.FromGin(c).Info("Tenant created successfully", zap.String("target_tenant_id", tenant.ID), zap.String("tenant_name", tenant.Name))
 	c.JSON(http.StatusCreated, tenant)
 }
 
+// UpdateTenant godoc
+// @Summary Update Tenant
+// @Description Updates an existing tenant's details.
+// @Tags Tenants
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Param request body payload.CreateTenantRequest true "Tenant Update Information"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to update tenant"
+// @Router /admin/management/tenants/{id} [put]
 func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 	id := c.Param("id")
-	var req dto.CreateTenantRequest
+	var req payload.CreateTenantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
-	tenant := &entity.Tenant{
+	tenant := &model.Tenant{
 		ID:          req.ID,
 		Name:        req.Name,
 		DisplayName: req.DisplayName,
@@ -159,25 +211,36 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 	}
 	err := h.TenantUse.UpdateTenant(c.Request.Context(), tenant, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update tenant", err))
 		return
 	}
 	logger.FromGin(c).Info("Tenant updated successfully", zap.String("target_tenant_id", id))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// DeleteTenant godoc
+// @Summary DeleteByClient Tenant
+// @Description Performs a cascade delete of a tenant and all its associated resources. The default tenant cannot be deleted.
+// @Tags Tenants
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} map[string]string "message: Tenant and all associated resources deleted successfully"
+// @Failure 400 {object} payload.AppError "Cannot delete the default tenant"
+// @Failure 500 {object} payload.AppError "Failed to cascade delete tenant"
+// @Router /admin/management/tenants/{id} [delete]
 func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 	tenantID := c.Param("id")
 
 	if tenantID == "default" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Cannot delete the default tenant", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Cannot delete the default tenant", nil))
 		return
 	}
 
 	err := h.TenantUse.DeleteTenant(c.Request.Context(), tenantID, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to cascade delete tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to cascade delete tenant", err))
 		return
 	}
 
@@ -185,12 +248,22 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Tenant and all associated resources deleted successfully"})
 }
 
-// --- OAuth2 Clients Management ---
-
+// CreateClient godoc
+// @Summary Create OIDC Client
+// @Description Registers a new OAuth2/OIDC client under the specified tenant enforcing OAuth 2.1 standards.
+// @Tags OAuth2 Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateOAuth2ClientRequest true "Client Configuration"
+// @Success 201 {object} payload.CreateOAuth2ClientRequest
+// @Failure 400 {object} payload.AppError "Invalid request payload or tenant not found"
+// @Failure 500 {object} payload.AppError "Failed to create OIDC req"
+// @Router /admin/management/clients [post]
 func (h *ManagementHandler) CreateClient(c *gin.Context) {
-	var req dto.CreateOAuth2ClientRequest
+	var req payload.CreateOAuth2ClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -202,7 +275,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 
 	req.ResponseModes = []string{"query", "fragment", "form_post"}
 
-	client := &entity.OAuth2Client{
+	client := &model.OAuth2Client{
 		ID:                      req.ID,
 		TenantID:                req.TenantID,
 		Name:                    req.Name,
@@ -223,17 +296,26 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create OIDC req", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create OIDC req", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC client created successfully", zap.String("client_id", req.ID), zap.String("target_tenant_id", req.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusCreated, req)
 }
 
+// ListClients godoc
+// @Summary List All OIDC Clients
+// @Description Lists all OAuth2/OIDC clients across the system. Secrets are masked.
+// @Tags OAuth2 Clients
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} model.OAuth2Client
+// @Failure 500 {object} payload.AppError "Failed to retrieve clients"
+// @Router /admin/management/clients [get]
 func (h *ManagementHandler) ListClients(c *gin.Context) {
 	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), "")
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients", err))
 		return
 	}
 	for i := range clients {
@@ -242,16 +324,27 @@ func (h *ManagementHandler) ListClients(c *gin.Context) {
 	c.JSON(http.StatusOK, clients)
 }
 
+// ListClientsByTenant godoc
+// @Summary List OIDC Clients By Tenant
+// @Description Lists all OAuth2/OIDC clients for a specific tenant. Secrets are masked.
+// @Tags OAuth2 Clients
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} model.OAuth2Client
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve clients for tenant"
+// @Router /admin/management/tenants/{tenant_id}/clients [get]
 func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
 		return
 	}
 
 	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients for tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients for tenant", err))
 		return
 	}
 
@@ -262,32 +355,56 @@ func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, clients)
 }
 
+// GetClient godoc
+// @Summary Get OIDC Client
+// @Description Retrieves details of a specific OAuth2/OIDC client. Secrets are masked.
+// @Tags OAuth2 Clients
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Client ID"
+// @Success 200 {object} model.OAuth2Client
+// @Failure 404 {object} payload.AppError "OIDC Client not found"
+// @Router /admin/management/clients/{id} [get]
 func (h *ManagementHandler) GetClient(c *gin.Context) {
 	id := c.Param("id")
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
 		return
 	}
 	client.Secret = "*****"
 	c.JSON(http.StatusOK, client)
 }
 
+// UpdateClient godoc
+// @Summary Update OIDC Client
+// @Description Updates an existing OAuth2/OIDC client. Pass "*****" or empty string to keep the existing secret.
+// @Tags OAuth2 Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Client ID"
+// @Param request body payload.CreateOAuth2ClientRequest true "Client Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 404 {object} payload.AppError "OIDC Client not found"
+// @Failure 500 {object} payload.AppError "Failed to update OIDC client"
+// @Router /admin/management/clients/{id} [put]
 func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 	id := c.Param("id")
-	var req dto.CreateOAuth2ClientRequest
+	var req payload.CreateOAuth2ClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
 		return
 	}
 
-	clientToSave := &entity.OAuth2Client{
+	clientToSave := &model.OAuth2Client{
 		ID:                      req.ID,
 		TenantID:                req.TenantID,
 		Name:                    req.Name,
@@ -315,20 +432,31 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 
 	_, _, err = h.OAuth2ClientUse.UpdateClient(c.Request.Context(), clientToSave, unhashedSecret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update OIDC client", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update OIDC client", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC client updated successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// DeleteClient godoc
+// @Summary DeleteByClient OIDC Client
+// @Description Deletes an OAuth2/OIDC client from a specific tenant.
+// @Tags OAuth2 Clients
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Client ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete OIDC client"
+// @Router /admin/management/clients/{tenant_id}/{id} [delete]
 func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 
 	err := h.OAuth2ClientUse.DeleteClient(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC client", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC client", err))
 		return
 	}
 
@@ -336,45 +464,88 @@ func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// ListSAMLClients godoc
+// @Summary List All SAML Clients
+// @Description Lists all SAML Service Providers globally across the hub.
+// @Tags SAML Clients
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} model.SAMLClient
+// @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients"
+// @Router /admin/management/saml-clients [get]
 func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
 	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), "")
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients", err))
 		return
 	}
 	c.JSON(http.StatusOK, clients)
 }
 
+// ListSAMLClientsByTenant godoc
+// @Summary List SAML Clients By Tenant
+// @Description Lists all SAML Service Providers for a specific tenant.
+// @Tags SAML Clients
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} model.SAMLClient
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients for tenant"
+// @Router /admin/management/saml-clients/tenant/{tenant_id} [get]
 func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
 		return
 	}
 
 	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients for tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients for tenant", err))
 		return
 	}
 	c.JSON(http.StatusOK, clients)
 }
 
+// GetSAMLClient godoc
+// @Summary Get SAML Client
+// @Description Retrieves details of a specific SAML Service Provider.
+// @Tags SAML Clients
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Client ID"
+// @Success 200 {object} model.SAMLClient
+// @Failure 404 {object} payload.AppError "SAML Client not found"
+// @Router /admin/management/saml-clients/{tenant_id}/{id} [get]
 func (h *ManagementHandler) GetSAMLClient(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	client, err := h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "SAML Client not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "SAML Client not found", err))
 		return
 	}
 	c.JSON(http.StatusOK, client)
 }
 
+// CreateSAMLClient godoc
+// @Summary Create SAML Client
+// @Description Registers a legacy SAML Service Provider in the system for federation.
+// @Tags SAML Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateSAMLClientRequest true "SAML Client Configuration"
+// @Success 201 {object} payload.CreateSAMLClientRequest
+// @Failure 400 {object} payload.AppError "Invalid request payload or tenant not found"
+// @Failure 500 {object} payload.AppError "Failed to create SAML client"
+// @Router /admin/management/saml-clients [post]
 func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
-	var client dto.CreateSAMLClientRequest
+	var client payload.CreateSAMLClientRequest
 	if err := c.ShouldBindJSON(&client); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -384,7 +555,7 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 	}
 	client.TenantID = realTenantID
 
-	clientToSave := &entity.SAMLClient{
+	clientToSave := &model.SAMLClient{
 		TenantID:                client.TenantID,
 		Name:                    client.Name,
 		EntityID:                client.EntityID,
@@ -404,24 +575,37 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 
 	createdClient, err := h.SAMLClientUse.CreateClient(c.Request.Context(), clientToSave, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create SAML client", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create SAML client", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client created successfully", zap.String("client_id", createdClient.ID), zap.String("target_tenant_id", client.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusCreated, client)
 }
 
+// UpdateSAMLClient godoc
+// @Summary Update SAML Client
+// @Description Updates an existing SAML Service Provider. Automatically pulls metadata if MetadataURL is provided.
+// @Tags SAML Clients
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Client ID"
+// @Param request body payload.CreateSAMLClientRequest true "SAML Client Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing required fields"
+// @Failure 500 {object} payload.AppError "Failed to update SAML client"
+// @Router /admin/management/saml-clients/{id} [put]
 func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	id := c.Param("id")
-	var req dto.CreateSAMLClientRequest
+	var req payload.CreateSAMLClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
 	client, err := h.SAMLClientUse.GetClient(c.Request.Context(), req.TenantID, id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "saml client not found", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "saml client not found", err))
 		return
 	}
 
@@ -496,19 +680,30 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	err = h.SAMLClientUse.UpdateClient(c.Request.Context(), client, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update SAML client", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update SAML client", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client updated successfully", zap.String("entity_id", req.EntityID), zap.String("target_tenant_id", req.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// DeleteSAMLClient godoc
+// @Summary DeleteByClient SAML Client
+// @Description Removes a SAML Service Provider from a specific tenant.
+// @Tags SAML Clients
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Client ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete SAML client"
+// @Router /admin/management/saml-clients/{tenant_id}/{id} [delete]
 func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	err := h.SAMLClientUse.DeleteClient(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete SAML client", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete SAML client", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client deleted successfully", zap.String("client_id", id), zap.String("protocol", "saml"))
@@ -517,10 +712,22 @@ func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
 
 // --- SAML Connection Management (Identity Providers) ---
 
+// CreateSAMLConnection godoc
+// @Summary Create SAML Connection (IdP)
+// @Description Registers an external SAML Identity Provider for federated authentication.
+// @Tags SAML Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateSAMLConnectionRequest true "SAML Connection Configuration"
+// @Success 201 {object} payload.CreateSAMLConnectionRequest
+// @Failure 400 {object} payload.AppError "Invalid request payload or missing metadata"
+// @Failure 500 {object} payload.AppError "Failed to create SAML connection"
+// @Router /admin/management/saml-connections [post]
 func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
-	var conn dto.CreateSAMLConnectionRequest
+	var conn payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&conn); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -531,11 +738,11 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 	conn.TenantID = realTenantID
 
 	if conn.MetadataURL == "" && conn.IdpMetadataXML == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Metadata URL or IdP Metadata XML is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Metadata URL or IdP Metadata XML is required", nil))
 		return
 	}
 
-	connToSave := &entity.SAMLConnection{
+	connToSave := &model.SAMLConnection{
 		ID:                       conn.ID,
 		TenantID:                 conn.TenantID,
 		Name:                     conn.Name,
@@ -555,56 +762,100 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 
 	connection, err := h.SAMLConnUse.CreateConnection(c.Request.Context(), connToSave, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create SAML connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create SAML connection", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML connection created successfully", zap.String("entity_id", connection.IdpEntityID), zap.String("target_tenant_id", connection.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusCreated, conn)
 }
 
+// ListSAMLConnections godoc
+// @Summary List All SAML Connections
+// @Description Lists all federated SAML Identity Providers.
+// @Tags SAML Connections
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} model.SAMLConnection
+// @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections"
+// @Router /admin/management/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
 	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), "")
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
 }
 
+// ListSAMLConnectionsByTenant godoc
+// @Summary List SAML Connections By Tenant
+// @Description Lists all federated SAML Identity Providers for a specific tenant.
+// @Tags SAML Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} model.SAMLConnection
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections for tenant"
+// @Router /admin/management/tenants/{tenant_id}/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
 		return
 	}
 
 	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections for tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections for tenant", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
 }
 
+// GetSAMLConnection godoc
+// @Summary Get SAML Connection
+// @Description Retrieves details of a specific SAML Identity Provider.
+// @Tags SAML Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} model.SAMLConnection
+// @Failure 404 {object} payload.AppError "SAML Connection not found"
+// @Router /admin/management/saml-connections/{tenant_id}/{id} [get]
 func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	conn, err := h.SAMLConnUse.GetConnection(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "SAML Connection not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "SAML Connection not found", err))
 		return
 	}
 	c.JSON(http.StatusOK, conn)
 }
 
+// UpdateSAMLConnection godoc
+// @Summary Update SAML Connection
+// @Description Updates an existing SAML Identity Provider.
+// @Tags SAML Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Connection ID"
+// @Param request body payload.CreateSAMLConnectionRequest true "SAML Connection Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to update SAML connection"
+// @Router /admin/management/saml-connections/{id} [put]
 func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
-	var req dto.CreateSAMLConnectionRequest
+	var req payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
-	updateData := entity.SAMLConnection{
+	updateData := model.SAMLConnection{
 		ID:                       req.ID,
 		TenantID:                 req.TenantID,
 		Name:                     req.Name,
@@ -625,19 +876,30 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 	err := h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update SAML connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update SAML connection", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML connection updated successfully", zap.String("entity_id", updateData.IdpEntityID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "saml"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// DeleteSAMLConnection godoc
+// @Summary DeleteByClient SAML Connection
+// @Description Deletes a federated SAML Identity Provider from a tenant.
+// @Tags SAML Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete SAML connection"
+// @Router /admin/management/saml-connections/{tenant_id}/{id} [delete]
 func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
 	id := c.Param("id")
 	tenantID := c.Param("tenant_id")
 	err := h.SAMLConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete SAML connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete SAML connection", err))
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
@@ -645,10 +907,22 @@ func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
 
 // --- OIDC Connection Management ---
 
+// CreateOIDCConnection godoc
+// @Summary Create OIDC Connection (IdP)
+// @Description Registers an external OpenID Connect Identity Provider for federated authentication.
+// @Tags OIDC Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateOIDCConnectionRequest true "OIDC Connection Configuration"
+// @Success 201 {object} payload.CreateOIDCConnectionRequest
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to create OIDC connection"
+// @Router /admin/management/oidc-connections [post]
 func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
-	var conn dto.CreateOIDCConnectionRequest
+	var conn payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&conn); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
@@ -658,7 +932,7 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 	}
 	conn.TenantID = realTenantID
 
-	connection := &entity.OIDCConnection{
+	connection := &model.OIDCConnection{
 		ID:                    conn.ID,
 		TenantID:              conn.TenantID,
 		Name:                  conn.Name,
@@ -677,56 +951,100 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 
 	savedConn, err := h.OIDCConnUse.CreateConnection(c.Request.Context(), connection, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to create OIDC connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create OIDC connection", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", savedConn.ClientID), zap.String("target_tenant_id", savedConn.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusCreated, conn)
 }
 
+// ListOIDCConnections godoc
+// @Summary List All OIDC Connections
+// @Description Lists all federated OIDC Identity Providers.
+// @Tags OIDC Connections
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} model.OIDCConnection
+// @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections"
+// @Router /admin/management/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
 	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), "")
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
 }
 
+// ListOIDCConnectionsByTenant godoc
+// @Summary List OIDC Connections By Tenant
+// @Description Lists all federated OIDC Identity Providers for a specific tenant.
+// @Tags OIDC Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} model.OIDCConnection
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections for tenant"
+// @Router /admin/management/tenants/{tenant_id}/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(response.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
 		return
 	}
 
 	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections for tenant", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections for tenant", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
 }
 
+// GetOIDCConnection godoc
+// @Summary Get OIDC Connection
+// @Description Retrieves details of a specific OIDC Identity Provider.
+// @Tags OIDC Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} model.OIDCConnection
+// @Failure 404 {object} payload.AppError "OIDC Connection not found"
+// @Router /admin/management/oidc-connections/{tenant_id}/{id} [get]
 func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	connection, err := h.OIDCConnUse.GetConnection(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusNotFound, "OIDC Connection not found", err))
+		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Connection not found", err))
 		return
 	}
 	c.JSON(http.StatusOK, connection)
 }
 
+// UpdateOIDCConnection godoc
+// @Summary Update OIDC Connection
+// @Description Updates an existing OIDC Identity Provider.
+// @Tags OIDC Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Connection ID"
+// @Param request body payload.CreateOIDCConnectionRequest true "OIDC Connection Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to update OIDC connection"
+// @Router /admin/management/oidc-connections/{id} [put]
 func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
-	var req dto.CreateOIDCConnectionRequest
+	var req payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(response.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
 		return
 	}
 
-	updateData := entity.OIDCConnection{
+	updateData := model.OIDCConnection{
 		ID:                    req.ID,
 		TenantID:              req.TenantID,
 		Name:                  req.Name,
@@ -745,19 +1063,30 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 	err := h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to update OIDC connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update OIDC connection", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection updated successfully", zap.String("client_id", updateData.ClientID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// DeleteOIDCConnection godoc
+// @Summary DeleteByClient OIDC Connection
+// @Description Deletes a federated OIDC Identity Provider from a tenant.
+// @Tags OIDC Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete OIDC connection"
+// @Router /admin/management/oidc-connections/{tenant_id}/{id} [delete]
 func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	err := h.OIDCConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(response.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC connection", err))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC connection", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection deleted successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))

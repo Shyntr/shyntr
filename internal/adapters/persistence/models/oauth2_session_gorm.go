@@ -3,8 +3,8 @@ package models
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"gorm.io/gorm"
 )
 
@@ -34,8 +34,8 @@ func (OAuth2SessionGORM) TableName() string {
 	return "o_auth2_sessions"
 }
 
-func (m *OAuth2SessionGORM) ToDomain() *entity.OAuth2Session {
-	return &entity.OAuth2Session{
+func (m *OAuth2SessionGORM) ToDomain() *model.OAuth2Session {
+	return &model.OAuth2Session{
 		Signature:       m.Signature,
 		Type:            m.TokenType,
 		TenantID:        m.TenantID,
@@ -57,7 +57,7 @@ func (m *OAuth2SessionGORM) ToDomain() *entity.OAuth2Session {
 	}
 }
 
-func FromDomainOAuth2Session(e *entity.OAuth2Session) *OAuth2SessionGORM {
+func FromDomainOAuth2Session(e *model.OAuth2Session) *OAuth2SessionGORM {
 	return &OAuth2SessionGORM{
 		Signature:       e.Signature,
 		TokenType:       e.Type,

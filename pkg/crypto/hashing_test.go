@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nevzatcirak/shyntr/pkg/crypto"
+	"github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/require"
 )

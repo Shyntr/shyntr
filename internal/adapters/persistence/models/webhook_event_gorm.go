@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
 type WebhookEventGORM struct {
@@ -17,8 +17,8 @@ type WebhookEventGORM struct {
 
 func (WebhookEventGORM) TableName() string { return "webhook_events" }
 
-func (m *WebhookEventGORM) ToDomain() *entity.WebhookEvent {
-	return &entity.WebhookEvent{
+func (m *WebhookEventGORM) ToDomain() *model.WebhookEvent {
+	return &model.WebhookEvent{
 		ID:        m.ID,
 		WebhookID: m.WebhookID,
 		TenantID:  m.TenantID,
@@ -28,7 +28,7 @@ func (m *WebhookEventGORM) ToDomain() *entity.WebhookEvent {
 	}
 }
 
-func FromDomainWebhookEvent(e *entity.WebhookEvent) *WebhookEventGORM {
+func FromDomainWebhookEvent(e *model.WebhookEvent) *WebhookEventGORM {
 	return &WebhookEventGORM{
 		ID:        e.ID,
 		WebhookID: e.WebhookID,

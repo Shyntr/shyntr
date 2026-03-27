@@ -3,8 +3,8 @@ package models
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"gorm.io/gorm"
 )
 
@@ -24,8 +24,8 @@ type WebhookGORM struct {
 
 func (WebhookGORM) TableName() string { return "webhooks" }
 
-func (m *WebhookGORM) ToDomain() *entity.Webhook {
-	return &entity.Webhook{
+func (m *WebhookGORM) ToDomain() *model.Webhook {
+	return &model.Webhook{
 		ID:           m.ID,
 		Name:         m.Name,
 		URL:          m.URL,
@@ -39,7 +39,7 @@ func (m *WebhookGORM) ToDomain() *entity.Webhook {
 	}
 }
 
-func FromDomainWebhook(e *entity.Webhook) *WebhookGORM {
+func FromDomainWebhook(e *model.Webhook) *WebhookGORM {
 	return &WebhookGORM{
 		ID:           e.ID,
 		Name:         e.Name,

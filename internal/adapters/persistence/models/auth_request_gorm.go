@@ -3,8 +3,8 @@ package models
 import (
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/lib/pq"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
 	"gorm.io/gorm"
 )
 
@@ -33,8 +33,8 @@ type LoginRequestGORM struct {
 
 func (LoginRequestGORM) TableName() string { return "login_requests" }
 
-func (m *LoginRequestGORM) ToDomain() *entity.LoginRequest {
-	return &entity.LoginRequest{
+func (m *LoginRequestGORM) ToDomain() *model.LoginRequest {
+	return &model.LoginRequest{
 		ID:                m.ID,
 		TenantID:          m.TenantID,
 		ClientID:          m.ClientID,
@@ -57,11 +57,11 @@ func (m *LoginRequestGORM) ToDomain() *entity.LoginRequest {
 	}
 }
 
-func ToDomainLoginRequestList(eList []LoginRequestGORM) []entity.LoginRequest {
-	result := make([]entity.LoginRequest, 0, len(eList))
+func ToDomainLoginRequestList(eList []LoginRequestGORM) []model.LoginRequest {
+	result := make([]model.LoginRequest, 0, len(eList))
 
 	for _, m := range eList {
-		result = append(result, entity.LoginRequest{
+		result = append(result, model.LoginRequest{
 			ID:                m.ID,
 			TenantID:          m.TenantID,
 			ClientID:          m.ClientID,
@@ -87,7 +87,7 @@ func ToDomainLoginRequestList(eList []LoginRequestGORM) []entity.LoginRequest {
 	return result
 }
 
-func FromDomainLoginRequest(e *entity.LoginRequest) *LoginRequestGORM {
+func FromDomainLoginRequest(e *model.LoginRequest) *LoginRequestGORM {
 	return &LoginRequestGORM{
 		ID:                e.ID,
 		TenantID:          e.TenantID,
@@ -109,7 +109,7 @@ func FromDomainLoginRequest(e *entity.LoginRequest) *LoginRequestGORM {
 	}
 }
 
-func LoginRequestToUpdateMap(req *entity.LoginRequest) map[string]interface{} {
+func LoginRequestToUpdateMap(req *model.LoginRequest) map[string]interface{} {
 	return map[string]interface{}{
 		"subject":         req.Subject,
 		"authenticated":   req.Authenticated,
@@ -146,8 +146,8 @@ type ConsentRequestGORM struct {
 
 func (ConsentRequestGORM) TableName() string { return "consent_requests" }
 
-func (m *ConsentRequestGORM) ToDomain() *entity.ConsentRequest {
-	return &entity.ConsentRequest{
+func (m *ConsentRequestGORM) ToDomain() *model.ConsentRequest {
+	return &model.ConsentRequest{
 		ID:                m.ID,
 		LoginChallenge:    m.LoginChallenge,
 		ClientID:          m.ClientID,
@@ -168,7 +168,7 @@ func (m *ConsentRequestGORM) ToDomain() *entity.ConsentRequest {
 	}
 }
 
-func FromDomainConsentRequest(e *entity.ConsentRequest) *ConsentRequestGORM {
+func FromDomainConsentRequest(e *model.ConsentRequest) *ConsentRequestGORM {
 	return &ConsentRequestGORM{
 		ID:                e.ID,
 		LoginChallenge:    e.LoginChallenge,
@@ -188,7 +188,7 @@ func FromDomainConsentRequest(e *entity.ConsentRequest) *ConsentRequestGORM {
 	}
 }
 
-func ConsentRequestToUpdateMap(req *entity.ConsentRequest) map[string]interface{} {
+func ConsentRequestToUpdateMap(req *model.ConsentRequest) map[string]interface{} {
 	return map[string]interface{}{
 		"active":           req.Active,
 		"authenticated":    req.Authenticated,

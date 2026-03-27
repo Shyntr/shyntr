@@ -2,25 +2,26 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/audit"
+	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
+	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
+	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/usecase"
+	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/nevzatcirak/shyntr/config"
-	"github.com/nevzatcirak/shyntr/internal/adapters/audit"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/handlers"
-	"github.com/nevzatcirak/shyntr/internal/adapters/http/middleware"
-	"github.com/nevzatcirak/shyntr/internal/adapters/iam"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/models"
-	"github.com/nevzatcirak/shyntr/internal/adapters/persistence/repository"
-	"github.com/nevzatcirak/shyntr/internal/application/usecase"
-	utils2 "github.com/nevzatcirak/shyntr/internal/application/utils"
-	"github.com/nevzatcirak/shyntr/internal/domain/entity"
-	"github.com/nevzatcirak/shyntr/pkg/logger"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
@@ -36,7 +37,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		&models.TenantGORM{},
 		&models.OAuth2ClientGORM{},
 		&models.AuditLogGORM{},
-		&models.SigningKeyGORM{},
+		&models.CryptoKeyGORM{},
 	)
 
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
@@ -49,8 +50,9 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		AppSecret:     "12345678901234567890123456789012",
 		BaseIssuerURL: "http://localhost:7496",
 	}
-	keyMgr := utils2.NewKeyManager(db, cfg)
-	_ = keyMgr.GetActivePrivateKey()
+	keyRepository := repository.NewCryptoKeyRepository(db)
+	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	keyMgr.GetActivePrivateKey(context.Background(), "sig")
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
@@ -117,7 +119,7 @@ func TestManagementAPI_Security(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var clients []entity.OAuth2Client
+		var clients []model.OAuth2Client
 		err := json.Unmarshal(w.Body.Bytes(), &clients)
 		assert.NoError(t, err)
 
