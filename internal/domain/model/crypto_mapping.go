@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/ory/fosite"
-	"github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
 )
@@ -49,21 +48,23 @@ type AttributeMappingRule struct {
 // JWTSession represents explicitly stored JWT states if required by custom flows or specific Fosite implementations.
 type JWTSession struct {
 	*openid.DefaultSession
-	JWTClaims *jwt.JWTClaims `json:"jwt_claims"`
-	JWTHeader *jwt.Headers   `json:"jwt_header"`
+	JWTClaims     *jwt.JWTClaims `json:"jwt_claims"`
+	JWTHeader     *jwt.Headers   `json:"jwt_header"`
+	TokenFamilyID string         `json:"token_family_id"`
 }
 
 var _ fosite.Session = (*JWTSession)(nil)
-var _ oauth2.JWTSessionContainer = (*JWTSession)(nil)
 
-func NewJWTSession(subject string) *JWTSession {
+func NewJWTSession(subject string, familyID string) *JWTSession {
 	return &JWTSession{
 		DefaultSession: &openid.DefaultSession{
 			Claims:  &jwt.IDTokenClaims{Subject: subject},
 			Headers: &jwt.Headers{Extra: make(map[string]interface{})},
+			Subject: subject,
 		},
-		JWTClaims: &jwt.JWTClaims{Subject: subject, Extra: make(map[string]interface{})},
-		JWTHeader: &jwt.Headers{Extra: make(map[string]interface{})},
+		JWTClaims:     &jwt.JWTClaims{Subject: subject, Extra: make(map[string]interface{})},
+		JWTHeader:     &jwt.Headers{Extra: make(map[string]interface{})},
+		TokenFamilyID: familyID,
 	}
 }
 
@@ -87,8 +88,9 @@ func (s *JWTSession) Clone() fosite.Session {
 	}
 
 	cloned := &JWTSession{
-		JWTClaims: &jwt.JWTClaims{Extra: make(map[string]interface{})},
-		JWTHeader: &jwt.Headers{Extra: make(map[string]interface{})},
+		JWTClaims:     &jwt.JWTClaims{Extra: make(map[string]interface{})},
+		JWTHeader:     &jwt.Headers{Extra: make(map[string]interface{})},
+		TokenFamilyID: s.TokenFamilyID,
 	}
 
 	if s.DefaultSession != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/constants"
 	"github.com/Shyntr/shyntr/pkg/consts"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
@@ -63,7 +62,7 @@ func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) t
 }
 
 func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
-	tenantID := c.Param(constants.ContextKeyTenantID)
+	tenantID := c.Param(consts.ContextKeyTenantID)
 	if tenantID == "" {
 		return h.Config.DefaultTenantID
 	}
@@ -73,7 +72,7 @@ func (h *OAuth2Handler) resolveTenantID(c *gin.Context) string {
 func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	tenantID := h.resolveTenantID(c)
 	base := strings.TrimRight(h.Config.BaseIssuerURL, "/")
-	if c.Param(constants.ContextKeyTenantID) == "" {
+	if c.Param(consts.ContextKeyTenantID) == "" {
 		return base
 	}
 	return fmt.Sprintf("%s/t/%s", base, tenantID)
@@ -100,7 +99,7 @@ func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
-	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
 
 	ar, err := h.Provider.GetFosite(tenantID).NewAuthorizeRequest(ctx, c.Request)
 	if err != nil {
@@ -112,7 +111,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	client, err := h.OAuth2ClientUse.GetClientByTenant(ctx, tenantID, clientID)
 	if err != nil {
-		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String(constants.ContextKeyTenantID, tenantID))
+		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String(consts.ContextKeyTenantID, tenantID))
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
 		return
 	}
@@ -300,7 +299,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	issuer := h.getIssuer(c)
 	now := time.Now()
-	session := model.NewJWTSession(userID)
+	session := model.NewJWTSession(userID, "")
 	session.DefaultSession = &openid.DefaultSession{
 		Claims: &fositejwt.IDTokenClaims{
 			Issuer:      issuer,
@@ -341,8 +340,8 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		session.ExpiresAt[fosite.RefreshToken] = now.Add(accessTokenLife)
 	}
 
-	session.Claims.Add(constants.ContextKeyTenantID, tenantID)
-	session.JWTClaims.Extra[constants.ContextKeyTenantID] = tenantID
+	session.Claims.Add(consts.ContextKeyTenantID, tenantID)
+	session.JWTClaims.Extra[consts.ContextKeyTenantID] = tenantID
 
 	if consentContext != nil {
 		for k, v := range consentContext {
@@ -402,8 +401,8 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 
 	fositeEngine := h.Provider.GetFosite(tenantID)
-	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
-	emptySession := model.NewJWTSession("")
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
+	emptySession := model.NewJWTSession("", "")
 	ar, err := fositeEngine.NewAccessRequest(ctx, c.Request, emptySession)
 	if err != nil {
 		logger.LogFositeError(c, err, "Failed to create access request in TokenEndpoint")
@@ -414,13 +413,13 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	urlTenantID := h.resolveTenantID(c)
 	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, ar.GetClient().GetID())
 	if dbClientErr != nil {
-		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
+		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, urlTenantID))
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
 	if dbClient.TenantID != urlTenantID {
-		logger.FromGin(c).Warn("Tenant mismatch detected", zap.String("client_id", ar.GetClient().GetID()), zap.String(constants.ContextKeyTenantID, urlTenantID))
+		logger.FromGin(c).Warn("Tenant mismatch detected", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, urlTenantID))
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
@@ -484,7 +483,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 			}
 		}
 	}
-	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
 	if subject == "" {
 		sessionCookie, _ := c.Cookie(consts.SessionCookieName)
 		subject = sessionCookie
@@ -584,7 +583,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 					tokenParam = "&id_token_hint=" + idTokenHint
 				}
 
-				tID := c.Param(constants.ContextKeyTenantID)
+				tID := c.Param(consts.ContextKeyTenantID)
 				if tID == "" {
 					tID = h.Config.DefaultTenantID
 				}
@@ -623,7 +622,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
-	session := model.NewJWTSession("")
+	session := model.NewJWTSession("", "")
 	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
@@ -756,8 +755,8 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 // @Router /t/{tenant_id}/oauth2/introspect [post]
 func (h *OAuth2Handler) Introspect(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
-	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
-	session := model.NewJWTSession("")
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
+	session := model.NewJWTSession("", "")
 	ar, err := h.Provider.GetFosite(tenantID).NewIntrospectionRequest(ctx, c.Request, session)
 	if err != nil {
 		h.Provider.GetFosite(tenantID).WriteIntrospectionError(ctx, c.Writer, err)
@@ -779,7 +778,7 @@ func (h *OAuth2Handler) Introspect(c *gin.Context) {
 // @Router /t/{tenant_id}/oauth2/revoke [post]
 func (h *OAuth2Handler) Revoke(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
-	ctx := context.WithValue(c.Request.Context(), constants.ContextKeyTenantID, tenantID)
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
 
 	err := h.Provider.GetFosite(tenantID).NewRevocationRequest(ctx, c.Request)
 	h.OAuth2SessionUse.RecordRevocation(ctx, tenantID, c.ClientIP(), c.Request.UserAgent(), err == nil)

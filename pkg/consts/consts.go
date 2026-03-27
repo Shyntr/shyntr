@@ -8,9 +8,10 @@ const (
 	SigningKeyID = "shyntr-key-1"
 
 	// Context Keys
-	ContextKeyRequestID = "RequestID"
-	ContextKeyTraceID   = "TraceID"
-	ContextKeySpanID    = "SpanID"
+	ContextKeyTenantID      = "tenant_id"
+	ContextKeyClientIP      = "client_ip"
+	ContextKeyUserAgent     = "user_agent"
+	ContextKeyTokenFamilyID = "token_family_id"
 
 	// Headers
 	HeaderTraceParent = "traceparent"
