@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -60,8 +62,36 @@ func NewJWKSCache(opts ...JWKSCacheOption) *JWKSCache {
 	return cache
 }
 
+func validateJWKSURI(jwksURI string) error {
+	parsedURL, err := url.ParseRequestURI(jwksURI)
+	if err != nil {
+		return fmt.Errorf("invalid JWKS URI format: %w", err)
+	}
+
+	if parsedURL.Scheme != "https" {
+		return errors.New("security violation: JWKS URI must use the 'https' scheme")
+	}
+
+	ips, err := net.LookupIP(parsedURL.Hostname())
+	if err != nil {
+		return fmt.Errorf("failed to resolve JWKS URI hostname: %w", err)
+	}
+
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("security violation: JWKS URI hostname resolves to a restricted or private IP address (%s)", ip.String())
+		}
+	}
+
+	return nil
+}
+
 // GetEncryptionKey fetches or retrieves a cached key matching the algorithm.
 func (c *JWKSCache) GetEncryptionKey(ctx context.Context, jwksURI string, alg string) (interface{}, error) {
+	if err := validateJWKSURI(jwksURI); err != nil {
+		return nil, fmt.Errorf("SSRF validation failed for JWKS URI: %w", err)
+	}
+
 	c.mu.RLock()
 	entry, exists := c.store[jwksURI]
 	c.mu.RUnlock()
@@ -93,6 +123,10 @@ func (c *JWKSCache) GetEncryptionKey(ctx context.Context, jwksURI string, alg st
 }
 
 func (c *JWKSCache) fetchJWKS(ctx context.Context, uri string) (*jose.JSONWebKeySet, error) {
+	if err := validateJWKSURI(uri); err != nil {
+		return nil, fmt.Errorf("SSRF validation blocked fetch: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return nil, err

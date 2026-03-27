@@ -107,7 +107,10 @@ func (km *DefaultKeyManager) loadOrGenerateActiveKey(ctx context.Context, use st
 		BasicConstraintsValid: true,
 	}
 
-	certBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &newKey.PublicKey, newKey)
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &newKey.PublicKey, newKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
 
 	encryptedData, err := crypto.EncryptAES(x509.MarshalPKCS1PrivateKey(newKey), []byte(km.config.AppSecret))
@@ -450,7 +453,10 @@ func (km *DefaultKeyManager) processRotationForUse(ctx context.Context, use stri
 }
 
 func (km *DefaultKeyManager) generateKeyInternal(ctx context.Context, use string, state model.KeyState) (*model.CryptoKey, error) {
-	newKey, _ := rsa.GenerateKey(rand.Reader, 4096)
+	newKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
 
 	template := x509.Certificate{
 		SerialNumber:          big.NewInt(time.Now().UnixNano()),
@@ -462,7 +468,10 @@ func (km *DefaultKeyManager) generateKeyInternal(ctx context.Context, use string
 		BasicConstraintsValid: true,
 	}
 
-	certBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &newKey.PublicKey, newKey)
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &newKey.PublicKey, newKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
 
 	encryptedData, err := crypto.EncryptAES(x509.MarshalPKCS1PrivateKey(newKey), []byte(km.config.AppSecret))

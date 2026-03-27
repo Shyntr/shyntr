@@ -346,7 +346,13 @@ func (s *samlBuilderUseCase) GetIdentityProvider(ctx context.Context, tenantID s
 	ssoURL, _ := url.Parse(baseURLStr + "/idp/sso")
 	logoutURL, _ := url.Parse(baseURLStr + "/idp/slo")
 
-	privKey, _, _ := s.KeyMgr.GetActivePrivateKey(ctx, "sig")
+	privKey, _, err := s.KeyMgr.GetActivePrivateKey(ctx, "sig")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load active signing key: %w", err)
+	}
+	if privKey == nil {
+		return nil, errors.New("active signing key is nil")
+	}
 	cert, err := s.generateSelfSignedCert(privKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate idp cert: %w", err)
@@ -807,7 +813,10 @@ func (s *samlBuilderUseCase) ParseLogoutRequest(req *http.Request) (*crewjamsaml
 }
 
 func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *model.SAMLClient, relayState string) (string, error) {
-	idp, _ := s.GetIdentityProvider(ctx, tenantID)
+	idp, err := s.GetIdentityProvider(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 
 	resp := &crewjamsaml.LogoutResponse{
@@ -827,15 +836,24 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 		},
 	}
 
-	respBytes, _ := xml.Marshal(resp)
+	respBytes, err := xml.Marshal(resp)
+	if err != nil {
+		return "", err
+	}
 	docResp := etree.NewDocument()
 	if err := docResp.ReadFromBytes(respBytes); err != nil {
 		return "", err
 	}
-	finalXMLBytes, _ := docResp.WriteToBytes()
+	finalXMLBytes, err := docResp.WriteToBytes()
+	if err != nil {
+		return "", err
+	}
 
 	if sp.SignResponse {
-		finalXMLBytes, _ = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		finalXMLBytes, err = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign logout response: %w", err)
+		}
 	}
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)

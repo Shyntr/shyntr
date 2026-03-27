@@ -431,7 +431,7 @@ func main() {
 	createClientCmd.Flags().StringVar(&clientID, "client-id", "", "Client ID (Auto-generated if empty)")
 	createClientCmd.Flags().StringVar(&clientName, "name", "", "Client Name")
 	createClientCmd.Flags().StringVar(&clientSecret, "secret", "", "Client Secret (Auto-generated if empty)")
-	createClientCmd.Flags().StringVar(&clientSecret, "auth-method", "", "Token endpoint authentication method")
+	createClientCmd.Flags().StringVar(&authMethod, "auth-method", "", "Token endpoint authentication method")
 	createClientCmd.Flags().StringSliceVar(&redirectURIs, "redirect-uris", nil, "Comma separated Redirect URIs")
 	createClientCmd.Flags().StringSliceVar(&postLogoutURIs, "post-logout-uris", nil, "Comma separated Post Logout URIs")
 	createClientCmd.Flags().StringSliceVar(&clientScopes, "scopes", nil, "Comma separated scopes")
