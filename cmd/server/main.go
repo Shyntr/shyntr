@@ -191,7 +191,7 @@ func main() {
 
 	var deleteTenantCmd = &cobra.Command{
 		Use:   "delete-tenant [id]",
-		Short: "DeleteByClient a tenant (Cannot delete 'default')",
+		Short: "Delete a tenant (Cannot delete 'default')",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			if args[0] == "default" {
@@ -960,9 +960,10 @@ func main() {
 	importKeyCmd.Flags().String("use", "sig", "Key usage type ('sig' or 'enc')")
 	importKeyCmd.Flags().String("cert", "", "Path to the CA-signed X.509 certificate (PEM)")
 	importKeyCmd.Flags().String("key", "", "Path to the unencrypted RSA private key (PEM)")
-	err := importKeyCmd.MarkFlagRequired("cert")
-	err = importKeyCmd.MarkFlagRequired("key")
-	if err != nil {
+	if err := importKeyCmd.MarkFlagRequired("cert"); err != nil {
+		log.Fatal(err)
+	}
+	if err := importKeyCmd.MarkFlagRequired("key"); err != nil {
 		log.Fatal(err)
 	}
 
