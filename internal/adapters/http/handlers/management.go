@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -23,15 +24,16 @@ type ManagementHandler struct {
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
+	OutboundGuard    port.OutboundGuard
 }
 
 func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase, SAMLClientUse usecase.SAMLClientUseCase,
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
-	TenantUse usecase.TenantUseCase) *ManagementHandler {
+	TenantUse usecase.TenantUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
-		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse}
+		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, OutboundGuard: OutboundGuard}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -621,7 +623,12 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.AllowedScopes = req.AllowedScopes
 
 	if client.MetadataURL != "" {
-		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(
+			c.Request.Context(),
+			client.TenantID,
+			client.MetadataURL,
+			h.OutboundGuard,
+		)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
 			return

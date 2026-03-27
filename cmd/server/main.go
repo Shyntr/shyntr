@@ -30,6 +30,7 @@ import (
 	persistence "github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/application/worker"
@@ -734,7 +735,9 @@ func main() {
 				_ = xml.Unmarshal(xmlBytes, meta)
 				entityID = meta.EntityID
 			} else if metadataURL != "" {
-				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(metadataURL)
+				outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+				outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(context.Background(), tenantID, metadataURL, outboundGuard)
 				if fetchErr != nil {
 					log.Fatalf("Failed to fetch metadata URL: %v", fetchErr)
 				}
@@ -829,6 +832,18 @@ func main() {
 			}
 			if len(oidcScopes) == 0 {
 				oidcScopes = []string{"openid", "profile", "email"}
+			}
+
+			outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+			outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+
+			if _, _, err := outboundGuard.ValidateURL(
+				context.Background(),
+				tenantID,
+				model.OutboundTargetOIDCDiscovery,
+				issuerURL,
+			); err != nil {
+				log.Fatalf("issuer url violates outbound policy: %v", err)
 			}
 
 			conn := models.OIDCConnectionGORM{
@@ -1040,6 +1055,7 @@ func runServer() {
 	healthRepository := repository.NewHealthRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
 	keyRepository := repository.NewCryptoKeyRepository(db)
+	policyRepository := repository.NewOutboundPolicyRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
@@ -1058,23 +1074,25 @@ func runServer() {
 
 	// UseCase
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	auditUseCase := usecase.NewAuditUseCase(logRepository)
-	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
+	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger, outboundGuard)
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase, outboundGuard)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase, outboundGuard)
 	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger)
+	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg)
 	healthUseCase := usecase.NewHealthUseCase(healthRepository)
+	outboundPolicyUseCase := usecase.NewOutboundPolicyUseCase(policyRepository, auditLogger)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, fositeConfig, cfg, provider, keyMgr)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()

@@ -7,6 +7,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/gin-contrib/cors"
@@ -33,6 +34,8 @@ func SetupRouter(
 	samlBuilderUseCase usecase.SamlBuilderUseCase,
 	healthUseCase usecase.HealthUseCase,
 	scopeUseCase usecase.ScopeUseCase,
+	outboundPolicyUseCase usecase.OutboundPolicyUseCase,
+	outboundGuard port.OutboundGuard,
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
@@ -46,7 +49,7 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
@@ -56,6 +59,7 @@ func SetupRouter(
 	webhookHandler := handlers.NewWebhookHandler(webhookUseCase, cfg)
 	auditHandler := handlers.NewAuditHandler(auditUseCase)
 	scopeHandler := handlers.NewScopeHandler(scopeUseCase)
+	outboundPolicyHandler := handlers.NewOutboundPolicyHandler(outboundPolicyUseCase)
 
 	public := gin.New()
 	public.Use(gin.Recovery())
@@ -226,6 +230,13 @@ func SetupRouter(
 
 			//Audit
 			mgmtGroup.GET("/audit/:tenant_id", auditHandler.Get)
+
+			//Outbound Policy
+			mgmtGroup.POST("/outbound-policies", outboundPolicyHandler.Create)
+			mgmtGroup.GET("/outbound-policies", outboundPolicyHandler.List)
+			mgmtGroup.GET("/outbound-policies/:id", outboundPolicyHandler.Get)
+			mgmtGroup.PUT("/outbound-policies/:id", outboundPolicyHandler.Update)
+			mgmtGroup.DELETE("/outbound-policies/:id", outboundPolicyHandler.Delete)
 		}
 	}
 

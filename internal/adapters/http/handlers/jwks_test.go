@@ -14,6 +14,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/pkg/logger"
@@ -32,7 +33,7 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
-	db.AutoMigrate(&models.CryptoKeyGORM{})
+	db.AutoMigrate(&models.CryptoKeyGORM{}, &models.OutboundPolicyGORM{})
 
 	cfg := &config.Config{
 		AppSecret: "12345678901234567890123456789012",
@@ -63,12 +64,14 @@ func setupJWKSAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	cache := utils2.NewJWKSCache()
+	policyRepository := repository.NewOutboundPolicyRepository(db)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
 	//UseCase
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 

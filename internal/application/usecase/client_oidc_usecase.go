@@ -37,7 +37,7 @@ type OAuth2ClientUseCase interface {
 	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error)
 	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
-	SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string)
+	SendBackchannelLogout(ctx context.Context, tenantID, clientID, logoutURI, subject, issuer string)
 	CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
 	UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
 	GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error)
@@ -57,6 +57,7 @@ type oauth2ClientUseCase struct {
 	hasher   port.SecretHasher
 	keyMgr   utils2.KeyManager
 	Config   *config.Config
+	outbound port.OutboundGuard
 }
 
 type oidcDiscovery struct {
@@ -69,7 +70,12 @@ type oidcDiscovery struct {
 }
 
 func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDCConnectionRepository, tenant port.TenantRepository,
-	audit port.AuditLogger, hasher port.SecretHasher, keyMgr utils2.KeyManager, cfg *config.Config) OAuth2ClientUseCase {
+	audit port.AuditLogger,
+	hasher port.SecretHasher,
+	keyMgr utils2.KeyManager,
+	outbound port.OutboundGuard,
+	cfg *config.Config,
+) OAuth2ClientUseCase {
 	return &oauth2ClientUseCase{
 		repo:     repo,
 		connRepo: connRepo,
@@ -77,6 +83,7 @@ func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDC
 		audit:    audit,
 		hasher:   hasher,
 		keyMgr:   keyMgr,
+		outbound: outbound,
 		Config:   cfg,
 	}
 }
@@ -91,7 +98,7 @@ func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connec
 		if conn.IssuerURL == "" {
 			return "", nil, errors.New("neither endpoints nor issuer_url provided")
 		}
-		discovered, err := u.discoverEndpoints(ctx, conn.IssuerURL)
+		discovered, err := u.discoverEndpoints(ctx, tenantID, conn.IssuerURL)
 		if err != nil {
 			return "", nil, fmt.Errorf("oidc discovery failed: %w", err)
 		}
@@ -181,7 +188,7 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 		if conn.IssuerURL == "" {
 			return nil, errors.New("missing issuer url for discovery")
 		}
-		discovered, err := u.discoverEndpoints(ctx, conn.IssuerURL)
+		discovered, err := u.discoverEndpoints(ctx, tenantID, conn.IssuerURL)
 		if err != nil {
 			return nil, fmt.Errorf("oidc discovery failed: %w", err)
 		}
@@ -284,7 +291,7 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 	return userInfo, nil
 }
 
-func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, clientID, logoutURI, subject, issuer string) {
+func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, tenantID, clientID, logoutURI, subject, issuer string) {
 	if logoutURI == "" {
 		return
 	}
@@ -319,14 +326,25 @@ func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, clientI
 		return
 	}
 
+	safeURL, policy, err := u.outbound.ValidateURL(ctx, tenantID, model.OutboundTargetOIDCBackchannel, logoutURI)
+	if err != nil {
+		logger.Log.Warn("Backchannel logout blocked by outbound policy",
+			zap.String("tenant_id", tenantID),
+			zap.String("client", clientID),
+			zap.String("logout_uri", logoutURI),
+			zap.Error(err),
+		)
+		return
+	}
+
 	data := url.Values{}
 	data.Set("logout_token", logoutToken)
 
 	go func() {
-		req, _ := http.NewRequest("POST", logoutURI, bytes.NewBufferString(data.Encode()))
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		client := u.outbound.NewHTTPClient(context.Background(), tenantID, model.OutboundTargetOIDCBackchannel, policy)
 
-		client := &http.Client{Timeout: 10 * time.Second}
+		req, _ := http.NewRequest(http.MethodPost, safeURL.String(), bytes.NewBufferString(data.Encode()))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := client.Do(req)
 		if err != nil {
 			logger.Log.Warn("Backchannel logout failed", zap.String("client", clientID), zap.Error(err))
@@ -342,9 +360,13 @@ func (u *oauth2ClientUseCase) SendBackchannelLogout(ctx context.Context, clientI
 	}()
 }
 
-func (u *oauth2ClientUseCase) discoverEndpoints(ctx context.Context, issuer string) (*oidcDiscovery, error) {
-	issuer = strings.TrimRight(issuer, "/")
-	configURL := fmt.Sprintf("%s/.well-known/openid-configuration", issuer)
+func (u *oauth2ClientUseCase) discoverEndpoints(ctx context.Context, tenantID, issuer string) (*oidcDiscovery, error) {
+	issuerURL, _, err := u.outbound.ValidateURL(ctx, tenantID, model.OutboundTargetOIDCDiscovery, issuer)
+	if err != nil {
+		return nil, fmt.Errorf("issuer violates outbound policy: %w", err)
+	}
+	base := strings.TrimRight(issuerURL.String(), "/")
+	configURL := base + "/.well-known/openid-configuration"
 
 	logger.Log.Info("Discovering OIDC endpoints", zap.String("url", configURL))
 
@@ -375,6 +397,25 @@ func (u *oauth2ClientUseCase) discoverEndpoints(ctx context.Context, issuer stri
 	var disc oidcDiscovery
 	if err := json.NewDecoder(resp.Body).Decode(&disc); err != nil {
 		return nil, err
+	}
+
+	if disc.Issuer == "" || strings.TrimRight(disc.Issuer, "/") != strings.TrimRight(issuerURL.String(), "/") {
+		return nil, fmt.Errorf("discovery issuer mismatch")
+	}
+
+	for _, endpoint := range []string{
+		disc.AuthorizationEndpoint,
+		disc.TokenEndpoint,
+		disc.UserInfoEndpoint,
+		disc.JWKSURI,
+		disc.EndSessionEndpoint,
+	} {
+		if endpoint == "" {
+			continue
+		}
+		if _, _, err := u.outbound.ValidateURL(ctx, tenantID, model.OutboundTargetOIDCDiscovery, endpoint); err != nil {
+			return nil, fmt.Errorf("discovery endpoint violates outbound policy: %w", err)
+		}
 	}
 
 	return &disc, nil

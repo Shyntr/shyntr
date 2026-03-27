@@ -15,7 +15,21 @@ The Shyntr Identity Hub includes a powerful Command Line Interface (CLI) built i
 These commands are used to manage the core application state.
 
 ### `migrate`
-Runs the GORM database auto-migration to ensure all schema definitions are up to date and seeds default system scopes.
+Runs the GORM database auto-migration to ensure all schema definitions are up to date, seeds default system scopes, and initializes the default global outbound security policies.
+
+In addition to schema migration, this command also ensures that a **global outbound policy** is initialized.
+
+This policy acts as a secure default fallback when no tenant-specific outbound policy is defined.
+
+The global policy enforces:
+
+* HTTPS-only outbound communication
+* Blocking of private, loopback, and link-local IP ranges
+* DNS resolution requirement before requests
+* Disabled redirects
+* Strict timeout and response size limits
+
+This guarantees that all outbound interactions comply with Zero Trust networking principles by default.
 
 * **Usage:** `./shyntr migrate`
 * **Flags:** None
@@ -141,6 +155,8 @@ Manage external SAML Identity Providers (like corporate ADFS or Keycloak) that S
 ### `create-saml-connection`
 Registers a new external SAML IdP using its Metadata XML or URL.
 
+> **Security Note:** If `--metadata-url` is used, Shyntr validates the outbound request using the configured outbound policy rules before fetching metadata.
+
 * **Usage:** `./shyntr create-saml-connection [flags]`
 * **Flags:**
 
@@ -166,6 +182,8 @@ Manage external OpenID Connect Identity Providers (like Google, Azure AD) that S
 
 ### `create-oidc-connection`
 Registers a new external OIDC Provider.
+
+> **Security Note:** The `--issuer` URL is validated against outbound policy restrictions before the connection is created.
 
 * **Usage:** `./shyntr create-oidc-connection [flags]`
 * **Flags:**

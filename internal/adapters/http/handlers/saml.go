@@ -663,7 +663,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
 			if clientErr == nil {
 				if oidcClient.BackchannelLogoutURI != "" {
-					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
+					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), tenantID, oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
 				}
 			}
 

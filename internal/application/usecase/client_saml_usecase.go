@@ -23,13 +23,14 @@ type SAMLClientUseCase interface {
 }
 
 type samlClientUseCase struct {
-	repo   port.SAMLClientRepository
-	tenant port.TenantRepository
-	audit  port.AuditLogger
+	repo          port.SAMLClientRepository
+	tenant        port.TenantRepository
+	audit         port.AuditLogger
+	outboundGuard port.OutboundGuard
 }
 
-func NewSAMLClientUseCase(repo port.SAMLClientRepository, tenant port.TenantRepository, audit port.AuditLogger) SAMLClientUseCase {
-	return &samlClientUseCase{repo: repo, tenant: tenant, audit: audit}
+func NewSAMLClientUseCase(repo port.SAMLClientRepository, tenant port.TenantRepository, audit port.AuditLogger, outboundGuard port.OutboundGuard) SAMLClientUseCase {
+	return &samlClientUseCase{repo: repo, tenant: tenant, audit: audit, outboundGuard: outboundGuard}
 }
 
 func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) (*model.SAMLClient, error) {
@@ -41,7 +42,12 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 	}
 
 	if client.MetadataURL != "" {
-		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(
+			ctx,
+			client.TenantID,
+			client.MetadataURL,
+			u.outboundGuard,
+		)
 		if err != nil {
 			return nil, errors.New("Invalid Metadata URL: " + err.Error())
 		}

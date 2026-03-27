@@ -39,11 +39,11 @@ It is designed to be protocol-agnostic, supporting OAuth2, OIDC, and SAML native
 
 ## 🏗 Architecture
 
-Shyntr follows a **Hexagonal Architecture**:
+Shyntr follows a layered **Hexagonal / Ports & Adapters Architecture**:
 
-* **`internal/core/`**: Contains the pure business logic (Auth provider, SAML service).
-* **`internal/data/`**: Handles database interactions (GORM models, repositories).
-* **`internal/api/`**: Manages HTTP requests (Gin handlers).
+* **`internal/domain/`**: Core domain models and contracts.
+* **`internal/application/`**: Use cases, orchestration, security policies, and business rules.
+* **`internal/adapters/`**: Infrastructure implementations such as HTTP handlers, persistence, IAM integrations, and audit logging.
 
 ## 🤝 Guidelines
 
@@ -59,3 +59,23 @@ Shyntr follows a **Hexagonal Architecture**:
 Shyntr enforces strict testing standards for security boundaries:
 * **No Mock Strings for Tokens:** When writing tests for protected endpoints (like `/userinfo`), you cannot use dummy strings (e.g., `"fake-token-123"`). You must instantiate the `compose.NewOAuth2JWTStrategy`, generate a cryptographically valid JWT Access Token with proper claims, and pass it in the `Authorization` header.
 * **Asserting Zero Trust:** Always write negative assertions (e.g., verifying that data *does not* leak when a scope is missing).
+
+### Outbound Security Testing
+
+Any feature that performs outbound HTTP communication must be validated through policy enforcement.
+
+Tests must include:
+
+* Allowed outbound request scenarios
+* Blocked requests (private IP, loopback, invalid scheme)
+* Failure cases (DNS resolution failure, timeout)
+
+Direct outbound HTTP calls without policy validation are not allowed.
+
+Tests must also validate:
+
+* Global outbound policy fallback when no tenant policy exists
+* Policy precedence (tenant policy overrides global policy)
+* Enforcement consistency across all outbound targets (JWKS, Webhooks, Discovery)
+
+Failing to test fallback behavior is considered a security gap.

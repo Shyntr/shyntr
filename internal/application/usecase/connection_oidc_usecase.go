@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
@@ -25,10 +26,11 @@ type oidcConnectionUseCase struct {
 	repo     port.OIDCConnectionRepository
 	audit    port.AuditLogger
 	scopeUse ScopeUseCase
+	outbound port.OutboundGuard
 }
 
-func NewOIDCConnectionUseCase(repo port.OIDCConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase) OIDCConnectionUseCase {
-	return &oidcConnectionUseCase{repo: repo, audit: audit, scopeUse: scopeUse}
+func NewOIDCConnectionUseCase(repo port.OIDCConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase, guard port.OutboundGuard) OIDCConnectionUseCase {
+	return &oidcConnectionUseCase{repo: repo, audit: audit, scopeUse: scopeUse, outbound: guard}
 }
 
 func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule) {
@@ -46,6 +48,37 @@ func (u *oidcConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID 
 	}
 }
 
+func (u *oidcConnectionUseCase) validateOutboundEndpoints(ctx context.Context, conn *model.OIDCConnection) error {
+	if conn.IssuerURL != "" {
+		if _, _, err := u.outbound.ValidateURL(ctx, conn.TenantID, model.OutboundTargetOIDCDiscovery, conn.IssuerURL); err != nil {
+			return fmt.Errorf("issuer_url violates outbound policy: %w", err)
+		}
+	}
+
+	for field, endpoint := range map[string]string{
+		"authorization_endpoint": conn.AuthorizationEndpoint,
+		"token_endpoint":         conn.TokenEndpoint,
+		"userinfo_endpoint":      conn.UserInfoEndpoint,
+		"jwks_uri":               conn.JWKSURI,
+		"end_session_endpoint":   conn.EndSessionEndpoint,
+	} {
+		if endpoint == "" {
+			continue
+		}
+
+		target := model.OutboundTargetOIDCDiscovery
+		if field == "end_session_endpoint" {
+			target = model.OutboundTargetOIDCBackchannel
+		}
+
+		if _, _, err := u.outbound.ValidateURL(ctx, conn.TenantID, target, endpoint); err != nil {
+			return fmt.Errorf("%s violates outbound policy: %w", field, err)
+		}
+	}
+
+	return nil
+}
+
 func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) (*model.OIDCConnection, error) {
 	if conn.ID == "" {
 		conn.ID, _ = utils.GenerateRandomHex(8)
@@ -56,6 +89,9 @@ func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *mode
 	conn.Active = true
 
 	if err := conn.Validate(); err != nil {
+		return nil, err
+	}
+	if err := u.validateOutboundEndpoints(ctx, conn); err != nil {
 		return nil, err
 	}
 
@@ -85,6 +121,9 @@ func (u *oidcConnectionUseCase) UpdateConnection(ctx context.Context, conn *mode
 	conn.Active = connection.Active
 
 	if err := conn.Validate(); err != nil {
+		return err
+	}
+	if err := u.validateOutboundEndpoints(ctx, conn); err != nil {
 		return err
 	}
 

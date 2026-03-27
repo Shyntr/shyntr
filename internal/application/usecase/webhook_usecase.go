@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -31,15 +33,20 @@ type webhookUseCase struct {
 	repo      port.WebhookRepository
 	eventRepo port.WebhookEventRepository
 	audit     port.AuditLogger
-	client    *http.Client
+	outbound  port.OutboundGuard
 }
 
-func NewWebhookUseCase(repo port.WebhookRepository, eventRepo port.WebhookEventRepository, audit port.AuditLogger) WebhookUseCase {
+func NewWebhookUseCase(
+	repo port.WebhookRepository,
+	eventRepo port.WebhookEventRepository,
+	audit port.AuditLogger,
+	outbound port.OutboundGuard,
+) WebhookUseCase {
 	return &webhookUseCase{
 		repo:      repo,
 		eventRepo: eventRepo,
 		audit:     audit,
-		client:    &http.Client{Timeout: 5 * time.Second},
+		outbound:  outbound,
 	}
 }
 
@@ -54,6 +61,11 @@ func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *model.Webho
 
 	if err := webhook.Validate(); err != nil {
 		return nil, "", err
+	}
+
+	effectiveTenantID := resolveWebhookPolicyTenantID(webhook.TenantIDs)
+	if _, _, err := u.outbound.ValidateURL(ctx, effectiveTenantID, model.OutboundTargetWebhookDelivery, webhook.URL); err != nil {
+		return nil, "", fmt.Errorf("webhook url violates outbound policy: %w", err)
 	}
 
 	if err := u.repo.Create(ctx, webhook); err != nil {
@@ -136,7 +148,7 @@ func (u *webhookUseCase) StartDispatcher() {
 
 				events, _ := u.eventRepo.GetPendingEvents(bgCtx, wh.ID, limit)
 				for _, evt := range events {
-					success := u.sendHTTP(wh, evt.Payload)
+					success := u.sendHTTP(bgCtx, wh, evt.Payload)
 					if success {
 						_ = u.eventRepo.DeleteEvent(bgCtx, evt.ID)
 						if !wh.IsActive {
@@ -157,8 +169,23 @@ func (u *webhookUseCase) StartDispatcher() {
 	}()
 }
 
-func (u *webhookUseCase) sendHTTP(wh *model.Webhook, payload []byte) bool {
-	req, err := http.NewRequest("POST", wh.URL, bytes.NewBuffer(payload))
+func (u *webhookUseCase) sendHTTP(ctx context.Context, wh *model.Webhook, payload []byte) bool {
+	effectiveTenantID := resolveWebhookPolicyTenantID(wh.TenantIDs)
+
+	safeURL, policy, err := u.outbound.ValidateURL(ctx, effectiveTenantID, model.OutboundTargetWebhookDelivery, wh.URL)
+	if err != nil {
+		logger.Log.Warn("Webhook delivery blocked by outbound policy",
+			zap.String("webhook_id", wh.ID),
+			zap.String("url", wh.URL),
+			zap.String("policy_tenant_id", effectiveTenantID),
+			zap.Error(err),
+		)
+		return false
+	}
+
+	client := u.outbound.NewHTTPClient(ctx, effectiveTenantID, model.OutboundTargetWebhookDelivery, policy)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, safeURL.String(), bytes.NewBuffer(payload))
 	if err != nil {
 		return false
 	}
@@ -168,11 +195,16 @@ func (u *webhookUseCase) sendHTTP(wh *model.Webhook, payload []byte) bool {
 	mac.Write(payload)
 	req.Header.Set("X-Shyntr-Signature", hex.EncodeToString(mac.Sum(nil)))
 
-	resp, err := u.client.Do(req)
-	if err != nil || resp.StatusCode >= 300 {
+	resp, err := client.Do(req)
+	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return false
+	}
+
 	return true
 }
 
@@ -186,4 +218,32 @@ func matchPattern(value string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+func resolveWebhookPolicyTenantID(tenantIDs []string) string {
+	if len(tenantIDs) == 0 {
+		return ""
+	}
+
+	candidates := make([]string, 0, len(tenantIDs))
+	for _, t := range tenantIDs {
+		trimmed := strings.TrimSpace(t)
+		if trimmed == "" || trimmed == "*" {
+			continue
+		}
+		if looksLikeRegexPattern(trimmed) {
+			continue
+		}
+		candidates = append(candidates, trimmed)
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+
+	return ""
+}
+
+func looksLikeRegexPattern(value string) bool {
+	return strings.ContainsAny(value, `\.+?*()[]{}|^$`)
 }

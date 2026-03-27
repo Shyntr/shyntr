@@ -16,6 +16,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -38,6 +39,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		&models.OAuth2ClientGORM{},
 		&models.AuditLogGORM{},
 		&models.CryptoKeyGORM{},
+		&models.OutboundPolicyGORM{},
 	)
 
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
@@ -64,6 +66,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		SendDebugMessagesToClients: true,
 	}
 
+	policyRepository := repository.NewOutboundPolicyRepository(db)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
 	requestRepository := repository.NewAuthRequestRepository(db)
 	tenantRepository := repository.NewTenantRepository(db)
 	clientRepository := repository.NewOAuth2ClientRepository(db)
@@ -76,14 +80,14 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
-	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil)
+	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger, outboundGuard)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil, outboundGuard)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

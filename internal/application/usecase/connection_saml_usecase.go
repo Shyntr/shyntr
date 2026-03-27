@@ -30,13 +30,15 @@ type samlConnectionUseCase struct {
 	repo     port.SAMLConnectionRepository
 	audit    port.AuditLogger
 	scopeUse ScopeUseCase
+	outbound port.OutboundGuard
 }
 
-func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase) SAMLConnectionUseCase {
+func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase, outbound port.OutboundGuard) SAMLConnectionUseCase {
 	return &samlConnectionUseCase{
 		repo:     repo,
 		audit:    audit,
 		scopeUse: scopeUse,
+		outbound: outbound,
 	}
 }
 
@@ -62,7 +64,7 @@ func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *mode
 
 	var descriptor *saml.EntityDescriptor
 	if conn.MetadataURL != "" {
-		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
+		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(ctx, conn.TenantID, conn.MetadataURL, u.outbound)
 		if err != nil {
 			return nil, err
 		}
@@ -158,7 +160,7 @@ func (u *samlConnectionUseCase) GetConnectionByIdpEntity(ctx context.Context, te
 func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) error {
 	var descriptor *saml.EntityDescriptor
 	if conn.MetadataURL != "" {
-		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
+		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(ctx, conn.TenantID, conn.MetadataURL, u.outbound)
 		if err != nil {
 			return err
 		}

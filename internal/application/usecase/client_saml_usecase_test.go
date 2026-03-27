@@ -3,6 +3,8 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/Shyntr/shyntr/internal/application/usecase"
@@ -49,6 +51,22 @@ func (m *mockSAMLRepo) Update(ctx context.Context, client *model.SAMLClient) err
 	return nil
 }
 
+type mockOutboundGuard struct{}
+
+func (m *mockOutboundGuard) ValidateURL(ctx context.Context, tenantID string, target model.OutboundTargetType, rawURL string) (*url.URL, *model.OutboundPolicy, error) {
+	u, _ := url.Parse(rawURL)
+	return u, &model.OutboundPolicy{
+		Enabled:               true,
+		AllowedSchemes:        []string{"http", "https"},
+		RequestTimeoutSeconds: 5,
+		MaxResponseBytes:      2 << 20,
+	}, nil
+}
+
+func (m *mockOutboundGuard) NewHTTPClient(ctx context.Context, tenantID string, target model.OutboundTargetType, policy *model.OutboundPolicy) *http.Client {
+	return &http.Client{}
+}
+
 type mockAuditLogger struct {
 	LoggedTenantID string
 	LoggedAction   string
@@ -67,7 +85,7 @@ func TestSAMLClientUseCase_DeleteClient(t *testing.T) {
 	mockRepo := &mockSAMLRepo{}
 	mockAudit := &mockAuditLogger{}
 
-	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit)
+	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit, &mockOutboundGuard{})
 
 	tenantID := "tnt_saml_01"
 	clientID := "client_123"
@@ -93,7 +111,7 @@ func TestSAMLClientUseCase_DeleteClient_RepoFailure(t *testing.T) {
 
 	mockRepo := &mockSAMLRepo{}
 	mockAudit := &mockAuditLogger{}
-	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit)
+	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit, &mockOutboundGuard{})
 
 	expectedErr := errors.New("database connection lost")
 	mockRepo.DeleteFunc = func(ctx context.Context, tID, id string) error {
@@ -110,7 +128,7 @@ func TestSAMLClientUseCase_UpdateClient_ValidationFailure(t *testing.T) {
 	t.Parallel()
 	mockRepo := &mockSAMLRepo{}
 	mockAudit := &mockAuditLogger{}
-	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit)
+	uc := usecase.NewSAMLClientUseCase(mockRepo, nil, mockAudit, &mockOutboundGuard{})
 
 	invalidClient := &model.SAMLClient{
 		ID:       "client_1",
