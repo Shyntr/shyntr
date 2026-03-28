@@ -801,24 +801,44 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 // @Accept application/x-www-form-urlencoded
 // @Produce json
 // @Param tenant_id path string true "Tenant ID"
-// @Param SAMLRequest query string false "SAML LogoutRequest"
-// @Param SAMLResponse query string false "SAML LogoutResponse"
+// @Param SAMLRequest query string false "SAML LogoutRequest (HTTP-Redirect)"
+// @Param SAMLRequest formData string false "SAML LogoutRequest (HTTP-POST)"
+// @Param SAMLResponse query string false "SAML LogoutResponse (HTTP-Redirect)"
+// @Param SAMLResponse formData string false "SAML LogoutResponse (HTTP-POST)"
 // @Param connection_id query string false "IdP Connection ID for SP-initiated SLO"
+// @Param connection_id formData string false "IdP Connection ID for SP-initiated SLO"
 // @Param RelayState query string false "Relay state"
+// @Param RelayState formData string false "Relay state"
 // @Success 302 {string} string "Redirects to external IdP or RelayState"
 // @Success 200 {object} map[string]string "Logout successful message"
 // @Failure 400 {object} map[string]string "Invalid logout request"
 // @Router /t/{tenant_id}/saml/sp/slo [get]
+// @Router /t/{tenant_id}/saml/sp/slo [post]
 func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
 		tenantID = h.Config.DefaultTenantID
 	}
 
-	samlReqEncoded := c.Query("SAMLRequest")
-	samlResEncoded := c.Query("SAMLResponse")
-	connectionID := c.Query("connection_id")
-	relayState := c.Query("RelayState")
+	samlReqEncoded := firstNonEmpty(
+		c.Query("SAMLRequest"),
+		c.PostForm("SAMLRequest"),
+	)
+
+	samlResEncoded := firstNonEmpty(
+		c.Query("SAMLResponse"),
+		c.PostForm("SAMLResponse"),
+	)
+
+	connectionID := firstNonEmpty(
+		c.Query("connection_id"),
+		c.PostForm("connection_id"),
+	)
+
+	relayState := firstNonEmpty(
+		c.Query("RelayState"),
+		c.PostForm("RelayState"),
+	)
 
 	if samlReqEncoded != "" {
 		logoutReq, err := h.samlBuilderUseCase.ParseLogoutRequest(c.Request)
@@ -935,7 +955,11 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	}
 
 	if connectionID == "" {
-		logger.FromGin(c).Warn("SAML Connection is empty for SP-initiated SLO.")
+		logger.FromGin(c).Warn("Missing connection_id for SP-initiated SLO.",
+			zap.String("method", c.Request.Method),
+			zap.Bool("has_saml_request", samlReqEncoded != ""),
+			zap.Bool("has_saml_response", samlResEncoded != ""),
+		)
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
 		} else {
@@ -1110,4 +1134,13 @@ func verifyRedirectSignature(req *http.Request, certPEM string) error {
 	hashed := hasher.Sum(nil)
 
 	return rsa.VerifyPKCS1v15(rsaPub, hash, hashed, sigBytes)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
