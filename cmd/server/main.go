@@ -1063,6 +1063,7 @@ func runServer() {
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	federationStateProvider := security.NewFederationStateProvider(cfg)
 
 	startupCtx := context.Background()
 	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "sig"); err != nil {
@@ -1086,13 +1087,13 @@ func runServer() {
 	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
-	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg)
+	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)
 	healthUseCase := usecase.NewHealthUseCase(healthRepository)
 	outboundPolicyUseCase := usecase.NewOutboundPolicyUseCase(policyRepository, auditLogger)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, outboundPolicyUseCase, outboundGuard, fositeConfig, cfg, provider, keyMgr)
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()

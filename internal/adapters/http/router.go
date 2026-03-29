@@ -8,6 +8,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
 	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/gin-contrib/cors"
@@ -40,6 +41,7 @@ func SetupRouter(
 	cfg *config.Config,
 	Provider *utils2.Provider,
 	km utils2.KeyManager,
+	federationState security.FederationStateProvider,
 ) (*gin.Engine, *gin.Engine) {
 	attrMapper := mapper.New()
 
@@ -53,7 +55,7 @@ func SetupRouter(
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
-	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
+	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase, federationState)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,
 		auth2SessionUseCase, samlClientUseCase, clientUseCase, webhookUseCase, scopeUseCase)
 	webhookHandler := handlers.NewWebhookHandler(webhookUseCase, cfg)

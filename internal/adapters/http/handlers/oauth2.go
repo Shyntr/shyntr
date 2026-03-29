@@ -78,6 +78,19 @@ func (h *OAuth2Handler) getIssuer(c *gin.Context) string {
 	return fmt.Sprintf("%s/t/%s", base, tenantID)
 }
 
+func (h *OAuth2Handler) resolveSessionSubject(c *gin.Context, ctx context.Context) *model.LoginRequest {
+	sessionToken, err := c.Cookie(consts.SessionCookieName)
+	if err != nil || sessionToken == "" {
+		return nil
+	}
+	loginReq, err := h.AuthReq.GetLoginRequestBySessionToken(ctx, sessionToken)
+	if err != nil {
+		logger.FromGin(c).Debug("Session token lookup failed, treating as unauthenticated")
+		return nil
+	}
+	return loginReq
+}
+
 // Authorize godoc
 // @Summary OAuth2 Authorization Endpoint
 // @Description Handles the initial step of the OAuth 2.1 authorization code flow. Enforces PKCE, tenant boundaries, and redirects the user agent to the login or consent UI.
@@ -151,14 +164,6 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	}
 
 	prompt := ar.GetRequestForm().Get("prompt")
-	sessionCookie, _ := c.Cookie(consts.SessionCookieName)
-	hasSession := sessionCookie != ""
-
-	if prompt == "none" && !hasSession {
-		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
-		return
-	}
-
 	forceLogin := prompt == "login"
 	verifier := c.Query("login_verifier")
 
@@ -183,24 +188,28 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 				}
 			}
 		} else {
-			logger.FromGin(c).Warn("Invalid or expired login verifier", zap.String("verifier", verifier))
+			logger.FromGin(c).Warn("Invalid or expired login verifier")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_login_verifier"})
 			return
 		}
 
-	} else if hasSession && !forceLogin {
-		userID = sessionCookie
-		lastLogin, lastLoginErr := h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, userID)
-		if lastLoginErr == nil {
-			authTime = lastLogin.UpdatedAt
-			isRemembered = lastLogin.Remember
-			rememberForDuration = lastLogin.RememberFor
-			if len(lastLogin.Context) > 0 {
-				if err := json.Unmarshal(lastLogin.Context, &userContext); err != nil {
+	} else if !forceLogin {
+		if sessionLoginReq := h.resolveSessionSubject(c, ctx); sessionLoginReq != nil {
+			userID = sessionLoginReq.Subject
+			authTime = sessionLoginReq.UpdatedAt
+			isRemembered = sessionLoginReq.Remember
+			rememberForDuration = sessionLoginReq.RememberFor
+			if len(sessionLoginReq.Context) > 0 {
+				if err := json.Unmarshal(sessionLoginReq.Context, &userContext); err != nil {
 					logger.FromGin(c).Error("Failed to unmarshal SSO user context", zap.Error(err))
 				}
 			}
 		}
+	}
+
+	if prompt == "none" && userID == "" {
+		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
+		return
 	}
 
 	if userID == "" || forceLogin {
@@ -228,7 +237,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 		_, savedErr := h.AuthReq.CreateLoginRequest(ctx, &request)
 		if savedErr != nil {
-			logger.FromGin(c).Error("Failed to save login request", zap.Error(err))
+			logger.FromGin(c).Error("Failed to save login request", zap.Error(savedErr))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database_error"})
 			return
 		}
@@ -410,16 +419,15 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		return
 	}
 
-	urlTenantID := h.resolveTenantID(c)
 	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, ar.GetClient().GetID())
 	if dbClientErr != nil {
-		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, urlTenantID))
+		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, tenantID))
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
 
-	if dbClient.TenantID != urlTenantID {
-		logger.FromGin(c).Warn("Tenant mismatch detected", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, urlTenantID))
+	if dbClient.TenantID != tenantID {
+		logger.FromGin(c).Warn("Tenant mismatch detected", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, tenantID))
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
 		return
 	}
@@ -485,8 +493,9 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	}
 	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
 	if subject == "" {
-		sessionCookie, _ := c.Cookie(consts.SessionCookieName)
-		subject = sessionCookie
+		if sessionLoginReq := h.resolveSessionSubject(c, ctx); sessionLoginReq != nil {
+			subject = sessionLoginReq.Subject
+		}
 	}
 
 	isValidRedirect := false
@@ -537,8 +546,10 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	}
 
 	var idpSource string
+	var lastLogin *model.LoginRequest
 	if subject != "" {
-		lastLogin, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, subject)
+		var err error
+		lastLogin, err = h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, subject)
 		if err == nil {
 			if len(lastLogin.Context) > 0 {
 				var ctxData map[string]interface{}

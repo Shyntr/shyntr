@@ -6,7 +6,6 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/Shyntr/shyntr/internal/application/utils"
@@ -158,8 +158,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		ctxData = make(map[string]interface{})
 	}
 	ctxData["connection_id"] = connectionID
-	hash := sha256.Sum256([]byte(csrfToken))
-	ctxData["csrf_hash"] = hex.EncodeToString(hash[:])
+	ctxData["federation_action"] = "saml_login"
 
 	loginReq.Context, _ = json.Marshal(ctxData)
 	if requestID != "" {
@@ -218,7 +217,20 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 	c.SetCookie("shyntr_fed_csrf", "", -1, "/", "", h.Config.CookieSecure, true)
 
-	loginChallenge := relayState
+	verifiedState, err := h.samlBuilderUseCase.VerifyRelayState(
+		c.Request.Context(),
+		tenantID,
+		relayState,
+		csrfCookie,
+	)
+	if err != nil {
+		logger.FromGin(c).Warn("SAML ACS relay state validation failed", zap.Error(err), zap.String("protocol", "saml"))
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_relay_state"})
+		return
+	}
+
+	loginChallenge := verifiedState.LoginChallenge
+	connectionID := verifiedState.ConnectionID
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
@@ -227,25 +239,16 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		return
 	}
 
-	var ctxData map[string]interface{}
-	_ = json.Unmarshal(loginReq.Context, &ctxData)
-	expectedCsrfHash, _ := ctxData["csrf_hash"].(string)
-	actualHash := sha256.Sum256([]byte(csrfCookie))
-	if hex.EncodeToString(actualHash[:]) != expectedCsrfHash {
-		logger.FromGin(c).Error("CSRF Flow Hijacking Attempt!")
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_csrf_token"})
-		return
-	}
-	expectedConnID, ok := ctxData["connection_id"].(string)
-	if !ok || expectedConnID == "" {
-		logger.FromGin(c).Error("Missing connection_id in session state")
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session_state"})
-		return
-	}
 	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
-	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, expectedConnID)
 	if err != nil {
-		logger.FromGin(c).Warn("Connection not found for stored state", zap.String("connection_id", expectedConnID))
+		logger.FromGin(c).Error("Failed to handle SAML ACS", zap.Error(err), zap.String("protocol", "saml"))
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_saml_response"})
+		return
+	}
+
+	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
+	if err != nil {
+		logger.FromGin(c).Warn("Connection not found for verified relay state", zap.String("connection_id", connectionID))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "connection_not_found"})
 		return
 	}
@@ -253,7 +256,9 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	issuer := assertion.Issuer.Value
 	if issuer != conn.IdpEntityID {
 		logger.FromGin(c).Error("SAML Signature Wrapping (XSW) / Issuer Mismatch Detected!",
-			zap.String("expected", conn.IdpEntityID), zap.String("actual", issuer))
+			zap.String("expected", conn.IdpEntityID),
+			zap.String("actual", issuer),
+		)
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_issuer"})
 		return
 	}
@@ -277,17 +282,28 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	finalAttributes, err := h.Mapper.Map(rawAttributes, conn.AttributeMapping)
 	if err != nil {
-		logger.FromGin(c).Warn("Attribute mapping failed", zap.Error(err), zap.String("protocol", "saml"))
+		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "saml"))
 		finalAttributes = rawAttributes
 	}
 
 	subject := assertion.Subject.NameID.Value
-	finalAttributes["sub"] = subject
-	finalAttributes["source"] = "saml"
-	finalAttributes["issuer"] = issuer
+	if subject == "" {
+		if sub, ok := finalAttributes["sub"].(string); ok {
+			subject = sub
+		}
+	}
+	if email, ok := finalAttributes["email"].(string); ok && subject == "" {
+		subject = email
+	}
 
-	finalAttributes["idp"] = fmt.Sprintf("saml:%s", conn.ID)
+	finalAttributes["source"] = "saml"
+	finalAttributes["connection_id"] = connectionID
+	finalAttributes["idp"] = fmt.Sprintf("saml:%s", connectionID)
 	finalAttributes["amr"] = []string{"ext"}
+	if _, ok := finalAttributes["sub"]; !ok {
+		finalAttributes["sub"] = subject
+	}
+
 	h.wh.FireEvent(tenantID, "user.login.ext", finalAttributes)
 
 	var existingCtx map[string]interface{}
@@ -298,10 +314,18 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 
 	existingCtx["login_claims"] = finalAttributes
-	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), relayState, subject, conn.Name, existingCtx, c.ClientIP(), c.Request.UserAgent())
+	loginReq, err = h.AuthUse.CompleteProviderLogin(
+		c.Request.Context(),
+		loginChallenge,
+		subject,
+		conn.Name,
+		existingCtx,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
 	if err != nil {
-		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatus(http.StatusInternalServerError)
+		logger.FromGin(c).Error("Failed to complete SAML login", zap.Error(err), zap.String("protocol", "saml"))
+		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to complete SAML login", err))
 		return
 	}
 

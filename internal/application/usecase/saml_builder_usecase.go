@@ -10,11 +10,9 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"encoding/xml"
 	"errors"
@@ -24,14 +22,13 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/beevik/etree"
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/google/uuid"
@@ -51,25 +48,27 @@ type SamlBuilderUseCase interface {
 	GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *model.SAMLClient, relayState string) (string, error)
 	signElementXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error)
 	generateSelfSignedCert(key *rsa.PrivateKey) (*x509.Certificate, error)
-	VerifyRelayState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
+	VerifyRelayState(ctx context.Context, tenantID, encryptedState, csrfToken string) (*security.FederationStatePayload, error)
 }
 
 type samlBuilderUseCase struct {
-	clientRepo port.SAMLClientRepository
-	connRepo   port.SAMLConnectionRepository
-	replayRepo port.SAMLReplayRepository
-	KeyMgr     utils.KeyManager
-	Config     *config.Config
+	clientRepo    port.SAMLClientRepository
+	connRepo      port.SAMLConnectionRepository
+	replayRepo    port.SAMLReplayRepository
+	KeyMgr        utils.KeyManager
+	Config        *config.Config
+	stateProvider security.FederationStateProvider
 }
 
 func NewSamlBuilderUseCase(clientRepo port.SAMLClientRepository, connRepo port.SAMLConnectionRepository,
-	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config) SamlBuilderUseCase {
+	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config, stateProvider security.FederationStateProvider) SamlBuilderUseCase {
 	return &samlBuilderUseCase{
-		clientRepo: clientRepo,
-		connRepo:   connRepo,
-		replayRepo: replayRepo,
-		KeyMgr:     km,
-		Config:     cfg,
+		clientRepo:    clientRepo,
+		connRepo:      connRepo,
+		replayRepo:    replayRepo,
+		KeyMgr:        km,
+		Config:        cfg,
+		stateProvider: stateProvider,
 	}
 }
 
@@ -225,7 +224,17 @@ func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connecti
 		return "", "", fmt.Errorf("no SSO URL found for HTTP-Redirect or HTTP-POST bindings")
 	}
 
-	relayState := loginChallenge
+	relayState, err := s.stateProvider.Issue(ctx, security.IssueFederationStateInput{
+		Action:         security.FederationActionSAMLLogin,
+		TenantID:       tenantID,
+		LoginChallenge: loginChallenge,
+		ConnectionID:   connectionID,
+		CSRFToken:      csrfToken,
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to issue relay state: %w", err)
+	}
 	req, err := sp.MakeAuthenticationRequest(ssoURL, binding, crewjamsaml.HTTPPostBinding)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)
@@ -860,25 +869,12 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 	return buildHTMLForm(sp.SLOURL, b64Resp, relayState), nil
 }
 
-func (s *samlBuilderUseCase) VerifyRelayState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error) {
-	decryptedBytes, err := shcrypto.DecryptAES(encryptedState, []byte(s.Config.AppSecret))
-	if err != nil {
-		return "", "", fmt.Errorf("invalid relay state signature: %w", err)
-	}
-
-	parts := strings.Split(string(decryptedBytes), "|")
-	if len(parts) != 3 {
-		return "", "", errors.New("malformed relay state payload")
-	}
-
-	expectedHash := parts[2]
-	hash := sha256.Sum256([]byte(csrfToken))
-	actualHash := hex.EncodeToString(hash[:])
-	if expectedHash != actualHash {
-		return "", "", errors.New("csrf token mismatch")
-	}
-
-	return parts[0], parts[1], nil
+func (s *samlBuilderUseCase) VerifyRelayState(ctx context.Context, tenantID, encryptedState, csrfToken string) (*security.FederationStatePayload, error) {
+	return s.stateProvider.Verify(ctx, encryptedState, security.VerifyFederationStateInput{
+		ExpectedAction: security.FederationActionSAMLLogin,
+		ExpectedTenant: tenantID,
+		CSRFToken:      csrfToken,
+	})
 }
 
 func buildHTMLForm(acsURL, b64Resp, relayState string) string {

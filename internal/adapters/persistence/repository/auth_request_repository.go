@@ -67,6 +67,23 @@ func (r *authRequestRepository) GetAuthenticatedLoginRequestBySubject(ctx contex
 	return dbModel.ToDomain(), nil
 }
 
+func (r *authRequestRepository) GetLoginRequestBySessionToken(ctx context.Context, sessionToken string) (*model.LoginRequest, error) {
+	if sessionToken == "" {
+		return nil, errors.New("session token must not be empty")
+	}
+	var dbModel models.LoginRequestGORM
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ? AND authenticated = ?", sessionToken, true).
+		Order("created_at DESC").
+		First(&dbModel).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("session not found or expired")
+		}
+		return nil, err
+	}
+	return dbModel.ToDomain(), nil
+}
+
 func (r *authRequestRepository) UpdateLoginRequest(ctx context.Context, req *model.LoginRequest) error {
 	dbModel := models.FromDomainLoginRequest(req)
 	return r.db.WithContext(ctx).Save(dbModel).Error

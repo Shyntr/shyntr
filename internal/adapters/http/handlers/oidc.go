@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
@@ -24,11 +26,12 @@ type OIDCHandler struct {
 	OIDCUse       usecase.OIDCConnectionUseCase
 	Mapper        *mapper.Mapper
 	wh            usecase.WebhookUseCase
+	StateProvider security.FederationStateProvider
 }
 
 func NewOIDCHandler(Config *config.Config, clientUseCase usecase.OAuth2ClientUseCase, AuthUse usecase.AuthUseCase,
-	OIDCUse usecase.OIDCConnectionUseCase, m *mapper.Mapper, wh usecase.WebhookUseCase) *OIDCHandler {
-	return &OIDCHandler{Config: Config, clientUseCase: clientUseCase, AuthUse: AuthUse, OIDCUse: OIDCUse, Mapper: m, wh: wh}
+	OIDCUse usecase.OIDCConnectionUseCase, m *mapper.Mapper, wh usecase.WebhookUseCase, StateProvider security.FederationStateProvider) *OIDCHandler {
+	return &OIDCHandler{Config: Config, clientUseCase: clientUseCase, AuthUse: AuthUse, OIDCUse: OIDCUse, Mapper: m, wh: wh, StateProvider: StateProvider}
 }
 
 // Login godoc
@@ -64,10 +67,28 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 		return
 	}
 
-	csrfToken, _ := utils.GenerateRandomHex(32)
+	csrfToken, err := utils.GenerateRandomHex(32)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "csrf_generation_failed"})
+		return
+	}
+
 	c.SetCookie("shyntr_fed_csrf", csrfToken, 600, "/", "", h.Config.CookieSecure, true)
 
-	redirectURL, providerCtx, err := h.clientUseCase.InitiateAuth(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	state, err := h.StateProvider.Issue(c.Request.Context(), security.IssueFederationStateInput{
+		Action:         security.FederationActionOIDCLogin,
+		TenantID:       tenantID,
+		LoginChallenge: loginChallenge,
+		ConnectionID:   connectionID,
+		CSRFToken:      csrfToken,
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "state_issue_failed"})
+		return
+	}
+
+	redirectURL, providerCtx, err := h.clientUseCase.InitiateAuth(c.Request.Context(), tenantID, connectionID, state, csrfToken)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initiate OIDC", zap.Error(err), zap.String("protocol", "oidc"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "oidc_init_failed", "details": err.Error()})
@@ -93,10 +114,33 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 // @Router /t/{tenant_id}/oidc/callback [get]
 func (h *OIDCHandler) Callback(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		return
+	}
+	providerError := c.Query("error")
+	if providerError != "" {
+		errorDescription := c.Query("error_description")
+		logger.FromGin(c).Warn("OIDC provider returned error",
+			zap.String("protocol", "oidc"),
+			zap.String("error", providerError),
+			zap.String("error_description", errorDescription),
+		)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error":             providerError,
+			"error_description": errorDescription,
+		})
+		return
+	}
 	code := c.Query("code")
-	state := c.Query("state")
+	stateToken := c.Query("state")
 
-	if code == "" || state == "" {
+	if stateToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing_state"})
+		return
+	}
+
+	if code == "" {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_callback_params"})
 		return
 	}
@@ -109,13 +153,22 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 	c.SetCookie("shyntr_fed_csrf", "", -1, "/", "", h.Config.CookieSecure, true)
 
-	loginChallenge, connectionID, err := h.clientUseCase.VerifyState(state, csrfCookie)
+	verifiedState, err := h.StateProvider.Verify(c.Request.Context(), stateToken, security.VerifyFederationStateInput{
+		ExpectedAction: security.FederationActionOIDCLogin,
+		ExpectedTenant: tenantID,
+		CSRFToken:      csrfCookie,
+	})
 	if err != nil {
-		logger.FromGin(c).Warn("Invalid OIDC state", zap.Error(err), zap.String("protocol", "oidc"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_state_token"})
+		logger.FromGin(c).Warn("OIDC callback federation state validation failed",
+			zap.Error(err),
+			zap.String("protocol", "oidc"),
+		)
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid_state"})
 		return
 	}
 
+	loginChallenge := verifiedState.LoginChallenge
+	connectionID := verifiedState.ConnectionID
 	loginReq, loginReqErr := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if loginReqErr != nil {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "session_expired"})
@@ -123,7 +176,12 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 
 	var ctxData map[string]interface{}
-	json.Unmarshal(loginReq.Context, &ctxData)
+	if len(loginReq.Context) > 0 {
+		_ = json.Unmarshal(loginReq.Context, &ctxData)
+	}
+	if ctxData == nil {
+		ctxData = make(map[string]interface{})
+	}
 	codeVerifier, _ := ctxData["code_verifier"].(string)
 	expectedNonce, _ := ctxData["nonce"].(string)
 
