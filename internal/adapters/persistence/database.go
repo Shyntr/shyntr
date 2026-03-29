@@ -86,6 +86,29 @@ func MigrateDB(db *gorm.DB) error {
 			}
 		}
 
+		if db.Migrator().HasTable("o_auth2_sessions") && db.Dialector.Name() == "postgres" {
+			renameTypeColumnSQL := `
+			DO $$
+			BEGIN
+				-- If old column "type" exists and new column "token_type" does not, rename it.
+				IF EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_name = 'o_auth2_sessions' AND column_name = 'type'
+				) AND NOT EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_name = 'o_auth2_sessions' AND column_name = 'token_type'
+				) THEN
+					ALTER TABLE o_auth2_sessions RENAME COLUMN "type" TO token_type;
+				END IF;
+			END $$;
+			`
+			if err := db.Exec(renameTypeColumnSQL).Error; err != nil {
+				return err
+			}
+		}
+
 		if err := db.Exec(`
           DROP INDEX IF EXISTS oauth2_sessions_one_active_refresh_per_request;
        `).Error; err != nil {
@@ -105,6 +128,7 @@ func MigrateDB(db *gorm.DB) error {
        `).Error; err != nil {
 			return err
 		}
+
 	}
 
 	if err := seedGlobalOutboundPolicies(db); err != nil {
