@@ -34,7 +34,7 @@ import (
 )
 
 type OAuth2ClientUseCase interface {
-	InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error)
+	InitiateAuth(ctx context.Context, tenantID, connectionID, stateToken, csrfToken string) (string, map[string]interface{}, error)
 	VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error)
 	ExchangeAndUserInfo(ctx context.Context, tenantID, code, connectionID, codeVerifier, expectedNonce string) (map[string]interface{}, error)
 	SendBackchannelLogout(ctx context.Context, tenantID, clientID, logoutURI, subject, issuer string)
@@ -88,7 +88,7 @@ func NewOAuth2ClientUseCase(repo port.OAuth2ClientRepository, connRepo port.OIDC
 	}
 }
 
-func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connectionID, loginChallenge, csrfToken string) (string, map[string]interface{}, error) {
+func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connectionID, stateToken, csrfToken string) (string, map[string]interface{}, error) {
 	conn, err := u.connRepo.GetByTenantAndID(ctx, tenantID, connectionID)
 	if err != nil {
 		return "", nil, fmt.Errorf("connection not found: %w", err)
@@ -128,27 +128,20 @@ func (u *oauth2ClientUseCase) InitiateAuth(ctx context.Context, tenantID, connec
 	hashPkce := sha256.Sum256([]byte(codeVerifier))
 	codeChallenge := base64.RawURLEncoding.EncodeToString(hashPkce[:])
 
-	hashCsrf := sha256.Sum256([]byte(csrfToken))
-	csrfHash := hex.EncodeToString(hashCsrf[:])
-
-	plainState := fmt.Sprintf("%s|%s|%s", loginChallenge, connectionID, csrfHash)
-	encryptedState, err := crypto.EncryptAES([]byte(plainState), []byte(u.Config.AppSecret))
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to encrypt state: %w", err)
-	}
-
-	opts := []oauth2.AuthCodeOption{
+	authURL := oauth2Config.AuthCodeURL(
+		stateToken,
 		oauth2.SetAuthURLParam("nonce", nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	}
+	)
 
-	providerContext := map[string]interface{}{
+	providerCtx := map[string]interface{}{
 		"nonce":         nonce,
 		"code_verifier": codeVerifier,
+		"connection_id": connectionID,
 	}
 
-	return oauth2Config.AuthCodeURL(encryptedState, opts...), providerContext, nil
+	return authURL, providerCtx, nil
 }
 
 func (u *oauth2ClientUseCase) VerifyState(encryptedState, csrfToken string) (loginChallenge, connectionID string, err error) {
