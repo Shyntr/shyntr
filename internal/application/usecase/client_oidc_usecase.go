@@ -231,7 +231,8 @@ func (u *oauth2ClientUseCase) ExchangeAndUserInfo(ctx context.Context, tenantID,
 			rawIDToken = decryptedToken
 		}
 
-		provider, err := oidc.NewProvider(ctx, conn.IssuerURL)
+		normalizedIssuer := strings.TrimRight(strings.TrimSpace(conn.IssuerURL), "/")
+		provider, err := oidc.NewProvider(ctx, normalizedIssuer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize oidc provider for verification: %w", err)
 		}

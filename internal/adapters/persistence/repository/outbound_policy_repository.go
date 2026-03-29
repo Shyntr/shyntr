@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -21,6 +22,7 @@ func NewOutboundPolicyRepository(db *gorm.DB) port.OutboundPolicyRepository {
 
 func (r *outboundPolicyRepository) GetEffectivePolicy(ctx context.Context, tenantID string, target model.OutboundTargetType) (*model.OutboundPolicy, error) {
 	var row models.OutboundPolicyGORM
+	tenantID = strings.TrimSpace(tenantID)
 
 	if tenantID != "" {
 		err := r.db.WithContext(ctx).
@@ -86,7 +88,32 @@ func (r *outboundPolicyRepository) Update(ctx context.Context, policy *model.Out
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&models.OutboundPolicyGORM{}).Where("id = ?", row.ID).Updates(row).Error
+
+	updates := map[string]interface{}{
+		"tenant_id":                  row.TenantID,
+		"name":                       row.Name,
+		"target":                     row.Target,
+		"enabled":                    row.Enabled,
+		"allowed_schemes_json":       row.AllowedSchemesJSON,
+		"allowed_host_patterns_json": row.AllowedHostPatternsJSON,
+		"allowed_path_patterns_json": row.AllowedPathPatternsJSON,
+		"allowed_ports_json":         row.AllowedPortsJSON,
+		"block_private_ips":          row.BlockPrivateIPs,
+		"block_loopback_ips":         row.BlockLoopbackIPs,
+		"block_link_local_ips":       row.BlockLinkLocalIPs,
+		"block_multicast_ips":        row.BlockMulticastIPs,
+		"block_localhost_names":      row.BlockLocalhostNames,
+		"disable_redirects":          row.DisableRedirects,
+		"require_dns_resolve":        row.RequireDNSResolve,
+		"request_timeout_seconds":    row.RequestTimeoutSeconds,
+		"max_response_bytes":         row.MaxResponseBytes,
+		"updated_at":                 row.UpdatedAt,
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&models.OutboundPolicyGORM{}).
+		Where("id = ?", row.ID).
+		Updates(updates).Error
 }
 
 func (r *outboundPolicyRepository) Delete(ctx context.Context, id string) error {

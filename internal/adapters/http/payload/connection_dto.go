@@ -1,6 +1,8 @@
 package payload
 
 import (
+	"strings"
+
 	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
@@ -81,7 +83,7 @@ func (req *CreateOIDCConnectionRequest) ToDomain() *model.OIDCConnection {
 		ID:                    req.ID,
 		TenantID:              req.TenantID,
 		Name:                  req.Name,
-		IssuerURL:             req.IssuerURL,
+		IssuerURL:             strings.TrimRight(strings.TrimSpace(req.IssuerURL), "/"),
 		ClientID:              req.ClientID,
 		ClientSecret:          req.ClientSecret,
 		Scopes:                req.Scopes,
