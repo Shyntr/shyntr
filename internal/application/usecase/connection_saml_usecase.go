@@ -6,12 +6,12 @@ import (
 	"errors"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 )
 
@@ -59,7 +59,7 @@ func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID 
 
 func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) (*model.SAMLConnection, error) {
 	if conn.ID == "" {
-		conn.ID, _ = utils.GenerateRandomHex(8)
+		conn.ID = uuid.New().String()
 	}
 
 	var descriptor *saml.EntityDescriptor

@@ -6,7 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
+	"github.com/google/uuid"
 )
 
 type OutboundPolicyUseCase interface {
@@ -31,7 +31,7 @@ func NewOutboundPolicyUseCase(repo port.OutboundPolicyRepository, audit port.Aud
 
 func (u *outboundPolicyUseCase) CreatePolicy(ctx context.Context, policy *model.OutboundPolicy, actorIP, userAgent string) (*model.OutboundPolicy, error) {
 	if policy.ID == "" {
-		policy.ID, _ = utils.GenerateRandomHex(8)
+		policy.ID = uuid.New().String()
 	}
 	now := time.Now().UTC()
 	policy.CreatedAt = now

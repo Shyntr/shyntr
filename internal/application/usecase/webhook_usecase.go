@@ -17,6 +17,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -52,7 +53,7 @@ func NewWebhookUseCase(
 
 func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *model.Webhook, actorIP, userAgent string) (*model.Webhook, string, error) {
 	if webhook.ID == "" {
-		webhook.ID, _ = utils.GenerateRandomHex(8)
+		webhook.ID = uuid.New().String()
 	}
 
 	secret, _ := utils.GenerateRandomHex(32)
@@ -107,7 +108,7 @@ func (u *webhookUseCase) FireEvent(tenantID, eventType string, data map[string]i
 			return
 		}
 
-		eventID, _ := utils.GenerateRandomHex(8)
+		eventID := uuid.New().String()
 		payloadBytes, _ := json.Marshal(map[string]interface{}{
 			"event_id":   "evt_" + eventID,
 			"event_type": eventType,
@@ -118,7 +119,7 @@ func (u *webhookUseCase) FireEvent(tenantID, eventType string, data map[string]i
 
 		for _, wh := range webhooks {
 			if matchPattern(tenantID, wh.TenantIDs) && matchPattern(eventType, wh.Events) {
-				evtID, _ := utils.GenerateRandomHex(8)
+				evtID := uuid.New().String()
 				evt := &model.WebhookEvent{
 					ID:        "we_" + evtID,
 					WebhookID: wh.ID,

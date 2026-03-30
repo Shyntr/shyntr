@@ -5,7 +5,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
+	"github.com/google/uuid"
 )
 
 func SeedSystemScopesForTenant(ctx context.Context, repo port.ScopeRepository, tenantID string) error {
@@ -48,7 +48,7 @@ func SeedSystemScopesForTenant(ctx context.Context, repo port.ScopeRepository, t
 			continue
 		}
 
-		s.ID, _ = utils.GenerateRandomHex(8)
+		s.ID = uuid.New().String()
 		if err := repo.Create(ctx, &s); err != nil {
 			return err
 		}

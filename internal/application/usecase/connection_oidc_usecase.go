@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
 )
 
 type OIDCConnectionUseCase interface {
@@ -81,7 +81,7 @@ func (u *oidcConnectionUseCase) validateOutboundEndpoints(ctx context.Context, c
 
 func (u *oidcConnectionUseCase) CreateConnection(ctx context.Context, conn *model.OIDCConnection, actorIP, userAgent string) (*model.OIDCConnection, error) {
 	if conn.ID == "" {
-		conn.ID, _ = utils.GenerateRandomHex(8)
+		conn.ID = uuid.New().String()
 	}
 	if len(conn.Scopes) == 0 {
 		conn.Scopes = []string{"openid", "profile", "email"}

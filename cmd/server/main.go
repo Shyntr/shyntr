@@ -39,6 +39,7 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
 	"github.com/spf13/cobra"
@@ -109,7 +110,7 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			if tenantID == "" {
-				tenantID, _ = utils.GenerateRandomHex(4)
+				tenantID = uuid.New().String()
 			}
 			if tenantName == "" {
 				tenantName = tenantID
@@ -242,7 +243,7 @@ func main() {
 				log.Fatal("Scope name is required")
 			}
 
-			scopeID, _ := utils.GenerateRandomHex(8)
+			scopeID := uuid.New().String()
 			scope := models.ScopeGORM{
 				ID:          scopeID,
 				TenantID:    tenantID,
@@ -368,13 +369,13 @@ func main() {
 				tenantID = "default"
 			}
 			if clientID == "" {
-				clientID, _ = utils.GenerateRandomHex(8)
+				clientID = uuid.New().String()
 			}
 			if clientName == "" {
 				clientName = "New Client " + clientID
 			}
 			if clientSecret == "" && !isPublic {
-				clientSecret, _ = utils.GenerateRandomHex(16)
+				clientSecret, _ = utils.GenerateRandomHex(32)
 			}
 			if len(redirectURIs) == 0 {
 				redirectURIs = []string{"http://localhost:8080/callback"}

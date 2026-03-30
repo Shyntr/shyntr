@@ -7,7 +7,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
+	"github.com/google/uuid"
 )
 
 type ScopeUseCase interface {
@@ -40,7 +40,7 @@ func (u *scopeUseCase) CreateScope(ctx context.Context, scope *model.Scope, acto
 		return nil, err
 	}
 	if scope.ID == "" {
-		scope.ID, _ = utils.GenerateRandomHex(8)
+		scope.ID = uuid.New().String()
 	}
 
 	existing, err := u.repo.GetByName(ctx, scope.TenantID, scope.Name)

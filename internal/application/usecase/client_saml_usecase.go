@@ -8,8 +8,8 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
+	"github.com/google/uuid"
 )
 
 type SAMLClientUseCase interface {
@@ -38,7 +38,7 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 		client.TenantID = "default"
 	}
 	if client.ID == "" {
-		client.ID, _ = utils.GenerateRandomHex(8)
+		client.ID = uuid.New().String()
 	}
 
 	if client.MetadataURL != "" {

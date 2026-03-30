@@ -424,7 +424,7 @@ func (u *oauth2ClientUseCase) CreateClient(ctx context.Context, client *model.OA
 	}
 
 	if client.ID == "" {
-		client.ID, _ = utils.GenerateRandomHex(8)
+		client.ID = uuid.New().String()
 	}
 
 	if client.Name == "" {

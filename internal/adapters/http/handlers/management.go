@@ -750,7 +750,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 	}
 
 	connToSave := &model.SAMLConnection{
-		ID:                       conn.ID,
+		ID:                       "",
 		TenantID:                 conn.TenantID,
 		Name:                     conn.Name,
 		IdpMetadataXML:           conn.IdpMetadataXML,
