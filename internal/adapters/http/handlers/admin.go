@@ -43,12 +43,12 @@ func NewAdminHandler(TenantUse usecase.TenantUseCase, OAuth2ClientUse usecase.OA
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 	req, err := h.AuthReqUseCase.GetLoginRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Login request not found", err))
+		c.Error(payload.NewNotFoundAppError("Login request", err))
 		return
 	}
 
@@ -70,13 +70,13 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 
 	var req payload.AcceptLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept login request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Login request", "complete", err))
 		return
 	}
 
@@ -118,13 +118,13 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 
 	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -137,7 +137,7 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Login request", "complete", err))
 		return
 	}
 
@@ -162,19 +162,19 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	req, err := h.AuthReqUseCase.GetConsentRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Consent request not found", err))
+		c.Error(payload.NewNotFoundAppError("Consent request", err))
 		return
 	}
 
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.ClientID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to fetch client details", err))
+		c.Error(payload.NewOperationAppError(http.StatusConflict, "Client details", "load", err))
 		return
 	}
 
@@ -208,13 +208,13 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	var req payload.AcceptConsentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -230,7 +230,7 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept consent request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Consent request", "complete", err))
 		return
 	}
 
@@ -257,13 +257,13 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -276,7 +276,7 @@ func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Consent request", "complete", err))
 		return
 	}
 	logger.FromGin(c).Info("Consent request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))

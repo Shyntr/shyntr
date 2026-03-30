@@ -36,14 +36,14 @@ func (h *ScopeHandler) Create(c *gin.Context) {
 	tenantID := c.Param("id")
 	var req model.Scope
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 	req.TenantID = tenantID
 
 	scope, err := h.scopeUse.CreateScope(c.Request.Context(), &req, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create scope", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scope", "create", err))
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *ScopeHandler) List(c *gin.Context) {
 	tenantID := c.Param("id")
 	scopes, err := h.scopeUse.ListScopes(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve scopes", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scopes", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, scopes)
@@ -87,7 +87,7 @@ func (h *ScopeHandler) Get(c *gin.Context) {
 	id := c.Param("scope_id")
 	scope, err := h.scopeUse.GetScope(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Scope not found", err))
+		c.Error(payload.NewNotFoundAppError("Scope", err))
 		return
 	}
 	c.JSON(http.StatusOK, scope)
@@ -113,14 +113,14 @@ func (h *ScopeHandler) Update(c *gin.Context) {
 
 	var req model.Scope
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 	req.TenantID = tenantID
 	req.ID = id
 
 	if err := h.scopeUse.UpdateScope(c.Request.Context(), &req, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update scope", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scope", "update", err))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
@@ -142,7 +142,7 @@ func (h *ScopeHandler) Delete(c *gin.Context) {
 	id := c.Param("scope_id")
 
 	if err := h.scopeUse.DeleteScope(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, err.Error(), err))
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Scope", "delete", err))
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)

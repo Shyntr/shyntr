@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
@@ -125,7 +126,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	client, err := h.OAuth2ClientUse.GetClientByTenant(ctx, tenantID, clientID)
 	if err != nil {
 		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String(consts.ContextKeyTenantID, tenantID))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "client not found in this tenant"})
+		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrUnauthorizedClient.WithHint("The authenticated client is not registered for this tenant."))
 		return
 	}
 
@@ -189,7 +190,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			}
 		} else {
 			logger.FromGin(c).Warn("Invalid or expired login verifier")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_login_verifier"})
+			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrAccessDenied.WithHint("The login_verifier is invalid or has expired. Restart the authorization flow."))
 			return
 		}
 
@@ -238,7 +239,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		_, savedErr := h.AuthReq.CreateLoginRequest(ctx, &request)
 		if savedErr != nil {
 			logger.FromGin(c).Error("Failed to save login request", zap.Error(savedErr))
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database_error"})
+			h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrServerError.WithHint("Failed to persist the authorization request. Please try again."))
 			return
 		}
 
@@ -256,7 +257,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 		if consentVerifier != "" {
 			consentReq, consentReqErr := h.AuthReq.GetAuthenticatedConsentRequest(ctx, consentVerifier)
 			if consentReqErr != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_consent_verifier"})
+				h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrAccessDenied.WithHint("The consent_verifier is invalid or has expired. Restart the authorization flow."))
 				return
 			}
 			if len(consentReq.Context) > 0 {
@@ -282,7 +283,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			}
 			_, consentReqErr := h.AuthReq.CreateConsentRequest(ctx, &request)
 			if consentReqErr != nil {
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database_error"})
+				h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrServerError.WithHint("Failed to persist the consent request. Please try again."))
 				return
 			}
 			redirectURL := fmt.Sprintf("%s?consent_challenge=%s", h.Config.ExternalConsentURL, challengeID)
@@ -629,20 +630,20 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_token"})
+		payload.WriteOAuth2Error(c, http.StatusUnauthorized, "invalid_token", "Access token is missing.", nil)
 		return
 	}
 
 	session := model.NewJWTSession("", "")
 	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
+		payload.WriteOAuth2Error(c, http.StatusUnauthorized, "invalid_token", "The access token is invalid, expired, or revoked.", err)
 		return
 	}
 
 	sess, ok := accessRequest.GetSession().(*model.JWTSession)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_session_type"})
+		payload.WriteOAuth2Error(c, http.StatusBadRequest, "invalid_request", "The token session could not be processed for the UserInfo response.", nil)
 		return
 	}
 
@@ -711,21 +712,21 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: privKey}, nil)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize userinfo signer", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The UserInfo response could not be generated due to an internal server error.", err)
 		return
 	}
 
 	jwsToken, err := jwt.Signed(signer).Claims(safeClaims).Serialize()
 	if err != nil {
 		logger.FromGin(c).Error("Failed to sign userinfo", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The UserInfo response could not be generated due to an internal server error.", err)
 		return
 	}
 
 	pubKey, err := h.JWKSCache.GetEncryptionKey(c.Request.Context(), client.JwksURI, alg)
 	if err != nil || pubKey == nil {
 		logger.FromGin(c).Warn("Cannot retrieve client encryption key for UserInfo", zap.String("client_id", client.GetID()), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "encryption_key_missing"})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The UserInfo response could not be encrypted because the client encryption key is unavailable.", err)
 		return
 	}
 
@@ -736,13 +737,13 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 
 	encrypter, err := jose.NewEncrypter(jose.ContentEncryption(enc), recipient, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The UserInfo encryption process could not be initialized.", err)
 		return
 	}
 
 	jweObject, err := encrypter.Encrypt([]byte(jwsToken))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "encryption_failed"})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The UserInfo response could not be encrypted.", err)
 		return
 	}
 
@@ -807,10 +808,7 @@ func (h *OAuth2Handler) Revoke(c *gin.Context) {
 func (h *OAuth2Handler) Jwks(c *gin.Context) {
 	jwks, err := h.KeyMgr.GetPublicJWKS(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "server_error",
-			"message": "failed to generate JWKS document",
-		})
+		payload.WriteOAuth2Error(c, http.StatusInternalServerError, "server_error", "The JWKS document could not be generated.", err)
 		return
 	}
 	c.JSON(http.StatusOK, jwks)
@@ -830,7 +828,7 @@ func (h *OAuth2Handler) Discover(c *gin.Context) {
 
 	_, err := h.TenantUse.GetTenant(c.Request.Context(), tenantID)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "tenant_not_found"})
+		payload.AbortWithOAuth2Error(c, http.StatusNotFound, "invalid_tenant", "The requested tenant could not be found.", err)
 		return
 	}
 

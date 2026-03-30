@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +45,7 @@ func (h *AuditHandler) Get(c *gin.Context) {
 	}
 	logs, err := h.audit.GetTenantLogs(c, tenantID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get audit logs"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusInternalServerError, "Audit logs", "load", err))
 		return
 	}
 	c.JSON(http.StatusOK, logs)

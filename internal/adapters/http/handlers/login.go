@@ -30,13 +30,13 @@ func NewLoginHandler(cfg *config.Config, MUC usecase.ManagementUseCase) *LoginHa
 func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "missing_login_challenge", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 
 	methods, loginReq, err := h.MUC.GetLoginMethods(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, err.Error(), nil))
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "invalid_login_challenge", "The login challenge is invalid, expired, or no longer active.", "Start the login flow again and use a fresh login_challenge value.", nil, err))
 		return
 	}
 

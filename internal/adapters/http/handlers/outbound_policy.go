@@ -32,13 +32,13 @@ func NewOutboundPolicyHandler(uc usecase.OutboundPolicyUseCase) *OutboundPolicyH
 func (h *OutboundPolicyHandler) Create(c *gin.Context) {
 	var req payload.CreateOutboundPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		payload.AbortWithAppError(c, payload.NewValidationAppError(err))
 		return
 	}
 
 	policy, err := h.UseCase.CreatePolicy(c.Request.Context(), req.ToDomain(), c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create outbound policy"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "create", err))
 		return
 	}
 
@@ -61,7 +61,7 @@ func (h *OutboundPolicyHandler) Get(c *gin.Context) {
 
 	policy, err := h.UseCase.GetPolicy(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "outbound policy not found"})
+		payload.AbortWithAppError(c, payload.NewNotFoundAppError("Outbound policy", err))
 		return
 	}
 
@@ -83,7 +83,7 @@ func (h *OutboundPolicyHandler) List(c *gin.Context) {
 
 	items, err := h.UseCase.ListPolicies(c.Request.Context(), tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list outbound policies"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policies", "list", err))
 		return
 	}
 
@@ -108,13 +108,13 @@ func (h *OutboundPolicyHandler) Update(c *gin.Context) {
 
 	existing, err := h.UseCase.GetPolicy(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "outbound policy not found"})
+		payload.AbortWithAppError(c, payload.NewNotFoundAppError("Outbound policy", err))
 		return
 	}
 
 	var req payload.UpdateOutboundPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		payload.AbortWithAppError(c, payload.NewValidationAppError(err))
 		return
 	}
 
@@ -122,7 +122,7 @@ func (h *OutboundPolicyHandler) Update(c *gin.Context) {
 
 	updated, err := h.UseCase.UpdatePolicy(c.Request.Context(), existing, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update outbound policy"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "update", err))
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *OutboundPolicyHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := h.UseCase.DeletePolicy(c.Request.Context(), id, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete outbound policy"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "delete", err))
 		return
 	}
 
