@@ -65,7 +65,7 @@ jobs:
           sha256sum ${{ env.BINARY_NAME }} > ${{ env.BINARY_NAME }}.sha256
 
       - name: Upload Binary to Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
