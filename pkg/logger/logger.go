@@ -67,6 +67,10 @@ func FromGin(c *gin.Context) *zap.Logger {
 	span := trace.SpanFromContext(c.Request.Context())
 	if span.SpanContext().HasTraceID() {
 		log = log.With(zap.String("trace_id", span.SpanContext().TraceID().String()))
+	} else if traceID, exists := c.Get("trace_id"); exists {
+		if traceIDStr, ok := traceID.(string); ok && traceIDStr != "" {
+			log = log.With(zap.String("trace_id", traceIDStr))
+		}
 	}
 	if span.SpanContext().HasSpanID() {
 		log = log.With(zap.String("span_id", span.SpanContext().SpanID().String()))
@@ -92,6 +96,15 @@ func FromGin(c *gin.Context) *zap.Logger {
 	}
 	if protocol, exists := c.Get("protocol"); exists {
 		log = log.With(zap.String("protocol", protocol.(string)))
+	}
+	if errorCode, exists := c.Get("error_code"); exists {
+		log = log.With(zap.String("error_code", errorCode.(string)))
+	}
+	if failureStage, exists := c.Get("failure_stage"); exists {
+		log = log.With(zap.String("failure_stage", failureStage.(string)))
+	}
+	if connectionID, exists := c.Get("connection_id"); exists {
+		log = log.With(zap.String("connection_id", connectionID.(string)))
 	}
 
 	if sub, exists := c.Get("user_sub"); exists {

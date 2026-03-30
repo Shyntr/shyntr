@@ -6,6 +6,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -198,12 +199,14 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	if tenantID == "" {
 		tenantID = h.Config.DefaultTenantID
 	}
+	setSAMLDiagnosticContext(c, tenantID, "", "acs_entry")
 
 	relayState := c.PostForm("RelayState")
 	if relayState == "" {
 		relayState = c.Query("RelayState")
 	}
 	if relayState == "" {
+		setSAMLDiagnosticContext(c, tenantID, "missing_relay_state", "acs_relay_state_missing")
 		logger.FromGin(c).Error("SAML ACS failed: RelayState is completely missing")
 		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "RelayState is required to resume the SAML login flow.", nil)
 		return
@@ -211,7 +214,10 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	csrfCookie, err := c.Cookie("shyntr_fed_csrf")
 	if err != nil || csrfCookie == "" {
-		logger.FromGin(c).Warn("Missing CSRF Cookie on ACS")
+		setSAMLDiagnosticContext(c, tenantID, "missing_csrf_cookie", "acs_csrf_cookie_missing")
+		logger.FromGin(c).Warn("Missing CSRF Cookie on ACS",
+			zap.String("relay_state_sha256", hashForLog(relayState)),
+		)
 		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "The SAML login session is missing the CSRF cookie. Restart the login flow.", nil)
 		return
 	}
@@ -224,30 +230,46 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		csrfCookie,
 	)
 	if err != nil {
-		logger.FromGin(c).Warn("SAML ACS relay state validation failed", zap.Error(err), zap.String("protocol", "saml"))
+		setSAMLDiagnosticContext(c, tenantID, "invalid_relay_state", "acs_relay_state_verification")
+		logger.FromGin(c).Warn("SAML ACS relay state validation failed",
+			zap.Error(err),
+			zap.String("relay_state_sha256", hashForLog(relayState)),
+			zap.Bool("csrf_cookie_present", true),
+		)
 		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "RelayState is invalid, expired, or does not match the current SAML login session.", err)
 		return
 	}
 
 	loginChallenge := verifiedState.LoginChallenge
 	connectionID := verifiedState.ConnectionID
+	c.Set("connection_id", connectionID)
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
-		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", loginChallenge))
+		setSAMLDiagnosticContext(c, tenantID, "invalid_session", "acs_login_request_lookup")
+		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)",
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+			zap.String("connection_id", connectionID),
+		)
 		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "The SAML login session is invalid or has expired.", err)
 		return
 	}
 
 	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
 	if err != nil {
-		logger.FromGin(c).Error("Failed to handle SAML ACS", zap.Error(err), zap.String("protocol", "saml"))
+		setSAMLDiagnosticContext(c, tenantID, "invalid_saml_response", "acs_response_validation")
+		logger.FromGin(c).Error("Failed to handle SAML ACS",
+			zap.Error(err),
+			zap.String("connection_id", connectionID),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+		)
 		payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_saml_response", "The SAML response is invalid or failed signature/condition validation.", err)
 		return
 	}
 
 	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
 	if err != nil {
+		setSAMLDiagnosticContext(c, tenantID, "connection_not_found", "acs_connection_lookup")
 		logger.FromGin(c).Warn("Connection not found for verified relay state", zap.String("connection_id", connectionID))
 		payload.AbortWithSAMLError(c, http.StatusNotFound, "connection_not_found", "The configured SAML connection could not be found for this tenant.", err)
 		return
@@ -255,13 +277,19 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	issuer := assertion.Issuer.Value
 	if issuer != conn.IdpEntityID {
+		setSAMLDiagnosticContext(c, tenantID, "invalid_issuer", "acs_issuer_validation")
 		logger.FromGin(c).Error("SAML Signature Wrapping (XSW) / Issuer Mismatch Detected!",
 			zap.String("expected", conn.IdpEntityID),
 			zap.String("actual", issuer),
+			zap.String("connection_id", connectionID),
 		)
 		payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_issuer", "The SAML response issuer does not match the configured identity provider.", nil)
 		return
 	}
+	setSAMLDiagnosticContext(c, tenantID, "", "acs_validated")
+	logger.FromGin(c).Info("SAML ACS relay state and assertion validated",
+		zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+	)
 	rawAttributes := make(map[string]interface{})
 	tempAttributes := make(map[string][]string)
 
@@ -1167,4 +1195,37 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func setSAMLDiagnosticContext(c *gin.Context, tenantID, errorCode, failureStage string) {
+	if tenantID != "" {
+		c.Set("tenant_id", tenantID)
+	}
+	c.Set("protocol", "saml")
+	if errorCode != "" {
+		c.Set("error_code", errorCode)
+		c.Header("X-Shyntr-Error-Code", errorCode)
+	}
+	if failureStage != "" {
+		c.Set("failure_stage", failureStage)
+	}
+	c.Header("Cache-Control", "no-store")
+}
+
+func shortForLog(value string, max int) string {
+	if value == "" || max <= 0 {
+		return ""
+	}
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
+}
+
+func hashForLog(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
