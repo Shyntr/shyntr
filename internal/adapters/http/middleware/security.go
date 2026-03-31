@@ -1,29 +1,110 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 )
 
 // SecurityHeaders adds standard security headers to every response.
-// Helps prevent XSS, clickjacking, and enforces HTTPS.
+// Applies protocol-aware defaults so browser-based federation flows are not
+// broken by a single restrictive CSP for every endpoint.
 func SecurityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Strict-Transport-Security: Force HTTPS for 1 year (production only)
-		// c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		if isHTTPSRequest(c) {
+			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 
-		// X-Content-Type-Options: Prevent MIME-sniffing
 		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()")
 
-		// X-Frame-Options: Deny to prevent clickjacking (allow framing only by same origin if needed)
-		c.Header("X-Frame-Options", "DENY")
+		if shouldDenyFraming(c.Request.URL.Path) {
+			c.Header("X-Frame-Options", "DENY")
+		} else {
+			c.Header("X-Frame-Options", "SAMEORIGIN")
+		}
 
-		// X-XSS-Protection: Enable XSS filtering
-		c.Header("X-XSS-Protection", "1; mode=block")
-
-		// Content-Security-Policy: Restrict sources for scripts, styles, etc.
-		// Adjust this based on your frontend needs.
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;")
+		c.Header("Content-Security-Policy", contentSecurityPolicyForPath(c.Request.URL.Path))
 
 		c.Next()
+	}
+}
+
+func isHTTPSRequest(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+
+	forwardedProto := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")))
+	return forwardedProto == "https"
+}
+
+func shouldDenyFraming(path string) bool {
+	if isSAMLHTMLResponsePath(path) {
+		return false
+	}
+
+	return true
+}
+
+func contentSecurityPolicyForPath(path string) string {
+	if isSAMLHTMLResponsePath(path) || isProtocolBrowserEndpoint(path) {
+		return strings.Join([]string{
+			"default-src 'self'",
+			"base-uri 'none'",
+			"frame-ancestors 'none'",
+			"object-src 'none'",
+			"img-src 'self' data:",
+			"style-src 'self' 'unsafe-inline'",
+			"script-src 'self' 'unsafe-inline'",
+			"form-action 'self' https:",
+		}, "; ")
+	}
+
+	return strings.Join([]string{
+		"default-src 'none'",
+		"base-uri 'none'",
+		"frame-ancestors 'none'",
+		"object-src 'none'",
+		"img-src 'self' data:",
+		"style-src 'self' 'unsafe-inline'",
+		"form-action 'self'",
+	}, "; ")
+}
+
+func isSAMLHTMLResponsePath(path string) bool {
+	switch {
+	case strings.HasSuffix(path, "/saml/idp/sso"):
+		return true
+	case strings.HasSuffix(path, "/saml/idp/slo"):
+		return true
+	case strings.HasSuffix(path, "/saml/resume"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isProtocolBrowserEndpoint(path string) bool {
+	switch {
+	case strings.HasSuffix(path, "/oauth2/auth"):
+		return true
+	case strings.HasSuffix(path, "/oauth2/logout"):
+		return true
+	case strings.HasSuffix(path, "/oidc/callback"):
+		return true
+	case strings.HasSuffix(path, "/oidc/login"):
+		return true
+	case strings.Contains(path, "/oidc/login/"):
+		return true
+	case strings.HasSuffix(path, "/saml/sp/acs"):
+		return true
+	case strings.HasSuffix(path, "/saml/sp/slo"):
+		return true
+	case strings.HasSuffix(path, "/auth/methods"):
+		return true
+	default:
+		return false
 	}
 }
