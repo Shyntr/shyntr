@@ -12,7 +12,7 @@ require (
 	github.com/go-jose/go-jose/v3 v3.0.4
 	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/google/uuid v1.6.0
-	github.com/lib/pq v1.12.0
+	github.com/lib/pq v1.12.1
 	github.com/ory/fosite v0.47.0
 	github.com/russellhaering/goxmldsig v1.6.0
 	github.com/spf13/cobra v1.10.2
