@@ -43,12 +43,12 @@ func NewAdminHandler(TenantUse usecase.TenantUseCase, OAuth2ClientUse usecase.OA
 func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 	req, err := h.AuthReqUseCase.GetLoginRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Login request not found", err))
+		c.Error(payload.NewNotFoundAppError("Login request", err))
 		return
 	}
 
@@ -66,17 +66,17 @@ func (h *AdminHandler) GetLoginRequest(c *gin.Context) {
 // @Success 200 {object} map[string]string "Returns redirect_to URL containing the login verifier"
 // @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
 // @Failure 500 {object} payload.AppError "Failed to accept login request"
-// @Router /admin/login/accept [post]
+// @Router /admin/login/accept [put]
 func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 
 	var req payload.AcceptLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept login request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Login request", "complete", err))
 		return
 	}
 
@@ -114,17 +114,17 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 // @Success 200 {object} map[string]string "Returns redirect_to URL containing error details"
 // @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
 // @Failure 500 {object} payload.AppError "Failed to reject login request"
-// @Router /admin/login/reject [post]
+// @Router /admin/login/reject [put]
 func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 	challenge := c.Query("login_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "login_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("login_challenge"))
 		return
 	}
 
 	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -137,10 +137,9 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject login request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Login request", "complete", err))
 		return
 	}
-	logger.FromGin(c).Info("Login request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))
 
 	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, loginReq.RequestURL, map[string]string{
 		"error":             req.Error,
@@ -163,19 +162,19 @@ func (h *AdminHandler) RejectLoginRequest(c *gin.Context) {
 func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	req, err := h.AuthReqUseCase.GetConsentRequest(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Consent request not found", err))
+		c.Error(payload.NewNotFoundAppError("Consent request", err))
 		return
 	}
 
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.ClientID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to fetch client details", err))
+		c.Error(payload.NewOperationAppError(http.StatusConflict, "Client details", "load", err))
 		return
 	}
 
@@ -205,17 +204,17 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 // @Success 200 {object} map[string]string "Returns redirect_to URL containing the consent verifier"
 // @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
 // @Failure 500 {object} payload.AppError "Failed to accept consent request"
-// @Router /admin/consent/accept [post]
+// @Router /admin/consent/accept [put]
 func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	var req payload.AcceptConsentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -231,7 +230,7 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to accept consent request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Consent request", "complete", err))
 		return
 	}
 
@@ -254,17 +253,17 @@ func (h *AdminHandler) AcceptConsentRequest(c *gin.Context) {
 // @Success 200 {object} map[string]string "Returns redirect_to URL containing error details"
 // @Failure 400 {object} payload.AppError "Invalid request payload or missing challenge"
 // @Failure 500 {object} payload.AppError "Failed to reject consent request"
-// @Router /admin/consent/reject [post]
+// @Router /admin/consent/reject [put]
 func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	challenge := c.Query("consent_challenge")
 	if challenge == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "consent_challenge is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("consent_challenge"))
 		return
 	}
 
 	var req payload.RejectRequestPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -277,7 +276,7 @@ func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to reject consent request", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Consent request", "complete", err))
 		return
 	}
 	logger.FromGin(c).Info("Consent request rejected", zap.String("challenge", challenge), zap.String("error", req.Error))
@@ -289,22 +288,30 @@ func (h *AdminHandler) RejectConsentRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectURL})
 }
 
-func buildRedirectURL(baseURL, requestURL string, params map[string]string) string {
-	parsed, _ := url.Parse(requestURL)
+// buildRedirectURL constructs a safe redirect URL by taking the path from requestURL,
+// stripping the host to prevent open redirects, and appending the provided query params.
+func buildRedirectURL(baseIssuerURL, requestURL string, params map[string]string) string {
+	parsed, err := url.Parse(requestURL)
+	if err != nil {
+		return baseIssuerURL
+	}
+
+	safePath := parsed.Path
+	if safePath == "" {
+		safePath = "/"
+	} else if !strings.HasPrefix(safePath, "/") {
+		safePath = "/" + safePath
+	}
+
 	q := parsed.Query()
 	for k, v := range params {
 		q.Set(k, v)
 	}
-	parsed.RawQuery = q.Encode()
 
-	if parsed.IsAbs() {
-		return parsed.String()
+	base := strings.TrimRight(baseIssuerURL, "/") + safePath
+	encoded := q.Encode()
+	if encoded == "" {
+		return base
 	}
-
-	base := strings.TrimRight(baseURL, "/")
-	path := parsed.Path
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return base + path + "?" + parsed.RawQuery
+	return base + "?" + encoded
 }

@@ -35,7 +35,7 @@ func ErrorHandlerMiddleware() gin.HandlerFunc {
 					zap.String("user_message", appErr.UserMessage),
 				)
 			}
-			payload.HandleManagementError(c, appErr.StatusCode, appErr.UserMessage, appErr.Err)
+			payload.HandleAppError(c, appErr)
 			return
 		}
 		log.Error("Unhandled Internal Server Error")

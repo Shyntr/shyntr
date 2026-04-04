@@ -1,11 +1,13 @@
 package persistence
 
 import (
+	"encoding/json"
 	"log"
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
@@ -54,6 +56,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.WebhookEventGORM{},
 		&models.ScopeGORM{},
 		&models.AuditLogGORM{},
+		&models.OutboundPolicyGORM{},
 	); err != nil {
 		return err
 	}
@@ -83,6 +86,29 @@ func MigrateDB(db *gorm.DB) error {
 			}
 		}
 
+		if db.Migrator().HasTable("o_auth2_sessions") && db.Dialector.Name() == "postgres" {
+			renameTypeColumnSQL := `
+			DO $$
+			BEGIN
+				-- If old column "type" exists and new column "token_type" does not, rename it.
+				IF EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_name = 'o_auth2_sessions' AND column_name = 'type'
+				) AND NOT EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_name = 'o_auth2_sessions' AND column_name = 'token_type'
+				) THEN
+					ALTER TABLE o_auth2_sessions RENAME COLUMN "type" TO token_type;
+				END IF;
+			END $$;
+			`
+			if err := db.Exec(renameTypeColumnSQL).Error; err != nil {
+				return err
+			}
+		}
+
 		if err := db.Exec(`
           DROP INDEX IF EXISTS oauth2_sessions_one_active_refresh_per_request;
        `).Error; err != nil {
@@ -102,7 +128,13 @@ func MigrateDB(db *gorm.DB) error {
        `).Error; err != nil {
 			return err
 		}
+
 	}
+
+	if err := seedGlobalOutboundPolicies(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -129,4 +161,100 @@ func SeedDefaultTenant(db *gorm.DB, cfg *config.Config) {
 	} else {
 		logger.Log.Info("Default tenant already exists.")
 	}
+}
+
+func seedGlobalOutboundPolicies(db *gorm.DB) error {
+	type seedItem struct {
+		ID     string
+		Name   string
+		Target model.OutboundTargetType
+	}
+
+	items := []seedItem{
+		{
+			ID:     "global-outbound-policy-webhook",
+			Name:   "Global Outbound Policy - Webhook",
+			Target: model.OutboundTargetWebhookDelivery,
+		},
+		{
+			ID:     "global-outbound-policy-saml-metadata",
+			Name:   "Global Outbound Policy - SAML Metadata",
+			Target: model.OutboundTargetSAMLMetadataFetch,
+		},
+		{
+			ID:     "global-outbound-policy-oidc-discovery",
+			Name:   "Global Outbound Policy - OIDC Discovery",
+			Target: model.OutboundTargetOIDCDiscovery,
+		},
+		{
+			ID:     "global-outbound-policy-oidc-backchannel",
+			Name:   "Global Outbound Policy - OIDC Backchannel",
+			Target: model.OutboundTargetOIDCBackchannel,
+		},
+	}
+
+	allowedSchemesJSON, err := json.Marshal([]string{"https"})
+	if err != nil {
+		return err
+	}
+
+	allowedHostPatternsJSON, err := json.Marshal([]string{"*"})
+	if err != nil {
+		return err
+	}
+
+	allowedPathPatternsJSON, err := json.Marshal([]string{"/*"})
+	if err != nil {
+		return err
+	}
+
+	allowedPortsJSON, err := json.Marshal([]int{443})
+	if err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		var count int64
+		if err := db.Model(&models.OutboundPolicyGORM{}).
+			Where("id = ?", item.ID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+
+		if count > 0 {
+			continue
+		}
+
+		row := &models.OutboundPolicyGORM{
+			ID:                      item.ID,
+			TenantID:                "",
+			Name:                    item.Name,
+			Target:                  string(item.Target),
+			Enabled:                 true,
+			AllowedSchemesJSON:      string(allowedSchemesJSON),
+			AllowedHostPatternsJSON: string(allowedHostPatternsJSON),
+			AllowedPathPatternsJSON: string(allowedPathPatternsJSON),
+			AllowedPortsJSON:        string(allowedPortsJSON),
+			BlockPrivateIPs:         true,
+			BlockLoopbackIPs:        true,
+			BlockLinkLocalIPs:       true,
+			BlockMulticastIPs:       true,
+			BlockLocalhostNames:     true,
+			DisableRedirects:        true,
+			RequireDNSResolve:       true,
+			RequestTimeoutSeconds:   5,
+			MaxResponseBytes:        2 << 20,
+		}
+
+		if err := db.Create(row).Error; err != nil {
+			return err
+		}
+
+		logger.Log.Info("Seeded global outbound policy",
+			zap.String("policy_id", item.ID),
+			zap.String("target", string(item.Target)),
+		)
+	}
+
+	return nil
 }

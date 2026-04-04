@@ -5,11 +5,19 @@ import (
 	"encoding/hex"
 )
 
+func GenerateRandomBytes(n int) ([]byte, error) {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		return nil, err
+	}
+	return bytes, nil
+}
+
 // GenerateRandomHex generates a random hex string of length n*2.
 // Example: n=16 -> returns 32 chars hex string.
 func GenerateRandomHex(n int) (string, error) {
-	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
+	bytes, err := GenerateRandomBytes(n)
+	if err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil

@@ -2,14 +2,14 @@ package usecase
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
+	"github.com/google/uuid"
 )
 
 type SAMLClientUseCase interface {
@@ -23,13 +23,14 @@ type SAMLClientUseCase interface {
 }
 
 type samlClientUseCase struct {
-	repo   port.SAMLClientRepository
-	tenant port.TenantRepository
-	audit  port.AuditLogger
+	repo          port.SAMLClientRepository
+	tenant        port.TenantRepository
+	audit         port.AuditLogger
+	outboundGuard port.OutboundGuard
 }
 
-func NewSAMLClientUseCase(repo port.SAMLClientRepository, tenant port.TenantRepository, audit port.AuditLogger) SAMLClientUseCase {
-	return &samlClientUseCase{repo: repo, tenant: tenant, audit: audit}
+func NewSAMLClientUseCase(repo port.SAMLClientRepository, tenant port.TenantRepository, audit port.AuditLogger, outboundGuard port.OutboundGuard) SAMLClientUseCase {
+	return &samlClientUseCase{repo: repo, tenant: tenant, audit: audit, outboundGuard: outboundGuard}
 }
 
 func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) (*model.SAMLClient, error) {
@@ -37,13 +38,18 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 		client.TenantID = "default"
 	}
 	if client.ID == "" {
-		client.ID, _ = utils.GenerateRandomHex(8)
+		client.ID = uuid.New().String()
 	}
 
 	if client.MetadataURL != "" {
-		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(
+			ctx,
+			client.TenantID,
+			client.MetadataURL,
+			u.outboundGuard,
+		)
 		if err != nil {
-			return nil, errors.New("Invalid Metadata URL: " + err.Error())
+			return nil, fmt.Errorf("invalid metadata url %q: %w", client.MetadataURL, err)
 		}
 		if descriptor != nil {
 			if client.EntityID == "" {
@@ -86,7 +92,7 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 		}
 	}
 	if client.EntityID == "" || client.ACSURL == "" {
-		return nil, errors.New("entity_id and acs_url are required if metadata_url is not provided")
+		return nil, fmt.Errorf("entity_id and acs_url are required if metadata_url is not provided")
 	}
 
 	client.SignResponse = true

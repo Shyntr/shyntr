@@ -6,12 +6,12 @@ import (
 	"errors"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
 )
 
@@ -30,13 +30,15 @@ type samlConnectionUseCase struct {
 	repo     port.SAMLConnectionRepository
 	audit    port.AuditLogger
 	scopeUse ScopeUseCase
+	outbound port.OutboundGuard
 }
 
-func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase) SAMLConnectionUseCase {
+func NewSAMLConnectionUseCase(repo port.SAMLConnectionRepository, audit port.AuditLogger, scopeUse ScopeUseCase, outbound port.OutboundGuard) SAMLConnectionUseCase {
 	return &samlConnectionUseCase{
 		repo:     repo,
 		audit:    audit,
 		scopeUse: scopeUse,
+		outbound: outbound,
 	}
 }
 
@@ -57,12 +59,12 @@ func (u *samlConnectionUseCase) bindMappingScopes(ctx context.Context, tenantID 
 
 func (u *samlConnectionUseCase) CreateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) (*model.SAMLConnection, error) {
 	if conn.ID == "" {
-		conn.ID, _ = utils.GenerateRandomHex(8)
+		conn.ID = uuid.New().String()
 	}
 
 	var descriptor *saml.EntityDescriptor
 	if conn.MetadataURL != "" {
-		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
+		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(ctx, conn.TenantID, conn.MetadataURL, u.outbound)
 		if err != nil {
 			return nil, err
 		}
@@ -158,7 +160,7 @@ func (u *samlConnectionUseCase) GetConnectionByIdpEntity(ctx context.Context, te
 func (u *samlConnectionUseCase) UpdateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) error {
 	var descriptor *saml.EntityDescriptor
 	if conn.MetadataURL != "" {
-		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(conn.MetadataURL)
+		meta, rawXML, err := shyntrsaml.FetchAndParseMetadata(ctx, conn.TenantID, conn.MetadataURL, u.outbound)
 		if err != nil {
 			return err
 		}

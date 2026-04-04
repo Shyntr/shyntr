@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/Shyntr/shyntr/internal/application/utils"
@@ -76,7 +77,7 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 	sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, nil)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize SP", zap.Error(err), zap.String("protocol", "saml"))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "saml_initialization_failed"})
+		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to initialize the SAML federation flow.", err)
 		return
 	}
 
@@ -119,13 +120,13 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 	loginChallenge := c.Query("login_challenge")
 
 	if loginChallenge == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing_login_challenge"})
+		payload.WriteSAMLError(c, http.StatusBadRequest, "invalid_request", "The login_challenge query parameter is required.", nil)
 		return
 	}
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "login_request_not_found"})
+		payload.WriteSAMLError(c, http.StatusNotFound, "login_request_not_found", "The login request was not found or has expired.", err)
 		return
 	}
 	csrfToken, _ := utils2.GenerateRandomHex(32)
@@ -147,7 +148,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 	redirectURLOrHTML, requestID, err = h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initiate SAML SSO", zap.Error(err), zap.String("protocol", "saml"))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "sso_init_failed", "details": err.Error()})
+		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to initiate SAML SSO with the external identity provider.", err)
 		return
 	}
 
@@ -158,8 +159,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		ctxData = make(map[string]interface{})
 	}
 	ctxData["connection_id"] = connectionID
-	hash := sha256.Sum256([]byte(csrfToken))
-	ctxData["csrf_hash"] = hex.EncodeToString(hash[:])
+	ctxData["federation_action"] = "saml_login"
 
 	loginReq.Context, _ = json.Marshal(ctxData)
 	if requestID != "" {
@@ -169,7 +169,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 	loginReq, err = h.AuthUse.UpdateLoginRequest(c.Request.Context(), loginReq)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to save Login request", zap.Error(err), zap.String("protocol", "saml"))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "login_request_save_failed", "details": err.Error()})
+		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to persist the login request for the SAML flow.", err)
 		return
 	}
 
@@ -199,64 +199,97 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	if tenantID == "" {
 		tenantID = h.Config.DefaultTenantID
 	}
+	setSAMLDiagnosticContext(c, tenantID, "", "acs_entry")
 
 	relayState := c.PostForm("RelayState")
 	if relayState == "" {
 		relayState = c.Query("RelayState")
 	}
 	if relayState == "" {
+		setSAMLDiagnosticContext(c, tenantID, "missing_relay_state", "acs_relay_state_missing")
 		logger.FromGin(c).Error("SAML ACS failed: RelayState is completely missing")
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_relay_state"})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "RelayState is required to resume the SAML login flow.", nil)
 		return
 	}
 
 	csrfCookie, err := c.Cookie("shyntr_fed_csrf")
 	if err != nil || csrfCookie == "" {
-		logger.FromGin(c).Warn("Missing CSRF Cookie on ACS")
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing_csrf_cookie"})
+		setSAMLDiagnosticContext(c, tenantID, "missing_csrf_cookie", "acs_csrf_cookie_missing")
+		logger.FromGin(c).Warn("Missing CSRF Cookie on ACS",
+			zap.String("relay_state_sha256", hashForLog(relayState)),
+		)
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "The SAML login session is missing the CSRF cookie. Restart the login flow.", nil)
 		return
 	}
 	c.SetCookie("shyntr_fed_csrf", "", -1, "/", "", h.Config.CookieSecure, true)
 
-	loginChallenge := relayState
+	verifiedState, err := h.samlBuilderUseCase.VerifyRelayState(
+		c.Request.Context(),
+		tenantID,
+		relayState,
+		csrfCookie,
+	)
+	if err != nil {
+		setSAMLDiagnosticContext(c, tenantID, "invalid_relay_state", "acs_relay_state_verification")
+		logger.FromGin(c).Warn("SAML ACS relay state validation failed",
+			zap.Error(err),
+			zap.String("relay_state_sha256", hashForLog(relayState)),
+			zap.Bool("csrf_cookie_present", true),
+		)
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "RelayState is invalid, expired, or does not match the current SAML login session.", err)
+		return
+	}
+
+	loginChallenge := verifiedState.LoginChallenge
+	connectionID := verifiedState.ConnectionID
+	c.Set("connection_id", connectionID)
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
-		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)", zap.String("challenge", loginChallenge))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session"})
+		setSAMLDiagnosticContext(c, tenantID, "invalid_session", "acs_login_request_lookup")
+		logger.FromGin(c).Warn("Invalid RelayState (LoginRequest not found)",
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+			zap.String("connection_id", connectionID),
+		)
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "The SAML login session is invalid or has expired.", err)
 		return
 	}
 
-	var ctxData map[string]interface{}
-	_ = json.Unmarshal(loginReq.Context, &ctxData)
-	expectedCsrfHash, _ := ctxData["csrf_hash"].(string)
-	actualHash := sha256.Sum256([]byte(csrfCookie))
-	if hex.EncodeToString(actualHash[:]) != expectedCsrfHash {
-		logger.FromGin(c).Error("CSRF Flow Hijacking Attempt!")
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_csrf_token"})
-		return
-	}
-	expectedConnID, ok := ctxData["connection_id"].(string)
-	if !ok || expectedConnID == "" {
-		logger.FromGin(c).Error("Missing connection_id in session state")
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_session_state"})
-		return
-	}
 	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
-	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, expectedConnID)
 	if err != nil {
-		logger.FromGin(c).Warn("Connection not found for stored state", zap.String("connection_id", expectedConnID))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "connection_not_found"})
+		setSAMLDiagnosticContext(c, tenantID, "invalid_saml_response", "acs_response_validation")
+		logger.FromGin(c).Error("Failed to handle SAML ACS",
+			zap.Error(err),
+			zap.String("connection_id", connectionID),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+		)
+		payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_saml_response", "The SAML response is invalid or failed signature/condition validation.", err)
+		return
+	}
+
+	conn, err := h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
+	if err != nil {
+		setSAMLDiagnosticContext(c, tenantID, "connection_not_found", "acs_connection_lookup")
+		logger.FromGin(c).Warn("Connection not found for verified relay state", zap.String("connection_id", connectionID))
+		payload.AbortWithSAMLError(c, http.StatusNotFound, "connection_not_found", "The configured SAML connection could not be found for this tenant.", err)
 		return
 	}
 
 	issuer := assertion.Issuer.Value
 	if issuer != conn.IdpEntityID {
+		setSAMLDiagnosticContext(c, tenantID, "invalid_issuer", "acs_issuer_validation")
 		logger.FromGin(c).Error("SAML Signature Wrapping (XSW) / Issuer Mismatch Detected!",
-			zap.String("expected", conn.IdpEntityID), zap.String("actual", issuer))
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_issuer"})
+			zap.String("expected", conn.IdpEntityID),
+			zap.String("actual", issuer),
+			zap.String("connection_id", connectionID),
+		)
+		payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_issuer", "The SAML response issuer does not match the configured identity provider.", nil)
 		return
 	}
+	setSAMLDiagnosticContext(c, tenantID, "", "acs_validated")
+	logger.FromGin(c).Info("SAML ACS relay state and assertion validated",
+		zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)),
+	)
 	rawAttributes := make(map[string]interface{})
 	tempAttributes := make(map[string][]string)
 
@@ -277,17 +310,28 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 
 	finalAttributes, err := h.Mapper.Map(rawAttributes, conn.AttributeMapping)
 	if err != nil {
-		logger.FromGin(c).Warn("Attribute mapping failed", zap.Error(err), zap.String("protocol", "saml"))
+		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "saml"))
 		finalAttributes = rawAttributes
 	}
 
 	subject := assertion.Subject.NameID.Value
-	finalAttributes["sub"] = subject
-	finalAttributes["source"] = "saml"
-	finalAttributes["issuer"] = issuer
+	if subject == "" {
+		if sub, ok := finalAttributes["sub"].(string); ok {
+			subject = sub
+		}
+	}
+	if email, ok := finalAttributes["email"].(string); ok && subject == "" {
+		subject = email
+	}
 
-	finalAttributes["idp"] = fmt.Sprintf("saml:%s", conn.ID)
+	finalAttributes["source"] = "saml"
+	finalAttributes["connection_id"] = connectionID
+	finalAttributes["idp"] = fmt.Sprintf("saml:%s", connectionID)
 	finalAttributes["amr"] = []string{"ext"}
+	if _, ok := finalAttributes["sub"]; !ok {
+		finalAttributes["sub"] = subject
+	}
+
 	h.wh.FireEvent(tenantID, "user.login.ext", finalAttributes)
 
 	var existingCtx map[string]interface{}
@@ -298,10 +342,18 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	}
 
 	existingCtx["login_claims"] = finalAttributes
-	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), relayState, subject, conn.Name, existingCtx, c.ClientIP(), c.Request.UserAgent())
+	loginReq, err = h.AuthUse.CompleteProviderLogin(
+		c.Request.Context(),
+		loginChallenge,
+		subject,
+		conn.Name,
+		existingCtx,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
 	if err != nil {
-		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatus(http.StatusInternalServerError)
+		logger.FromGin(c).Error("Failed to complete SAML login", zap.Error(err), zap.String("protocol", "saml"))
+		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to complete the SAML login and resume the original authentication flow.", err)
 		return
 	}
 
@@ -316,7 +368,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 	} else {
 		parsedURL, err := url.Parse(loginReq.RequestURL)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "invalid_redirect_url"})
+			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The original redirect URL stored for the login request is invalid.", err)
 			return
 		}
 
@@ -354,7 +406,7 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 	idp, err := h.samlBuilderUseCase.GetIdentityProvider(c.Request.Context(), tenantID)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize IdP", zap.Error(err), zap.String("protocol", "saml"))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "idp_init_failed"})
+		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to initialize the SAML identity provider context.", err)
 		return
 	}
 
@@ -413,14 +465,14 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		loginReq, err := h.AuthUse.GetAuthenticatedLoginRequest(c.Request.Context(), loginVerifier)
 		if err != nil {
 			logger.FromGin(c).Error("Invalid login verifier for SAML IdP", zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_login_verifier"})
+			payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "The login_verifier is invalid or has expired.", nil)
 			return
 		}
 
 		spClient, err := h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, loginReq.ClientID)
 		if err != nil {
 			logger.FromGin(c).Error("SP Client not found", zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "sp_not_found"})
+			payload.AbortWithSAMLError(c, http.StatusNotFound, "sp_not_found", "The service provider configuration could not be found for this tenant.", err)
 			return
 		}
 
@@ -504,7 +556,7 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
 		if err != nil {
 			logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "saml_response_generation_failed"})
+			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
 			return
 		}
 		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
@@ -520,21 +572,21 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 
 	if samlReq == "" {
 		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(errors.New("missing SAMLRequest parameter")), zap.String("protocol", "saml"))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing SAMLRequest parameter"})
+		payload.WriteSAMLError(c, http.StatusBadRequest, "invalid_request", "The SAMLRequest parameter is required.", nil)
 		return
 	}
 
 	authReq, err := h.samlBuilderUseCase.ParseAuthnRequest(c.Request.Context(), tenantID, c.Request)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to parse SAML AuthnRequest", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_saml_request", "details": err.Error()})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_saml_request", "The SAMLRequest could not be parsed or validated.", err)
 		return
 	}
 
 	spClient, err := h.SAMLClientUse.GetClientByEntityID(c.Request.Context(), tenantID, authReq.Issuer.Value)
 	if err != nil {
 		logger.FromGin(c).Warn("Unknown SP EntityID", zap.String("entity_id", authReq.Issuer.Value), zap.String("protocol", "saml"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "unknown_service_provider"})
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "unknown_service_provider", "The requesting service provider is not registered for this tenant.", nil)
 		return
 	}
 
@@ -583,7 +635,7 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 
 	savedLoginReq, err := h.AuthUse.CreateLoginRequest(c.Request.Context(), &loginReq)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "db_error"})
+		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML request could not be persisted due to an internal server error.", err)
 		return
 	}
 
@@ -615,26 +667,26 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	logoutReq, err := h.samlBuilderUseCase.ParseLogoutRequest(c.Request)
 	if err != nil {
 		logger.FromGin(c).Error("Invalid SLO Request", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_logout_request"})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_logout_request", "The SAML logout request is invalid or could not be parsed.", nil)
 		return
 	}
 
 	if logoutReq.Issuer == nil || logoutReq.Issuer.Value == "" {
 		logger.FromGin(c).Error("Missing Issuer in SLO Request")
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_issuer"})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "The SAML logout request does not include an issuer.", nil)
 		return
 	}
 
 	spClient, err := h.SAMLClientUse.GetClientByEntityID(c.Request.Context(), tenantID, logoutReq.Issuer.Value)
 	if err != nil {
 		logger.FromGin(c).Warn("Unknown SP in SLO", zap.String("entity_id", logoutReq.Issuer.Value))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "unknown_sp"})
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "unknown_service_provider", "The service provider in the SAML logout request is not registered for this tenant.", nil)
 		return
 	}
 
 	if spClient.SLOURL == "" {
 		logger.FromGin(c).Warn("SP does not have SLO URL configured", zap.String("entity_id", spClient.EntityID))
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "sp_slo_not_configured"})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "Single Logout is not configured for the requesting service provider.", nil)
 		return
 	}
 
@@ -642,7 +694,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		if err := verifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
 			logger.FromGin(c).Error("SAML SLO Signature Verification Failed! Possible session riding attempt.",
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_signature"})
+			payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_signature", "The SAML logout request signature is invalid.", err)
 			return
 		}
 		logger.FromGin(c).Info("SAML SLO request signature verified successfully", zap.String("sp", spClient.EntityID))
@@ -663,7 +715,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
 			if clientErr == nil {
 				if oidcClient.BackchannelLogoutURI != "" {
-					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
+					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), tenantID, oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)
 				}
 			}
 
@@ -676,7 +728,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	htmlForm, err := h.samlBuilderUseCase.GenerateLogoutResponse(c.Request.Context(), tenantID, logoutReq, spClient, relayState)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to generate SAML Logout Response", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "saml_logout_response_generation_failed"})
+		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML logout response could not be generated.", err)
 		return
 	}
 
@@ -715,18 +767,18 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	}
 
 	if !loginReq.Authenticated {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication_pending"})
+		payload.AbortWithSAMLError(c, http.StatusUnauthorized, "authentication_pending", "The user has not completed authentication for this SAML login flow yet.", nil)
 		return
 	}
 
 	if loginReq.Protocol != "saml" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_protocol"})
+		payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "The stored login request does not belong to a SAML flow.", nil)
 		return
 	}
 
 	var ctxData map[string]interface{}
 	if err := json.Unmarshal(loginReq.Context, &ctxData); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "corrupt_session_context"})
+		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The stored SAML session context is invalid or corrupted.", err)
 		return
 	}
 
@@ -786,7 +838,7 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err), zap.String("protocol", "saml"))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "response_generation_failed"})
+		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
 		return
 	}
 
@@ -801,30 +853,50 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 // @Accept application/x-www-form-urlencoded
 // @Produce json
 // @Param tenant_id path string true "Tenant ID"
-// @Param SAMLRequest query string false "SAML LogoutRequest"
-// @Param SAMLResponse query string false "SAML LogoutResponse"
+// @Param SAMLRequest query string false "SAML LogoutRequest (HTTP-Redirect)"
+// @Param SAMLRequest formData string false "SAML LogoutRequest (HTTP-POST)"
+// @Param SAMLResponse query string false "SAML LogoutResponse (HTTP-Redirect)"
+// @Param SAMLResponse formData string false "SAML LogoutResponse (HTTP-POST)"
 // @Param connection_id query string false "IdP Connection ID for SP-initiated SLO"
+// @Param connection_id formData string false "IdP Connection ID for SP-initiated SLO"
 // @Param RelayState query string false "Relay state"
+// @Param RelayState formData string false "Relay state"
 // @Success 302 {string} string "Redirects to external IdP or RelayState"
 // @Success 200 {object} map[string]string "Logout successful message"
 // @Failure 400 {object} map[string]string "Invalid logout request"
 // @Router /t/{tenant_id}/saml/sp/slo [get]
+// @Router /t/{tenant_id}/saml/sp/slo [post]
 func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
 		tenantID = h.Config.DefaultTenantID
 	}
 
-	samlReqEncoded := c.Query("SAMLRequest")
-	samlResEncoded := c.Query("SAMLResponse")
-	connectionID := c.Query("connection_id")
-	relayState := c.Query("RelayState")
+	samlReqEncoded := firstNonEmpty(
+		c.Query("SAMLRequest"),
+		c.PostForm("SAMLRequest"),
+	)
+
+	samlResEncoded := firstNonEmpty(
+		c.Query("SAMLResponse"),
+		c.PostForm("SAMLResponse"),
+	)
+
+	connectionID := firstNonEmpty(
+		c.Query("connection_id"),
+		c.PostForm("connection_id"),
+	)
+
+	relayState := firstNonEmpty(
+		c.Query("RelayState"),
+		c.PostForm("RelayState"),
+	)
 
 	if samlReqEncoded != "" {
 		logoutReq, err := h.samlBuilderUseCase.ParseLogoutRequest(c.Request)
 		if err != nil {
 			logger.FromGin(c).Error("Invalid IdP SLO Request", zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_logout_request"})
+			payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_logout_request", "The SAML logout request is invalid or could not be parsed.", nil)
 			return
 		}
 
@@ -935,11 +1007,15 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	}
 
 	if connectionID == "" {
-		logger.FromGin(c).Warn("SAML Connection is empty for SP-initiated SLO.")
+		logger.FromGin(c).Warn("Missing connection_id for SP-initiated SLO.",
+			zap.String("method", c.Request.Method),
+			zap.Bool("has_saml_request", samlReqEncoded != ""),
+			zap.Bool("has_saml_response", samlResEncoded != ""),
+		)
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
 		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "connection_id_required"})
+			payload.WriteSAMLError(c, http.StatusBadRequest, "invalid_request", "The connection_id query parameter is required for SP-initiated logout.", nil)
 		}
 		return
 	}
@@ -949,7 +1025,7 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 		if relayState != "" {
 			c.Redirect(http.StatusFound, relayState)
 		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "connection_not_found"})
+			payload.WriteSAMLError(c, http.StatusBadRequest, "connection_not_found", "The configured SAML connection could not be found for this tenant.", nil)
 		}
 		return
 	}
@@ -994,7 +1070,7 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 
 	if subject == "" {
 		logger.FromGin(c).Error("No valid subject found for SLO (stateless token missing/invalid)")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "subject_required_for_slo"})
+		payload.WriteSAMLError(c, http.StatusBadRequest, "invalid_request", "A subject is required to start SP-initiated logout.", nil)
 		return
 	}
 
@@ -1110,4 +1186,46 @@ func verifyRedirectSignature(req *http.Request, certPEM string) error {
 	hashed := hasher.Sum(nil)
 
 	return rsa.VerifyPKCS1v15(rsaPub, hash, hashed, sigBytes)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func setSAMLDiagnosticContext(c *gin.Context, tenantID, errorCode, failureStage string) {
+	if tenantID != "" {
+		c.Set("tenant_id", tenantID)
+	}
+	c.Set("protocol", "saml")
+	if errorCode != "" {
+		c.Set("error_code", errorCode)
+		c.Header("X-Shyntr-Error-Code", errorCode)
+	}
+	if failureStage != "" {
+		c.Set("failure_stage", failureStage)
+	}
+	c.Header("Cache-Control", "no-store")
+}
+
+func shortForLog(value string, max int) string {
+	if value == "" || max <= 0 {
+		return ""
+	}
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
+}
+
+func hashForLog(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }

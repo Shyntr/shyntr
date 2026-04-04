@@ -30,6 +30,7 @@ import (
 	persistence "github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/application/worker"
@@ -38,6 +39,7 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
 	"github.com/crewjam/saml"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/ory/fosite"
 	"github.com/spf13/cobra"
@@ -51,6 +53,14 @@ func printJSON(v interface{}) {
 		log.Fatalf("JSON marshaling failed: %v", err)
 	}
 	fmt.Println(string(b))
+}
+
+func parseRequiredDuration(name, value string) time.Duration {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		log.Fatalf("Invalid %s duration %q: %v", name, value, err)
+	}
+	return d
 }
 
 func main() {
@@ -108,7 +118,7 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			if tenantID == "" {
-				tenantID, _ = utils.GenerateRandomHex(4)
+				tenantID = uuid.New().String()
 			}
 			if tenantName == "" {
 				tenantName = tenantID
@@ -241,7 +251,7 @@ func main() {
 				log.Fatal("Scope name is required")
 			}
 
-			scopeID, _ := utils.GenerateRandomHex(8)
+			scopeID := uuid.New().String()
 			scope := models.ScopeGORM{
 				ID:          scopeID,
 				TenantID:    tenantID,
@@ -367,13 +377,16 @@ func main() {
 				tenantID = "default"
 			}
 			if clientID == "" {
-				clientID, _ = utils.GenerateRandomHex(8)
+				clientID = uuid.New().String()
 			}
 			if clientName == "" {
 				clientName = "New Client " + clientID
 			}
 			if clientSecret == "" && !isPublic {
-				clientSecret, _ = utils.GenerateRandomHex(16)
+				clientSecret, err = utils.GenerateRandomHex(32)
+				if err != nil {
+					log.Fatalf("Failed to generate client secret: %v", err)
+				}
 			}
 			if len(redirectURIs) == 0 {
 				redirectURIs = []string{"http://localhost:8080/callback"}
@@ -385,7 +398,10 @@ func main() {
 			hashedSecret := ""
 			if clientSecret != "" {
 				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
-				hashedSecret, _ = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				hashedSecret, err = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				if err != nil {
+					log.Fatalf("Failed to hash client secret: %v", err)
+				}
 			}
 
 			if authMethod == "" {
@@ -513,11 +529,21 @@ func main() {
 			}
 			if clientSecret != "" {
 				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
-				hashed, _ := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				hashed, hashErr := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				if hashErr != nil {
+					log.Fatalf("Failed to hash client secret: %v", hashErr)
+				}
 				updates["secret"] = hashed
 			}
+			if len(updates) == 0 {
+				log.Println("No changes detected.")
+				return
+			}
+
 			var client models.OAuth2ClientGORM
-			db.Select("tenant_id").First(&client, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Client not found: %v", err)
+			}
 			if err := db.Model(&models.OAuth2ClientGORM{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
@@ -543,7 +569,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var client models.OAuth2ClientGORM
-			db.Select("tenant_id").First(&client, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Client not found: %v", err)
+			}
 			if err := db.Delete(&models.OAuth2ClientGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient failed: %v", err)
 			}
@@ -661,7 +689,9 @@ func main() {
 				return
 			}
 			var client models.SAMLClientGORM
-			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "entity_id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML client not found: %v", err)
+			}
 			if err := db.Model(&models.SAMLClientGORM{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
@@ -686,7 +716,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var client models.SAMLClientGORM
-			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "entity_id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML client not found: %v", err)
+			}
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClientGORM{}).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -731,12 +763,22 @@ func main() {
 				}
 
 				meta := &saml.EntityDescriptor{}
-				_ = xml.Unmarshal(xmlBytes, meta)
+				if err := xml.Unmarshal(xmlBytes, meta); err != nil {
+					log.Fatalf("Failed to parse metadata XML: %v", err)
+				}
 				entityID = meta.EntityID
+				if entityID == "" {
+					log.Fatal("Parsed metadata XML does not contain an EntityID")
+				}
 			} else if metadataURL != "" {
-				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(metadataURL)
+				outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+				outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(context.Background(), tenantID, metadataURL, outboundGuard)
 				if fetchErr != nil {
 					log.Fatalf("Failed to fetch metadata URL: %v", fetchErr)
+				}
+				if descriptor == nil || descriptor.EntityID == "" {
+					log.Fatal("Fetched metadata does not contain a valid EntityID")
 				}
 				xmlBytes = []byte(rawXML)
 				entityID = descriptor.EntityID
@@ -793,7 +835,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var conn models.SAMLConnectionGORM
-			db.Select("tenant_id").First(&conn, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&conn, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML connection not found: %v", err)
+			}
 			if err := db.Delete(&models.SAMLConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -829,6 +873,18 @@ func main() {
 			}
 			if len(oidcScopes) == 0 {
 				oidcScopes = []string{"openid", "profile", "email"}
+			}
+
+			outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+			outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+
+			if _, _, err := outboundGuard.ValidateURL(
+				context.Background(),
+				tenantID,
+				model.OutboundTargetOIDCDiscovery,
+				issuerURL,
+			); err != nil {
+				log.Fatalf("issuer url violates outbound policy: %v", err)
 			}
 
 			conn := models.OIDCConnectionGORM{
@@ -888,7 +944,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var conn models.OIDCConnectionGORM
-			db.Select("tenant_id").First(&conn, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&conn, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("OIDC connection not found: %v", err)
+			}
 			if err := db.Delete(&models.OIDCConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -999,6 +1057,10 @@ func runServer() {
 	cfg := config.LoadConfig()
 	logger.InitLogger(cfg.LogLevel)
 
+	accessTokenLifespan := parseRequiredDuration("ACCESS_TOKEN_LIFESPAN", cfg.AccessTokenLifespan)
+	refreshTokenLifespan := parseRequiredDuration("REFRESH_TOKEN_LIFESPAN", cfg.RefreshTokenLifespan)
+	idTokenLifespan := parseRequiredDuration("ID_TOKEN_LIFESPAN", cfg.IDTokenLifespan)
+
 	db, err := persistence.ConnectDB(cfg)
 	if err != nil {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
@@ -1011,13 +1073,13 @@ func runServer() {
 	}
 
 	fositeConfig := &fosite.Config{
-		AccessTokenLifespan:        1 * time.Hour,
+		AccessTokenLifespan:        accessTokenLifespan,
 		AuthorizeCodeLifespan:      10 * time.Minute,
-		IDTokenLifespan:            1 * time.Hour,
-		RefreshTokenLifespan:       30 * 24 * time.Hour, // 30 Days
+		IDTokenLifespan:            idTokenLifespan,
+		RefreshTokenLifespan:       refreshTokenLifespan,
 		GlobalSecret:               []byte(cfg.AppSecret),
 		IDTokenIssuer:              cfg.BaseIssuerURL,
-		SendDebugMessagesToClients: true, //TODO, Make it false for Production
+		SendDebugMessagesToClients: false,
 
 		EnforcePKCE:                    true,
 		EnforcePKCEForPublicClients:    true,
@@ -1040,6 +1102,7 @@ func runServer() {
 	healthRepository := repository.NewHealthRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
 	keyRepository := repository.NewCryptoKeyRepository(db)
+	policyRepository := repository.NewOutboundPolicyRepository(db)
 
 	auditLogger := audit.NewAuditLogger(db)
 
@@ -1047,6 +1110,7 @@ func runServer() {
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
 	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
+	federationStateProvider := security.NewFederationStateProvider(cfg)
 
 	startupCtx := context.Background()
 	if _, _, err := keyMgr.GetActivePrivateKey(startupCtx, "sig"); err != nil {
@@ -1058,43 +1122,54 @@ func runServer() {
 
 	// UseCase
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	auditUseCase := usecase.NewAuditUseCase(logRepository)
-	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
+	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger, outboundGuard)
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase, outboundGuard)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase, outboundGuard)
 	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger)
-	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg)
+	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
+	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)
 	healthUseCase := usecase.NewHealthUseCase(healthRepository)
+	outboundPolicyUseCase := usecase.NewOutboundPolicyUseCase(policyRepository, auditLogger)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, fositeConfig, cfg, provider, keyMgr)
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()
 
 	publicSrv := &http.Server{
-		Addr:        ":" + cfg.Port,
-		Handler:     publicRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           publicRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	adminSrv := &http.Server{
-		Addr:        ":" + cfg.AdminPort,
-		Handler:     adminRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.AdminPort,
+		Handler:           adminRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	swaggerSrv := &http.Server{
-		Addr:        ":" + cfg.SwaggerPort,
-		Handler:     swaggerRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.SwaggerPort,
+		Handler:           swaggerRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())

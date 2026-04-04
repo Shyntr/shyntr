@@ -262,6 +262,34 @@ Shyntr Owns The Identity Routing Layer.**
 
 This is why Shyntr should be understood not as a simple bridge, but as an **identity routing and orchestration platform**.
 
+### 🔐 Trust Enforcement Layer
+
+Shyntr enforces trust boundaries not only at the identity protocol level, but also at the **network interaction layer**.
+
+Security-sensitive outbound HTTP requests initiated by Shyntr (such as:
+
+* Webhook delivery
+* OIDC discovery
+* SAML metadata retrieval
+
+) are evaluated through a **policy-driven outbound control mechanism**.
+
+This ensures that:
+
+* Identity flows cannot trigger arbitrary network calls
+* Internal infrastructure is never exposed via outbound requests
+* All integrations respect tenant-level trust boundaries
+
+Outbound behavior is governed by:
+
+* Tenant-specific policies
+* Global fallback policy
+* Strict default deny posture
+
+This makes Shyntr a **Zero Trust Identity Router**, not just at the protocol level, but across system boundaries.
+
+A default global outbound policy is provisioned during migration, ensuring that outbound security remains enforced even before tenant-specific policies are configured.
+
 ---
 
 ## 🎯 Why This Architecture Matters

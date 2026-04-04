@@ -14,6 +14,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/pkg/logger"
@@ -37,6 +38,7 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		&models.CryptoKeyGORM{},
 		&models.OAuth2ClientGORM{},
 		&models.TenantGORM{},
+		&models.OutboundPolicyGORM{},
 	)
 
 	cfg := &config.Config{
@@ -64,6 +66,8 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		SendDebugMessagesToClients: true,
 	}
 
+	policyRepository := repository.NewOutboundPolicyRepository(db)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
 	requestRepository := repository.NewAuthRequestRepository(db)
 	tenantRepository := repository.NewTenantRepository(db)
 	clientRepository := repository.NewOAuth2ClientRepository(db)
@@ -73,7 +77,7 @@ func setupConsentAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
-	clientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	clientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
 	handler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)

@@ -109,8 +109,11 @@ func LoadConfig() *Config {
 		cfg.DSN = envDSN
 	}
 
+	if cfg.AppSecret == "" {
+		log.Fatal("APP_SECRET is required and must be exactly 32 bytes.")
+	}
 	if len(cfg.AppSecret) != 32 {
-		log.Println("WARNING: APP_SECRET should be exactly 32 bytes for AES-256 security.")
+		log.Fatal("APP_SECRET must be exactly 32 bytes.")
 	}
 
 	return &cfg

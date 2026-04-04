@@ -1,8 +1,12 @@
 package payload
 
 import (
+	"strings"
+
 	"github.com/Shyntr/shyntr/internal/domain/model"
 )
+
+func normalizeURL(value string) string { return strings.TrimRight(strings.TrimSpace(value), "/") }
 
 type CreateOIDCConnectionRequest struct {
 	ID                    string                                `json:"id" example:"conn_oidc_123"`
@@ -81,16 +85,16 @@ func (req *CreateOIDCConnectionRequest) ToDomain() *model.OIDCConnection {
 		ID:                    req.ID,
 		TenantID:              req.TenantID,
 		Name:                  req.Name,
-		IssuerURL:             req.IssuerURL,
+		IssuerURL:             normalizeURL(req.IssuerURL),
 		ClientID:              req.ClientID,
 		ClientSecret:          req.ClientSecret,
 		Scopes:                req.Scopes,
 		AttributeMapping:      req.AttributeMapping,
-		AuthorizationEndpoint: req.AuthorizationEndpoint,
-		EndSessionEndpoint:    req.EndSessionEndpoint,
-		TokenEndpoint:         req.TokenEndpoint,
-		UserInfoEndpoint:      req.UserInfoEndpoint,
-		JWKSURI:               req.JWKSURI,
+		AuthorizationEndpoint: normalizeURL(req.AuthorizationEndpoint),
+		EndSessionEndpoint:    normalizeURL(req.EndSessionEndpoint),
+		TokenEndpoint:         normalizeURL(req.TokenEndpoint),
+		UserInfoEndpoint:      normalizeURL(req.UserInfoEndpoint),
+		JWKSURI:               normalizeURL(req.JWKSURI),
 	}
 }
 
@@ -122,9 +126,9 @@ func (req *CreateSAMLConnectionRequest) ToDomain() *model.SAMLConnection {
 		Name:                     req.Name,
 		IdpMetadataXML:           req.IdpMetadataXML,
 		IdpEntityID:              req.IdpEntityID,
-		IdpSingleSignOn:          req.IdpSingleSignOn,
-		IdpSloUrl:                req.IdpSloUrl,
-		MetadataURL:              req.MetadataURL,
+		IdpSingleSignOn:          normalizeURL(req.IdpSingleSignOn),
+		IdpSloUrl:                normalizeURL(req.IdpSloUrl),
+		MetadataURL:              normalizeURL(req.MetadataURL),
 		IdpCertificate:           req.IdpCertificate,
 		IdpEncryptionCertificate: req.IdpEncryptionCertificate,
 		SPPrivateKey:             req.SPPrivateKey,

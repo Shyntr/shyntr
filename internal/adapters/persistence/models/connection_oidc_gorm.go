@@ -37,6 +37,7 @@ func (c *OIDCConnectionGORM) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
+
 func (m *OIDCConnectionGORM) ToDomain() *model.OIDCConnection {
 	return &model.OIDCConnection{
 		ID:                    m.ID,

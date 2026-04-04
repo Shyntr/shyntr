@@ -14,8 +14,10 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -33,13 +35,10 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
-	db.AutoMigrate(
-		&models.TenantGORM{},
-		&models.OAuth2ClientGORM{},
-		&models.AuditLogGORM{},
-		&models.CryptoKeyGORM{},
-	)
-
+	err = persistence.MigrateDB(db)
+	if err != nil {
+		t.Fatalf("failed to migrate database: %v", err)
+	}
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
 	db.Create(&models.TenantGORM{ID: "tenant-a", Name: "Tenant A"})
 	db.Create(&models.TenantGORM{ID: "tenant-b", Name: "Tenant B"})
@@ -64,6 +63,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		SendDebugMessagesToClients: true,
 	}
 
+	policyRepository := repository.NewOutboundPolicyRepository(db)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
 	requestRepository := repository.NewAuthRequestRepository(db)
 	tenantRepository := repository.NewTenantRepository(db)
 	clientRepository := repository.NewOAuth2ClientRepository(db)
@@ -76,14 +77,14 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
-	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil)
-	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil)
+	clientUseCase := usecase.NewSAMLClientUseCase(samlClientRepository, tenantRepository, auditLogger, outboundGuard)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil, outboundGuard)
+	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -109,7 +110,7 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Cannot delete the default tenant")
+		assert.Contains(t, w.Body.String(), `"code":"default_tenant_protected"`)
 	})
 
 	t.Run("Prevent Cross-Tenant Data Leakage (Client Listing)", func(t *testing.T) {
@@ -137,6 +138,6 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "The specified tenant does not exist")
+		assert.Contains(t, w.Body.String(), `"code":"resource_not_found"`)
 	})
 }

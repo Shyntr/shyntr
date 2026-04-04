@@ -29,7 +29,45 @@ Shyntr follows the **12-Factor App** methodology. All configurations are managed
 | `APP_SECRET` | `12345678901234567890123456789012` | A strict **32-byte** string used for AES-256-GCM encryption. It encrypts sensitive data in the database (like Client Secrets and Private Keys) and signs session states. |
 | `APP_PRIVATE_KEY_BASE64` | `""` (Empty) | Base64 encoded RSA Private Key (PKCS#1 or PKCS#8 format). If left empty, Shyntr will auto-generate a secure RSA key pair and store it encrypted in the database. |
 | `COOKIE_SECURE` | `false` | Set to `true` in production to enforce `Secure` flag on HTTP cookies (requires HTTPS). |
-| `SKIP_TLS_VERIFY` | `false` | If `true`, ignores SSL/TLS certificate errors on outbound HTTP requests (e.g., OIDC Discovery). **Use only in development!**  |
+| `SKIP_TLS_VERIFY` | `false` | If `true`, ignores SSL/TLS certificate errors on outbound HTTPS requests. This affects TLS verification behavior only and does **not** bypass outbound policy enforcement. **Use only in development!** |
+
+### ⚠️ Outbound Security Note
+
+Shyntr does not rely solely on environment variables for outbound request security.
+
+All outbound HTTP interactions are governed by **policy-based controls defined in the system (database-driven outbound policies)**.
+
+Environment variables like `SKIP_TLS_VERIFY` only affect TLS behavior and **do not bypass outbound policy enforcement**.
+
+In production environments:
+
+* Always keep `SKIP_TLS_VERIFY=false`
+* Use outbound policies to define allowed destinations
+
+### 🔐 Outbound Policy Model
+
+Outbound security in Shyntr is enforced through a **policy evaluation layer**.
+
+When an outbound request is initiated:
+
+1. The system first checks for a **tenant-specific outbound policy**
+2. If none exists, the **global outbound policy** is applied
+3. The request is validated against:
+    * Allowed schemes (e.g., HTTPS)
+    * Allowed host patterns
+    * Allowed ports
+    * IP safety rules (private, loopback, link-local)
+    * DNS resolution requirements
+
+If any rule is violated, the request is blocked before execution.
+
+This ensures that outbound communication is:
+
+* Deterministic
+* Auditable
+* Secure by default
+
+⚠️ Even if `SKIP_TLS_VERIFY=true`, outbound policy rules are still enforced.
 
 ## 4. Headless UI Routing (Auth Portal)
 

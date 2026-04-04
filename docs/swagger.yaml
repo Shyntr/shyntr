@@ -64,7 +64,13 @@ definitions:
         items:
           type: string
         type: array
+      id_token_encrypted_response_alg:
+        type: string
+      id_token_encrypted_response_enc:
+        type: string
       id_token_lifespan:
+        type: string
+      jwks_uri:
         type: string
       name:
         type: string
@@ -328,6 +334,16 @@ definitions:
     type: object
   payload.AppError:
     properties:
+      code:
+        example: validation_failed
+        type: string
+      field_errors:
+        items:
+          $ref: '#/definitions/payload.FieldError'
+        type: array
+      hint:
+        example: Check the highlighted fields and send the request again.
+        type: string
       status_code:
         example: 400
         type: integer
@@ -368,8 +384,17 @@ definitions:
         items:
           type: string
         type: array
+      id_token_encrypted_response_alg:
+        example: RSA-OAEP-256
+        type: string
+      id_token_encrypted_response_enc:
+        example: A256GCM
+        type: string
       jwks:
         type: object
+      jwks_uri:
+        example: https://app.example.com/.well-known/jwks.json
+        type: string
       name:
         example: My Frontend Application
         type: string
@@ -476,6 +501,87 @@ definitions:
     - name
     - scopes
     - tenant_id
+    type: object
+  payload.CreateOutboundPolicyRequest:
+    properties:
+      allowed_host_patterns:
+        example:
+        - '*.example.com'
+        items:
+          type: string
+        type: array
+      allowed_path_patterns:
+        example:
+        - /api/*
+        items:
+          type: string
+        type: array
+      allowed_ports:
+        example:
+        - 443
+        items:
+          type: integer
+        type: array
+      allowed_schemes:
+        example:
+        - https
+        items:
+          type: string
+        type: array
+      block_link_local_ips:
+        example: true
+        type: boolean
+      block_localhost_names:
+        example: true
+        type: boolean
+      block_loopback_ips:
+        example: true
+        type: boolean
+      block_multicast_ips:
+        example: true
+        type: boolean
+      block_private_ips:
+        example: true
+        type: boolean
+      disable_redirects:
+        example: true
+        type: boolean
+      enabled:
+        example: true
+        type: boolean
+      id:
+        example: policy-123
+        type: string
+      max_response_bytes:
+        example: 2097152
+        maximum: 10485760
+        minimum: 1024
+        type: integer
+      name:
+        example: Default Webhook Policy
+        type: string
+      request_timeout_seconds:
+        example: 5
+        maximum: 30
+        minimum: 1
+        type: integer
+      require_dns_resolve:
+        example: true
+        type: boolean
+      target:
+        enum:
+        - webhook_delivery
+        - saml_metadata_fetch
+        - oidc_discovery
+        - oidc_backchannel_logout
+        example: webhook_delivery
+        type: string
+      tenant_id:
+        example: tenant-abc
+        type: string
+    required:
+    - name
+    - target
     type: object
   payload.CreateSAMLClientRequest:
     properties:
@@ -592,6 +698,90 @@ definitions:
     required:
     - name
     type: object
+  payload.FieldError:
+    properties:
+      field:
+        example: id
+        type: string
+      message:
+        example: Must be a valid UUID.
+        type: string
+    type: object
+  payload.OutboundPolicyResponse:
+    properties:
+      allowed_host_patterns:
+        example:
+        - '*.example.com'
+        items:
+          type: string
+        type: array
+      allowed_path_patterns:
+        example:
+        - /api/*
+        items:
+          type: string
+        type: array
+      allowed_ports:
+        example:
+        - 443
+        items:
+          type: integer
+        type: array
+      allowed_schemes:
+        example:
+        - https
+        items:
+          type: string
+        type: array
+      block_link_local_ips:
+        example: true
+        type: boolean
+      block_localhost_names:
+        example: true
+        type: boolean
+      block_loopback_ips:
+        example: true
+        type: boolean
+      block_multicast_ips:
+        example: true
+        type: boolean
+      block_private_ips:
+        example: true
+        type: boolean
+      created_at:
+        example: "2026-01-01T12:00:00Z"
+        type: string
+      disable_redirects:
+        example: true
+        type: boolean
+      enabled:
+        example: true
+        type: boolean
+      id:
+        example: policy-123
+        type: string
+      max_response_bytes:
+        example: 2097152
+        type: integer
+      name:
+        example: Default Webhook Policy
+        type: string
+      request_timeout_seconds:
+        example: 5
+        type: integer
+      require_dns_resolve:
+        example: true
+        type: boolean
+      target:
+        example: webhook_delivery
+        type: string
+      tenant_id:
+        example: tenant-abc
+        type: string
+      updated_at:
+        example: "2026-01-01T12:00:00Z"
+        type: string
+    type: object
   payload.RejectRequestPayload:
     properties:
       error:
@@ -620,6 +810,72 @@ definitions:
       name:
         example: alpha-production
         type: string
+    type: object
+  payload.UpdateOutboundPolicyRequest:
+    properties:
+      allowed_host_patterns:
+        example:
+        - api.example.com
+        items:
+          type: string
+        type: array
+      allowed_path_patterns:
+        example:
+        - /v1/*
+        items:
+          type: string
+        type: array
+      allowed_ports:
+        example:
+        - 443
+        items:
+          type: integer
+        type: array
+      allowed_schemes:
+        example:
+        - https
+        items:
+          type: string
+        type: array
+      block_link_local_ips:
+        example: true
+        type: boolean
+      block_localhost_names:
+        example: true
+        type: boolean
+      block_loopback_ips:
+        example: true
+        type: boolean
+      block_multicast_ips:
+        example: true
+        type: boolean
+      block_private_ips:
+        example: true
+        type: boolean
+      disable_redirects:
+        example: true
+        type: boolean
+      enabled:
+        example: true
+        type: boolean
+      max_response_bytes:
+        example: 2097152
+        maximum: 10485760
+        minimum: 1024
+        type: integer
+      name:
+        example: Updated Policy Name
+        type: string
+      request_timeout_seconds:
+        example: 5
+        maximum: 30
+        minimum: 1
+        type: integer
+      require_dns_resolve:
+        example: true
+        type: boolean
+    required:
+    - name
     type: object
 info:
   contact: {}
@@ -698,7 +954,7 @@ paths:
       tags:
       - Auth-Admin
   /admin/consent/accept:
-    post:
+    put:
       consumes:
       - application/json
       description: Accepts a consent request, granting the requested scopes and audiences
@@ -736,7 +992,7 @@ paths:
       tags:
       - Auth-Admin
   /admin/consent/reject:
-    post:
+    put:
       consumes:
       - application/json
       description: Rejects a consent request (e.g., user denied access to scopes)
@@ -803,7 +1059,7 @@ paths:
       tags:
       - Auth-Admin
   /admin/login/accept:
-    post:
+    put:
       consumes:
       - application/json
       description: Accepts a login request and confirms the user's identity. Returns
@@ -841,7 +1097,7 @@ paths:
       tags:
       - Auth-Admin
   /admin/login/reject:
-    post:
+    put:
       consumes:
       - application/json
       description: Rejects a login request (e.g., due to invalid credentials or user
@@ -1025,7 +1281,7 @@ paths:
             $ref: '#/definitions/payload.AppError'
       security:
       - BearerAuth: []
-      summary: Delete OIDC Client
+      summary: DeleteByClient OIDC Client
       tags:
       - OAuth2 Clients
   /admin/management/dashboard/stats:
@@ -1167,7 +1423,7 @@ paths:
             $ref: '#/definitions/payload.AppError'
       security:
       - BearerAuth: []
-      summary: Delete OIDC Connection
+      summary: DeleteByClient OIDC Connection
       tags:
       - OIDC Connections
     get:
@@ -1199,6 +1455,166 @@ paths:
       summary: Get OIDC Connection
       tags:
       - OIDC Connections
+  /admin/management/outbound-policies:
+    get:
+      consumes:
+      - application/json
+      description: Lists outbound policies. If tenant_id is provided, returns tenant
+        and global policies.
+      parameters:
+      - description: Tenant ID
+        in: query
+        name: tenant_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.OutboundPolicyResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List outbound policies
+      tags:
+      - Outbound Policies
+    post:
+      consumes:
+      - application/json
+      description: Creates a new outbound security policy for global or tenant-specific
+        outbound HTTP controls.
+      parameters:
+      - description: Create outbound policy request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateOutboundPolicyRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.OutboundPolicyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create outbound policy
+      tags:
+      - Outbound Policies
+  /admin/management/outbound-policies/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Deletes an outbound policy by id.
+      parameters:
+      - description: Policy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete outbound policy
+      tags:
+      - Outbound Policies
+    get:
+      consumes:
+      - application/json
+      description: Returns a single outbound policy by id.
+      parameters:
+      - description: Policy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.OutboundPolicyResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get outbound policy
+      tags:
+      - Outbound Policies
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing outbound policy by id.
+      parameters:
+      - description: Policy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update outbound policy request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.UpdateOutboundPolicyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.OutboundPolicyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update outbound policy
+      tags:
+      - Outbound Policies
   /admin/management/saml-clients:
     get:
       description: Lists all SAML Service Providers globally across the hub.
@@ -1316,7 +1732,7 @@ paths:
             $ref: '#/definitions/payload.AppError'
       security:
       - BearerAuth: []
-      summary: Delete SAML Client
+      summary: DeleteByClient SAML Client
       tags:
       - SAML Clients
     get:
@@ -1495,7 +1911,7 @@ paths:
             $ref: '#/definitions/payload.AppError'
       security:
       - BearerAuth: []
-      summary: Delete SAML Connection
+      summary: DeleteByClient SAML Connection
       tags:
       - SAML Connections
     get:
@@ -1608,7 +2024,7 @@ paths:
             $ref: '#/definitions/payload.AppError'
       security:
       - BearerAuth: []
-      summary: Delete Tenant
+      summary: DeleteByClient Tenant
       tags:
       - Tenants
     get:
@@ -2963,20 +3379,101 @@ paths:
         name: tenant_id
         required: true
         type: string
-      - description: SAML LogoutRequest
+      - description: SAML LogoutRequest (HTTP-Redirect)
         in: query
         name: SAMLRequest
         type: string
-      - description: SAML LogoutResponse
+      - description: SAML LogoutRequest (HTTP-POST)
+        in: formData
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutResponse (HTTP-Redirect)
         in: query
+        name: SAMLResponse
+        type: string
+      - description: SAML LogoutResponse (HTTP-POST)
+        in: formData
         name: SAMLResponse
         type: string
       - description: IdP Connection ID for SP-initiated SLO
         in: query
         name: connection_id
         type: string
+      - description: IdP Connection ID for SP-initiated SLO
+        in: formData
+        name: connection_id
+        type: string
       - description: Relay state
         in: query
+        name: RelayState
+        type: string
+      - description: Relay state
+        in: formData
+        name: RelayState
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Logout successful message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "302":
+          description: Redirects to external IdP or RelayState
+          schema:
+            type: string
+        "400":
+          description: Invalid logout request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SAML SP Single Logout
+      tags:
+      - SAML Federation
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Handles logout requests acting as a Service Provider against an
+        external IdP.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: SAML LogoutRequest (HTTP-Redirect)
+        in: query
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutRequest (HTTP-POST)
+        in: formData
+        name: SAMLRequest
+        type: string
+      - description: SAML LogoutResponse (HTTP-Redirect)
+        in: query
+        name: SAMLResponse
+        type: string
+      - description: SAML LogoutResponse (HTTP-POST)
+        in: formData
+        name: SAMLResponse
+        type: string
+      - description: IdP Connection ID for SP-initiated SLO
+        in: query
+        name: connection_id
+        type: string
+      - description: IdP Connection ID for SP-initiated SLO
+        in: formData
+        name: connection_id
+        type: string
+      - description: Relay state
+        in: query
+        name: RelayState
+        type: string
+      - description: Relay state
+        in: formData
         name: RelayState
         type: string
       produces:

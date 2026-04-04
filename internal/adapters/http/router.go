@@ -7,6 +7,8 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/gin-contrib/cors"
@@ -33,10 +35,13 @@ func SetupRouter(
 	samlBuilderUseCase usecase.SamlBuilderUseCase,
 	healthUseCase usecase.HealthUseCase,
 	scopeUseCase usecase.ScopeUseCase,
+	outboundPolicyUseCase usecase.OutboundPolicyUseCase,
+	outboundGuard port.OutboundGuard,
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
 	km utils2.KeyManager,
+	federationState security.FederationStateProvider,
 ) (*gin.Engine, *gin.Engine) {
 	attrMapper := mapper.New()
 
@@ -46,16 +51,17 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
-	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase)
+	oidcHandler := handlers.NewOIDCHandler(cfg, clientUseCase, authUseCase, connectionUseCase, attrMapper, webhookUseCase, federationState)
 	samlHandler := handlers.NewSAMLHandler(cfg, km, samlBuilderUseCase, clientUseCase, attrMapper, authUseCase, samlConnectionUseCase,
 		auth2SessionUseCase, samlClientUseCase, clientUseCase, webhookUseCase, scopeUseCase)
 	webhookHandler := handlers.NewWebhookHandler(webhookUseCase, cfg)
 	auditHandler := handlers.NewAuditHandler(auditUseCase)
 	scopeHandler := handlers.NewScopeHandler(scopeUseCase)
+	outboundPolicyHandler := handlers.NewOutboundPolicyHandler(outboundPolicyUseCase)
 
 	public := gin.New()
 	public.Use(gin.Recovery())
@@ -82,6 +88,7 @@ func SetupRouter(
 
 	// Authentication UI Redirects (User facing)
 	uiGroup := public.Group("/auth")
+	uiGroup.Use(middleware.ErrorHandlerMiddleware())
 	{
 		uiGroup.GET("/methods", loginHandler.GetLoginMethods)
 	}
@@ -92,6 +99,7 @@ func SetupRouter(
 		rootSamlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
 		rootSamlGroup.POST("/sp/acs", samlHandler.ACS)
 		rootSamlGroup.GET("/sp/slo", samlHandler.SPSLO)
+		rootSamlGroup.POST("/sp/slo", samlHandler.SPSLO)
 		rootSamlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 		rootSamlGroup.GET("/login/:connection_id", samlHandler.Login)
 		rootSamlGroup.GET("/idp/sso", samlHandler.IDPSSO)
@@ -133,6 +141,7 @@ func SetupRouter(
 			samlGroup.GET("/sp/metadata", samlHandler.SPMetadata)
 			samlGroup.POST("/sp/acs", samlHandler.ACS)
 			samlGroup.GET("/sp/slo", samlHandler.SPSLO)
+			samlGroup.POST("/sp/slo", samlHandler.SPSLO)
 			samlGroup.GET("/idp/metadata", samlHandler.IDPMetadata)
 			samlGroup.GET("/login/:connection_id", samlHandler.Login)
 			samlGroup.GET("/idp/sso", samlHandler.IDPSSO)
@@ -226,6 +235,13 @@ func SetupRouter(
 
 			//Audit
 			mgmtGroup.GET("/audit/:tenant_id", auditHandler.Get)
+
+			//Outbound Policy
+			mgmtGroup.POST("/outbound-policies", outboundPolicyHandler.Create)
+			mgmtGroup.GET("/outbound-policies", outboundPolicyHandler.List)
+			mgmtGroup.GET("/outbound-policies/:id", outboundPolicyHandler.Get)
+			mgmtGroup.PUT("/outbound-policies/:id", outboundPolicyHandler.Update)
+			mgmtGroup.DELETE("/outbound-policies/:id", outboundPolicyHandler.Delete)
 		}
 	}
 

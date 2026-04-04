@@ -3,12 +3,14 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/Shyntr/shyntr/config"
+	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/gin-gonic/gin"
@@ -31,6 +33,17 @@ func NewWebhookHandler(webhookUse usecase.WebhookUseCase, cfg *config.Config) *W
 	return &WebhookHandler{
 		webhookUse: webhookUse,
 		cfg:        cfg,
+	}
+}
+
+func webhookCreateStatus(err error) int {
+	switch {
+	case errors.Is(err, usecase.ErrWebhookValidation):
+		return http.StatusBadRequest
+	case errors.Is(err, usecase.ErrWebhookPolicyViolation):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
 	}
 }
 
@@ -71,14 +84,14 @@ func isSafeWebhookURL(target string, allowPrivate bool) bool {
 func (h *WebhookHandler) Create(c *gin.Context) {
 	var req CreateWebhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		payload.AbortWithAppError(c, payload.NewValidationAppError(err))
 		return
 	}
 
 	isDevMode := h.cfg.DEVELOPMENT == "true"
 
 	if !isSafeWebhookURL(req.URL, isDevMode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_webhook_url: target resolves to an internal or restricted IP address (SSRF blocked)"})
+		payload.AbortWithAppError(c, payload.NewDetailedAppError(http.StatusBadRequest, "invalid_webhook_url", "The webhook URL is blocked because it resolves to an internal or restricted address.", "Use a public HTTP or HTTPS endpoint that is allowed by the outbound security policy.", []payload.FieldError{{Field: "url", Message: "Must resolve to a public and allowed destination."}}, nil))
 		return
 	}
 
@@ -98,7 +111,7 @@ func (h *WebhookHandler) Create(c *gin.Context) {
 
 	webhook, _, err := h.webhookUse.CreateWebhook(c.Request.Context(), &wh, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create webhook"})
+		payload.AbortWithAppError(c, payload.NewOperationAppError(webhookCreateStatus(err), "Webhook", "create", err))
 		return
 	}
 

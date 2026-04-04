@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -23,20 +24,21 @@ type ManagementHandler struct {
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
+	OutboundGuard    port.OutboundGuard
 }
 
 func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase, SAMLClientUse usecase.SAMLClientUseCase,
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
-	TenantUse usecase.TenantUseCase) *ManagementHandler {
+	TenantUse usecase.TenantUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
-		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse}
+		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, OutboundGuard: OutboundGuard}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
 	if inputID == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Tenant ID is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return "", false
 	}
 
@@ -49,7 +51,7 @@ func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (str
 		return tenant.ID, true
 	}
 
-	c.Error(payload.NewAppError(http.StatusNotFound, "The specified tenant does not exist", nil))
+	c.Error(payload.NewNotFoundAppError("Tenant", nil))
 	return "", false
 }
 
@@ -122,7 +124,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 func (h *ManagementHandler) ListTenants(c *gin.Context) {
 	tenants, err := h.TenantUse.ListTenants(c.Request.Context())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve tenants", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Tenants", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, tenants)
@@ -142,7 +144,7 @@ func (h *ManagementHandler) GetTenant(c *gin.Context) {
 	id := c.Param("id")
 	tenant, err := h.TenantUse.GetTenant(c.Request.Context(), id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "Tenant not found", err))
+		c.Error(payload.NewNotFoundAppError("Tenant", err))
 		return
 	}
 	c.JSON(http.StatusOK, tenant)
@@ -163,7 +165,7 @@ func (h *ManagementHandler) GetTenant(c *gin.Context) {
 func (h *ManagementHandler) CreateTenant(c *gin.Context) {
 	var tenantReq payload.CreateTenantRequest
 	if err := c.ShouldBindJSON(&tenantReq); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -175,7 +177,7 @@ func (h *ManagementHandler) CreateTenant(c *gin.Context) {
 	}
 	tenant, err := h.TenantUse.CreateTenant(c.Request.Context(), tenant, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Tenant", "create", err))
 		return
 	}
 	logger.FromGin(c).Info("Tenant created successfully", zap.String("target_tenant_id", tenant.ID), zap.String("tenant_name", tenant.Name))
@@ -199,7 +201,7 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 	id := c.Param("id")
 	var req payload.CreateTenantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -211,7 +213,7 @@ func (h *ManagementHandler) UpdateTenant(c *gin.Context) {
 	}
 	err := h.TenantUse.UpdateTenant(c.Request.Context(), tenant, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Tenant", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("Tenant updated successfully", zap.String("target_tenant_id", id))
@@ -233,14 +235,14 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 	tenantID := c.Param("id")
 
 	if tenantID == "default" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Cannot delete the default tenant", nil))
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "default_tenant_protected", "The default tenant cannot be deleted.", "Delete a non-default tenant or keep the default tenant in place.", nil, nil))
 		return
 	}
 
 	err := h.TenantUse.DeleteTenant(c.Request.Context(), tenantID, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to cascade delete tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Tenant", "delete", err))
 		return
 	}
 
@@ -263,7 +265,7 @@ func (h *ManagementHandler) DeleteTenant(c *gin.Context) {
 func (h *ManagementHandler) CreateClient(c *gin.Context) {
 	var req payload.CreateOAuth2ClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -296,7 +298,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create OIDC req", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC client", "create", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC client created successfully", zap.String("client_id", req.ID), zap.String("target_tenant_id", req.TenantID), zap.String("protocol", "oidc"))
@@ -315,7 +317,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 func (h *ManagementHandler) ListClients(c *gin.Context) {
 	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), "")
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
 	}
 	for i := range clients {
@@ -338,13 +340,13 @@ func (h *ManagementHandler) ListClients(c *gin.Context) {
 func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
 	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve clients for tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
 	}
 
@@ -369,7 +371,7 @@ func (h *ManagementHandler) GetClient(c *gin.Context) {
 	id := c.Param("id")
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
+		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
 	}
 	client.Secret = "*****"
@@ -394,13 +396,13 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 	id := c.Param("id")
 	var req payload.CreateOAuth2ClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
 	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Client not found", err))
+		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
 	}
 
@@ -432,7 +434,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 
 	_, _, err = h.OAuth2ClientUse.UpdateClient(c.Request.Context(), clientToSave, unhashedSecret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update OIDC client", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC client", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC client updated successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
@@ -456,7 +458,7 @@ func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 
 	err := h.OAuth2ClientUse.DeleteClient(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC client", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC client", "delete", err))
 		return
 	}
 
@@ -476,7 +478,7 @@ func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
 	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), "")
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, clients)
@@ -496,13 +498,13 @@ func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
 func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
 	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML clients for tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, clients)
@@ -524,7 +526,7 @@ func (h *ManagementHandler) GetSAMLClient(c *gin.Context) {
 	id := c.Param("id")
 	client, err := h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "SAML Client not found", err))
+		c.Error(payload.NewNotFoundAppError("SAML client", err))
 		return
 	}
 	c.JSON(http.StatusOK, client)
@@ -545,7 +547,7 @@ func (h *ManagementHandler) GetSAMLClient(c *gin.Context) {
 func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 	var client payload.CreateSAMLClientRequest
 	if err := c.ShouldBindJSON(&client); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -575,7 +577,7 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 
 	createdClient, err := h.SAMLClientUse.CreateClient(c.Request.Context(), clientToSave, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create SAML client", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML client", "create", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client created successfully", zap.String("client_id", createdClient.ID), zap.String("target_tenant_id", client.TenantID), zap.String("protocol", "saml"))
@@ -599,13 +601,13 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	id := c.Param("id")
 	var req payload.CreateSAMLClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
 	client, err := h.SAMLClientUse.GetClient(c.Request.Context(), req.TenantID, id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "saml client not found", err))
+		c.Error(payload.NewNotFoundAppError("SAML client", err))
 		return
 	}
 
@@ -621,9 +623,14 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.AllowedScopes = req.AllowedScopes
 
 	if client.MetadataURL != "" {
-		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(client.MetadataURL)
+		descriptor, _, err := shyntrsaml.FetchAndParseMetadata(
+			c.Request.Context(),
+			client.TenantID,
+			client.MetadataURL,
+			h.OutboundGuard,
+		)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Metadata URL: " + err.Error()})
+			payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "SAML client metadata", "process", err))
 			return
 		}
 
@@ -673,14 +680,14 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	}
 
 	if client.EntityID == "" || client.ACSURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "entity_id and acs_url are required if metadata_url is not provided"})
+		payload.AbortWithAppError(c, payload.NewDetailedAppError(http.StatusBadRequest, "missing_required_fields", "The SAML client request must include entity_id and acs_url when metadata_url is not provided.", "Provide entity_id and acs_url, or send a valid metadata_url.", []payload.FieldError{{Field: "entity_id", Message: "This field is required when metadata_url is empty."}, {Field: "acs_url", Message: "This field is required when metadata_url is empty."}}, nil))
 		return
 	}
 
 	err = h.SAMLClientUse.UpdateClient(c.Request.Context(), client, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update SAML client", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML client", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client updated successfully", zap.String("entity_id", req.EntityID), zap.String("target_tenant_id", req.TenantID), zap.String("protocol", "saml"))
@@ -703,7 +710,7 @@ func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
 	id := c.Param("id")
 	err := h.SAMLClientUse.DeleteClient(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete SAML client", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML client", "delete", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML client deleted successfully", zap.String("client_id", id), zap.String("protocol", "saml"))
@@ -727,7 +734,7 @@ func (h *ManagementHandler) DeleteSAMLClient(c *gin.Context) {
 func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 	var conn payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&conn); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -738,12 +745,12 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 	conn.TenantID = realTenantID
 
 	if conn.MetadataURL == "" && conn.IdpMetadataXML == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Metadata URL or IdP Metadata XML is required", nil))
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "missing_metadata", "The SAML connection request must include metadata_url or idp_metadata_xml.", "Provide a valid metadata_url or inline idp_metadata_xml and send the request again.", []payload.FieldError{{Field: "metadata_url", Message: "Provide this field or idp_metadata_xml."}, {Field: "idp_metadata_xml", Message: "Provide this field or metadata_url."}}, nil))
 		return
 	}
 
 	connToSave := &model.SAMLConnection{
-		ID:                       conn.ID,
+		ID:                       "",
 		TenantID:                 conn.TenantID,
 		Name:                     conn.Name,
 		IdpMetadataXML:           conn.IdpMetadataXML,
@@ -762,7 +769,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 
 	connection, err := h.SAMLConnUse.CreateConnection(c.Request.Context(), connToSave, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create SAML connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connection", "create", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML connection created successfully", zap.String("entity_id", connection.IdpEntityID), zap.String("target_tenant_id", connection.TenantID), zap.String("protocol", "saml"))
@@ -781,7 +788,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
 	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), "")
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
@@ -801,13 +808,13 @@ func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
 func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
 	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve SAML connections for tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
@@ -829,7 +836,7 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 	id := c.Param("id")
 	conn, err := h.SAMLConnUse.GetConnection(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "SAML Connection not found", err))
+		c.Error(payload.NewNotFoundAppError("SAML connection", err))
 		return
 	}
 	c.JSON(http.StatusOK, conn)
@@ -851,7 +858,7 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 	var req payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -876,7 +883,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 	err := h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update SAML connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connection", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("SAML connection updated successfully", zap.String("entity_id", updateData.IdpEntityID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "saml"))
@@ -899,7 +906,7 @@ func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	err := h.SAMLConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete SAML connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connection", "delete", err))
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
@@ -922,7 +929,7 @@ func (h *ManagementHandler) DeleteSAMLConnection(c *gin.Context) {
 func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 	var conn payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&conn); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -951,7 +958,7 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 
 	savedConn, err := h.OIDCConnUse.CreateConnection(c.Request.Context(), connection, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to create OIDC connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connection", "create", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", savedConn.ClientID), zap.String("target_tenant_id", savedConn.TenantID), zap.String("protocol", "oidc"))
@@ -970,7 +977,7 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
 	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), "")
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
@@ -990,13 +997,13 @@ func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
 func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "tenant_id is required", nil))
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
 	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to retrieve OIDC connections for tenant", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, connections)
@@ -1018,7 +1025,7 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 	id := c.Param("id")
 	connection, err := h.OIDCConnUse.GetConnection(c.Request.Context(), tenantID, id)
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusNotFound, "OIDC Connection not found", err))
+		c.Error(payload.NewNotFoundAppError("OIDC connection", err))
 		return
 	}
 	c.JSON(http.StatusOK, connection)
@@ -1040,7 +1047,7 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 	var req payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(payload.NewAppError(http.StatusBadRequest, "Invalid request payload", err))
+		c.Error(payload.NewValidationAppError(err))
 		return
 	}
 
@@ -1063,7 +1070,7 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 	err := h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to update OIDC connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connection", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection updated successfully", zap.String("client_id", updateData.ClientID), zap.String("target_tenant_id", updateData.TenantID), zap.String("protocol", "oidc"))
@@ -1086,7 +1093,7 @@ func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
 	id := c.Param("id")
 	err := h.OIDCConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to delete OIDC connection", err))
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connection", "delete", err))
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection deleted successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))

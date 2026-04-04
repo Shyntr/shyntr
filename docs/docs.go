@@ -115,7 +115,7 @@ const docTemplate = `{
             }
         },
         "/admin/consent/accept": {
-            "post": {
+            "put": {
                 "description": "Accepts a consent request, granting the requested scopes and audiences to the OAuth2 client.",
                 "consumes": [
                     "application/json"
@@ -171,7 +171,7 @@ const docTemplate = `{
             }
         },
         "/admin/consent/reject": {
-            "post": {
+            "put": {
                 "description": "Rejects a consent request (e.g., user denied access to scopes) and aborts the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -269,7 +269,7 @@ const docTemplate = `{
             }
         },
         "/admin/login/accept": {
-            "post": {
+            "put": {
                 "description": "Accepts a login request and confirms the user's identity. Returns a redirection URL to continue the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -325,7 +325,7 @@ const docTemplate = `{
             }
         },
         "/admin/login/reject": {
-            "post": {
+            "put": {
                 "description": "Rejects a login request (e.g., due to invalid credentials or user denial) and aborts the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -874,6 +874,251 @@ const docTemplate = `{
                         "description": "Failed to delete OIDC connection",
                         "schema": {
                             "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/outbound-policies": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists outbound policies. If tenant_id is provided, returns tenant and global policies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Outbound Policies"
+                ],
+                "summary": "List outbound policies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/payload.OutboundPolicyResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new outbound security policy for global or tenant-specific outbound HTTP controls.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Outbound Policies"
+                ],
+                "summary": "Create outbound policy",
+                "parameters": [
+                    {
+                        "description": "Create outbound policy request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.CreateOutboundPolicyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/payload.OutboundPolicyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/outbound-policies/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a single outbound policy by id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Outbound Policies"
+                ],
+                "summary": "Get outbound policy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Policy ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.OutboundPolicyResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates an existing outbound policy by id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Outbound Policies"
+                ],
+                "summary": "Update outbound policy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Policy ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update outbound policy request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.UpdateOutboundPolicyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.OutboundPolicyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes an outbound policy by id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Outbound Policies"
+                ],
+                "summary": "Delete outbound policy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Policy ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -1847,7 +2092,7 @@ const docTemplate = `{
                 "tags": [
                     "Scopes"
                 ],
-                "summary": "DeleteByClient Scope",
+                "summary": "Delete Scope",
                 "parameters": [
                     {
                         "type": "string",
@@ -3512,15 +3757,27 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "SAML LogoutRequest",
+                        "description": "SAML LogoutRequest (HTTP-Redirect)",
                         "name": "SAMLRequest",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "SAML LogoutResponse",
+                        "description": "SAML LogoutRequest (HTTP-POST)",
+                        "name": "SAMLRequest",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-Redirect)",
                         "name": "SAMLResponse",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-POST)",
+                        "name": "SAMLResponse",
+                        "in": "formData"
                     },
                     {
                         "type": "string",
@@ -3530,9 +3787,117 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
                         "description": "Relay state",
                         "name": "RelayState",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Logout successful message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "302": {
+                        "description": "Redirects to external IdP or RelayState",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid logout request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Handles logout requests acting as a Service Provider against an external IdP.",
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SAML Federation"
+                ],
+                "summary": "SAML SP Single Logout",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutRequest (HTTP-Redirect)",
+                        "name": "SAMLRequest",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutRequest (HTTP-POST)",
+                        "name": "SAMLRequest",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-Redirect)",
+                        "name": "SAMLResponse",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-POST)",
+                        "name": "SAMLResponse",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -3807,7 +4172,16 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "id_token_encrypted_response_alg": {
+                    "type": "string"
+                },
+                "id_token_encrypted_response_enc": {
+                    "type": "string"
+                },
                 "id_token_lifespan": {
+                    "type": "string"
+                },
+                "jwks_uri": {
                     "type": "string"
                 },
                 "name": {
@@ -4204,6 +4578,20 @@ const docTemplate = `{
         "payload.AppError": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "validation_failed"
+                },
+                "field_errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/payload.FieldError"
+                    }
+                },
+                "hint": {
+                    "type": "string",
+                    "example": "Check the highlighted fields and send the request again."
+                },
                 "status_code": {
                     "type": "integer",
                     "example": 400
@@ -4267,8 +4655,20 @@ const docTemplate = `{
                         "refresh_token"
                     ]
                 },
+                "id_token_encrypted_response_alg": {
+                    "type": "string",
+                    "example": "RSA-OAEP-256"
+                },
+                "id_token_encrypted_response_enc": {
+                    "type": "string",
+                    "example": "A256GCM"
+                },
                 "jwks": {
                     "type": "object"
+                },
+                "jwks_uri": {
+                    "type": "string",
+                    "example": "https://app.example.com/.well-known/jwks.json"
                 },
                 "name": {
                     "type": "string",
@@ -4408,6 +4808,117 @@ const docTemplate = `{
                 "user_info_endpoint": {
                     "type": "string",
                     "example": "https://openidconnect.googleapis.com/v1/userinfo"
+                }
+            }
+        },
+        "payload.CreateOutboundPolicyRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "target"
+            ],
+            "properties": {
+                "allowed_host_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "*.example.com"
+                    ]
+                },
+                "allowed_path_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "/api/*"
+                    ]
+                },
+                "allowed_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "example": [
+                        443
+                    ]
+                },
+                "allowed_schemes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "https"
+                    ]
+                },
+                "block_link_local_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_localhost_names": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_loopback_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_multicast_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_private_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "disable_redirects": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "id": {
+                    "type": "string",
+                    "example": "policy-123"
+                },
+                "max_response_bytes": {
+                    "type": "integer",
+                    "maximum": 10485760,
+                    "minimum": 1024,
+                    "example": 2097152
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Default Webhook Policy"
+                },
+                "request_timeout_seconds": {
+                    "type": "integer",
+                    "maximum": 30,
+                    "minimum": 1,
+                    "example": 5
+                },
+                "require_dns_resolve": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "target": {
+                    "type": "string",
+                    "enum": [
+                        "webhook_delivery",
+                        "saml_metadata_fetch",
+                        "oidc_discovery",
+                        "oidc_backchannel_logout"
+                    ],
+                    "example": "webhook_delivery"
+                },
+                "tenant_id": {
+                    "type": "string",
+                    "example": "tenant-abc"
                 }
             }
         },
@@ -4565,6 +5076,124 @@ const docTemplate = `{
                 }
             }
         },
+        "payload.FieldError": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "example": "id"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Must be a valid UUID."
+                }
+            }
+        },
+        "payload.OutboundPolicyResponse": {
+            "type": "object",
+            "properties": {
+                "allowed_host_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "*.example.com"
+                    ]
+                },
+                "allowed_path_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "/api/*"
+                    ]
+                },
+                "allowed_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "example": [
+                        443
+                    ]
+                },
+                "allowed_schemes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "https"
+                    ]
+                },
+                "block_link_local_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_localhost_names": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_loopback_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_multicast_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_private_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-01-01T12:00:00Z"
+                },
+                "disable_redirects": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "id": {
+                    "type": "string",
+                    "example": "policy-123"
+                },
+                "max_response_bytes": {
+                    "type": "integer",
+                    "example": 2097152
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Default Webhook Policy"
+                },
+                "request_timeout_seconds": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "require_dns_resolve": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "target": {
+                    "type": "string",
+                    "example": "webhook_delivery"
+                },
+                "tenant_id": {
+                    "type": "string",
+                    "example": "tenant-abc"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "example": "2026-01-01T12:00:00Z"
+                }
+            }
+        },
         "payload.RejectRequestPayload": {
             "type": "object",
             "required": [
@@ -4603,6 +5232,98 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "alpha-production"
+                }
+            }
+        },
+        "payload.UpdateOutboundPolicyRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "allowed_host_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "api.example.com"
+                    ]
+                },
+                "allowed_path_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "/v1/*"
+                    ]
+                },
+                "allowed_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "example": [
+                        443
+                    ]
+                },
+                "allowed_schemes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "https"
+                    ]
+                },
+                "block_link_local_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_localhost_names": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_loopback_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_multicast_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "block_private_ips": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "disable_redirects": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "max_response_bytes": {
+                    "type": "integer",
+                    "maximum": 10485760,
+                    "minimum": 1024,
+                    "example": 2097152
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Updated Policy Name"
+                },
+                "request_timeout_seconds": {
+                    "type": "integer",
+                    "maximum": 30,
+                    "minimum": 1,
+                    "example": 5
+                },
+                "require_dns_resolve": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         }

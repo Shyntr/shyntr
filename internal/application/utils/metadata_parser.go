@@ -1,31 +1,56 @@
 package utils
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
+	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/crewjam/saml"
 )
 
-func FetchAndParseMetadata(metadataURL string) (*saml.EntityDescriptor, string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(metadataURL)
+func FetchAndParseMetadata(
+	ctx context.Context,
+	tenantID string,
+	metadataURL string,
+	outbound port.OutboundGuard,
+) (*saml.EntityDescriptor, string, error) {
+	safeURL, policy, err := outbound.ValidateURL(ctx, tenantID, model.OutboundTargetSAMLMetadataFetch, metadataURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("metadata url violates outbound policy: %w", err)
+	}
+
+	client := outbound.NewHTTPClient(ctx, tenantID, model.OutboundTargetSAMLMetadataFetch, policy)
+
+	req, err := newSAMLMetadataRequest(ctx, safeURL.String())
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to build metadata request: %w", err)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to fetch metadata url: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
+	if resp.StatusCode != 200 {
 		return nil, "", fmt.Errorf("metadata url returned status %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	maxBytes := int64(2 << 20)
+	if policy != nil && policy.MaxResponseBytes > 0 {
+		maxBytes = policy.MaxResponseBytes
+	}
+
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read metadata body: %w", err)
+	}
+	if int64(len(bodyBytes)) > maxBytes {
+		return nil, "", fmt.Errorf("metadata response too large")
 	}
 
 	var descriptor saml.EntityDescriptor

@@ -3,11 +3,21 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	"github.com/Shyntr/shyntr/pkg/utils"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+var (
+	ErrScopeValidation         = errors.New("scope validation failed")
+	ErrScopeNotFound           = errors.New("scope not found")
+	ErrScopeConflict           = errors.New("scope already exists")
+	ErrSystemScopeRenameDenied = errors.New("cannot rename system scope")
+	ErrSystemScopeDeleteDenied = errors.New("cannot delete a system-level scope")
 )
 
 type ScopeUseCase interface {
@@ -37,15 +47,18 @@ func (u *scopeUseCase) CreateScope(ctx context.Context, scope *model.Scope, acto
 	scope.IsSystem = false
 
 	if err := scope.Validate(); err != nil {
-		return nil, err
+		return nil, wrapScopeValidation(err)
 	}
 	if scope.ID == "" {
-		scope.ID, _ = utils.GenerateRandomHex(8)
+		scope.ID = uuid.New().String()
 	}
 
 	existing, err := u.repo.GetByName(ctx, scope.TenantID, scope.Name)
 	if err == nil && existing != nil {
-		return nil, errors.New("conflict: a scope with this name already exists")
+		return nil, ErrScopeConflict
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	if err := u.repo.Create(ctx, scope); err != nil {
@@ -61,7 +74,11 @@ func (u *scopeUseCase) CreateScope(ctx context.Context, scope *model.Scope, acto
 }
 
 func (u *scopeUseCase) GetScope(ctx context.Context, tenantID, id string) (*model.Scope, error) {
-	return u.repo.GetByID(ctx, tenantID, id)
+	scope, err := u.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, normalizeScopeLookupError(err)
+	}
+	return scope, nil
 }
 
 func (u *scopeUseCase) GetScopesByNames(ctx context.Context, tenantID string, names []string) ([]*model.Scope, error) {
@@ -91,17 +108,20 @@ func (u *scopeUseCase) ListScopes(ctx context.Context, tenantID string) ([]*mode
 func (u *scopeUseCase) UpdateScope(ctx context.Context, scope *model.Scope, actorIP, userAgent string) error {
 	existing, err := u.repo.GetByID(ctx, scope.TenantID, scope.ID)
 	if err != nil {
-		return err
+		return normalizeScopeLookupError(err)
 	}
 
 	scope.IsSystem = existing.IsSystem
 	if existing.IsSystem && existing.Name != scope.Name {
-		return errors.New("security_violation: cannot rename a system-level scope")
+		return ErrSystemScopeRenameDenied
 	}
 	if existing.Name != scope.Name {
 		conflict, err := u.repo.GetByName(ctx, scope.TenantID, scope.Name)
 		if err == nil && conflict != nil {
-			return errors.New("conflict: a scope with this name already exists")
+			return ErrScopeConflict
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
 		}
 	}
 
@@ -128,7 +148,7 @@ func (u *scopeUseCase) DeleteScope(ctx context.Context, tenantID, id string, act
 			"scope_id":   id,
 			"scope_name": scope.Name,
 		})
-		return errors.New("security_violation: cannot delete a system-level scope")
+		return ErrSystemScopeDeleteDenied
 	}
 
 	if err := u.repo.Delete(ctx, tenantID, id); err != nil {
@@ -173,4 +193,21 @@ func containsString(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+func wrapScopeValidation(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrScopeValidation, err)
+}
+
+func normalizeScopeLookupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrScopeNotFound
+	}
+	return err
 }

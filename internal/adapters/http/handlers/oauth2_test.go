@@ -12,8 +12,10 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/audit"
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/pkg/consts"
@@ -35,14 +37,10 @@ func setupTestDB() *gorm.DB {
 		panic("failed to connect database")
 	}
 
-	db.AutoMigrate(
-		&models.OAuth2ClientGORM{},
-		&models.OAuth2SessionGORM{},
-		&models.LoginRequestGORM{},
-		&models.ConsentRequestGORM{},
-		&models.AuditLogGORM{},
-		&models.CryptoKeyGORM{},
-	)
+	err = persistence.MigrateDB(db)
+	if err != nil {
+		return nil
+	}
 	return db
 }
 
@@ -108,12 +106,14 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 
 	jwksCache := utils2.NewJWKSCache()
 
+	policyRepository := repository.NewOutboundPolicyRepository(db)
+	outboundGuard := security.NewOutboundGuard(policyRepository, cfg.SkipTLSVerify)
 	//UseCase
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
-	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, cfg)
+	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
 	authUseCase := usecase.NewAuthUseCase(requestRepository, auditLogger)
 	tenantUseCase := usecase.NewTenantUseCase(tenantRepository, auditLogger, scopeRepository)
-	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase)
+	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	provider := utils2.NewProvider(db, fositeConfig, keyMgr, clientRepository, jtiRepository)
 	handler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, auth2ClientUseCase, authUseCase, sessionUseCase,

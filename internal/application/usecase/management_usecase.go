@@ -9,6 +9,11 @@ import (
 	"github.com/Shyntr/shyntr/internal/domain/model"
 )
 
+var (
+	ErrLoginChallengeNotFound = errors.New("login challenge not found")
+	ErrLoginAlreadyUsed       = errors.New("login challenge already authenticated")
+)
+
 type ManagementUseCase interface {
 	GetLoginMethods(ctx context.Context, challenge string) ([]model.AuthMethod, *model.LoginRequest, error)
 }
@@ -29,19 +34,29 @@ func NewManagementUseCase(Config *config.Config, AuthReq port.AuthRequestReposit
 func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge string) ([]model.AuthMethod, *model.LoginRequest, error) {
 	loginReq, err := m.AuthReq.GetLoginRequest(ctx, challenge)
 	if err != nil {
+		if err.Error() == "login request not found" {
+			return nil, nil, ErrLoginChallengeNotFound
+		}
 		return nil, nil, err
 	}
 
 	if loginReq.Authenticated {
-		return nil, nil, errors.New("already authenticated")
+		return nil, nil, ErrLoginAlreadyUsed
 	}
 
 	tenantID := loginReq.TenantID
 	samlConns, err := m.SamlConn.ListActiveByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	oidcConns, err := m.OidcConn.ListActiveByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	methods := []model.AuthMethod{}
 
-	//TODO this will be configured by tenants
 	if tenantID == "default" {
 		methods = append(methods, model.AuthMethod{
 			ID:   "basic-auth",

@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/mapper"
+	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/Shyntr/shyntr/pkg/utils"
@@ -24,11 +26,12 @@ type OIDCHandler struct {
 	OIDCUse       usecase.OIDCConnectionUseCase
 	Mapper        *mapper.Mapper
 	wh            usecase.WebhookUseCase
+	StateProvider security.FederationStateProvider
 }
 
 func NewOIDCHandler(Config *config.Config, clientUseCase usecase.OAuth2ClientUseCase, AuthUse usecase.AuthUseCase,
-	OIDCUse usecase.OIDCConnectionUseCase, m *mapper.Mapper, wh usecase.WebhookUseCase) *OIDCHandler {
-	return &OIDCHandler{Config: Config, clientUseCase: clientUseCase, AuthUse: AuthUse, OIDCUse: OIDCUse, Mapper: m, wh: wh}
+	OIDCUse usecase.OIDCConnectionUseCase, m *mapper.Mapper, wh usecase.WebhookUseCase, StateProvider security.FederationStateProvider) *OIDCHandler {
+	return &OIDCHandler{Config: Config, clientUseCase: clientUseCase, AuthUse: AuthUse, OIDCUse: OIDCUse, Mapper: m, wh: wh, StateProvider: StateProvider}
 }
 
 // Login godoc
@@ -47,30 +50,48 @@ func NewOIDCHandler(Config *config.Config, clientUseCase usecase.OAuth2ClientUse
 func (h *OIDCHandler) Login(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	if tenantID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id required"})
+		payload.WriteOIDCError(c, http.StatusBadRequest, "invalid_request", "The tenant_id path parameter is required.", nil)
 		return
 	}
 	connectionID := c.Param("connection_id")
 	loginChallenge := c.Query("login_challenge")
 
 	if loginChallenge == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing_login_challenge"})
+		payload.WriteOIDCError(c, http.StatusBadRequest, "invalid_request", "The login_challenge query parameter is required.", nil)
 		return
 	}
 
 	loginReq, err := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "login_request_not_found"})
+		payload.WriteOIDCError(c, http.StatusNotFound, "login_request_not_found", "The login request was not found or has expired.", err)
 		return
 	}
 
-	csrfToken, _ := utils.GenerateRandomHex(32)
+	csrfToken, err := utils.GenerateRandomHex(32)
+	if err != nil {
+		payload.WriteOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to generate the CSRF token for the OIDC login flow.", err)
+		return
+	}
+
 	c.SetCookie("shyntr_fed_csrf", csrfToken, 600, "/", "", h.Config.CookieSecure, true)
 
-	redirectURL, providerCtx, err := h.clientUseCase.InitiateAuth(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	state, err := h.StateProvider.Issue(c.Request.Context(), security.IssueFederationStateInput{
+		Action:         security.FederationActionOIDCLogin,
+		TenantID:       tenantID,
+		LoginChallenge: loginChallenge,
+		ConnectionID:   connectionID,
+		CSRFToken:      csrfToken,
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		payload.WriteOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to create the federation state for the OIDC login flow.", err)
+		return
+	}
+
+	redirectURL, providerCtx, err := h.clientUseCase.InitiateAuth(c.Request.Context(), tenantID, connectionID, state, csrfToken)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initiate OIDC", zap.Error(err), zap.String("protocol", "oidc"))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "oidc_init_failed", "details": err.Error()})
+		payload.WriteOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to initiate login with the external OIDC provider.", err)
 		return
 	}
 
@@ -93,50 +114,84 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 // @Router /t/{tenant_id}/oidc/callback [get]
 func (h *OIDCHandler) Callback(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		payload.WriteOIDCError(c, http.StatusBadRequest, "invalid_request", "The tenant_id path parameter is required.", nil)
+		return
+	}
+	providerError := c.Query("error")
+	if providerError != "" {
+		errorDescription := c.Query("error_description")
+		logger.FromGin(c).Warn("OIDC provider returned error",
+			zap.String("protocol", "oidc"),
+			zap.String("error", providerError),
+			zap.String("error_description", errorDescription),
+		)
+		payload.AbortWithOIDCError(c, http.StatusBadRequest, providerError, errorDescription, nil)
+		return
+	}
 	code := c.Query("code")
-	state := c.Query("state")
+	stateToken := c.Query("state")
 
-	if code == "" || state == "" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_callback_params"})
+	if stateToken == "" {
+		payload.WriteOIDCError(c, http.StatusBadRequest, "invalid_request", "The state query parameter is required.", nil)
+		return
+	}
+
+	if code == "" {
+		payload.AbortWithOIDCError(c, http.StatusBadRequest, "invalid_request", "The OIDC callback request must include both code and state parameters.", nil)
 		return
 	}
 
 	csrfCookie, err := c.Cookie("shyntr_fed_csrf")
 	if err != nil || csrfCookie == "" {
 		logger.FromGin(c).Warn("Login CSRF blocked", zap.String("protocol", "oidc"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing_csrf_cookie"})
+		payload.AbortWithOIDCError(c, http.StatusForbidden, "access_denied", "The OIDC login session is missing the CSRF cookie. Restart the login flow.", err)
 		return
 	}
 	c.SetCookie("shyntr_fed_csrf", "", -1, "/", "", h.Config.CookieSecure, true)
 
-	loginChallenge, connectionID, err := h.clientUseCase.VerifyState(state, csrfCookie)
+	verifiedState, err := h.StateProvider.Verify(c.Request.Context(), stateToken, security.VerifyFederationStateInput{
+		ExpectedAction: security.FederationActionOIDCLogin,
+		ExpectedTenant: tenantID,
+		CSRFToken:      csrfCookie,
+	})
 	if err != nil {
-		logger.FromGin(c).Warn("Invalid OIDC state", zap.Error(err), zap.String("protocol", "oidc"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid_state_token"})
+		logger.FromGin(c).Warn("OIDC callback federation state validation failed",
+			zap.Error(err),
+			zap.String("protocol", "oidc"),
+		)
+		payload.WriteOIDCError(c, http.StatusForbidden, "access_denied", "The OIDC callback state is invalid, expired, or does not match the current login session.", err)
 		return
 	}
 
+	loginChallenge := verifiedState.LoginChallenge
+	connectionID := verifiedState.ConnectionID
 	loginReq, loginReqErr := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if loginReqErr != nil {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "session_expired"})
+		payload.AbortWithOIDCError(c, http.StatusForbidden, "access_denied", "The login session has expired. Restart the login flow.", loginReqErr)
 		return
 	}
 
 	var ctxData map[string]interface{}
-	json.Unmarshal(loginReq.Context, &ctxData)
+	if len(loginReq.Context) > 0 {
+		_ = json.Unmarshal(loginReq.Context, &ctxData)
+	}
+	if ctxData == nil {
+		ctxData = make(map[string]interface{})
+	}
 	codeVerifier, _ := ctxData["code_verifier"].(string)
 	expectedNonce, _ := ctxData["nonce"].(string)
 
 	userInfo, err := h.clientUseCase.ExchangeAndUserInfo(c.Request.Context(), tenantID, code, connectionID, codeVerifier, expectedNonce)
 	if err != nil {
 		logger.FromGin(c).Error("OIDC Exchange Failed", zap.Error(err), zap.String("protocol", "oidc"))
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token_exchange_failed", "details": err.Error()})
+		payload.AbortWithOIDCError(c, http.StatusForbidden, "invalid_grant", "The authorization code could not be exchanged with the external OIDC provider.", err)
 		return
 	}
 
 	conn, connErr := h.OIDCUse.GetConnection(c.Request.Context(), tenantID, connectionID)
 	if connErr != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "connection_not_found"})
+		payload.AbortWithOIDCError(c, http.StatusNotFound, "server_error", "The configured OIDC connection could not be found for this tenant.", connErr)
 		return
 	}
 
@@ -177,7 +232,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, conn.Name, existingCtx, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"))
-		c.Error(payload.NewAppError(http.StatusInternalServerError, "Failed to complete OIDC login", err))
+		payload.AbortWithOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to complete the external OIDC login and resume the original authentication flow.", err)
 		return
 	}
 
@@ -192,7 +247,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	} else {
 		parsedURL, err := url.Parse(loginReq.RequestURL)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "invalid_redirect_url"})
+			payload.AbortWithOIDCError(c, http.StatusBadRequest, "server_error", "The original redirect URL stored for the login request is invalid.", err)
 			return
 		}
 
