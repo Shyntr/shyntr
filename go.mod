@@ -6,12 +6,12 @@ require (
 	github.com/beevik/etree v1.6.0
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/crewjam/saml v0.5.1
-	github.com/gin-contrib/cors v1.7.6
+	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
-	github.com/go-jose/go-jose/v3 v3.0.4
-	github.com/go-jose/go-jose/v4 v4.1.3
-	github.com/go-playground/validator/v10 v10.30.1
+	github.com/go-jose/go-jose/v3 v3.0.5
+	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.0
 	github.com/ory/fosite v0.47.0

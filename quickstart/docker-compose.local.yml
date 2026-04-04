@@ -89,9 +89,9 @@ services:
     environment:
       - SHYNTR_INTERNAL_API_URL=http://host.docker.internal:7497
       - SHYNTR_PUBLIC_API_URL=http://host.docker.internal:7496
-#    depends_on:
-#      shyntr-backend:
-#        condition: service_healthy
+    depends_on:
+      shyntr-backend:
+        condition: service_healthy
     networks:
       - shyntr-net
 

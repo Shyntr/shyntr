@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -105,12 +106,14 @@ func (g *outboundGuard) ValidateURL(ctx context.Context, tenantID string, target
 		return nil, nil, fmt.Errorf("%w: host %q is not allowed", ErrURLNotAllowed, host)
 	}
 
-	path := parsed.EscapedPath()
-	if path == "" {
-		path = "/"
+	rawPath := parsed.EscapedPath()
+	if rawPath == "" {
+		rawPath = "/"
 	}
-	if len(policy.AllowedPathPatterns) > 0 && !matchPathPatternList(path, policy.AllowedPathPatterns) {
-		return nil, nil, fmt.Errorf("%w: path %q is not allowed", ErrURLNotAllowed, path)
+	unescaped, _ := url.PathUnescape(rawPath)
+	cleanPath := "/" + strings.TrimPrefix(path.Clean(unescaped), "/")
+	if len(policy.AllowedPathPatterns) > 0 && !matchPathPatternList(cleanPath, policy.AllowedPathPatterns) {
+		return nil, nil, fmt.Errorf("%w: path %q is not allowed", ErrURLNotAllowed, cleanPath)
 	}
 
 	if len(policy.AllowedPorts) > 0 {
@@ -151,6 +154,7 @@ func (g *outboundGuard) NewHTTPClient(ctx context.Context, tenantID string, targ
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: g.skipTLSVerify,
+			MinVersion:         tls.VersionTLS12,
 		},
 	}
 
