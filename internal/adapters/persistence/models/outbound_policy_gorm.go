@@ -4,9 +4,9 @@ import "time"
 
 type OutboundPolicyGORM struct {
 	ID       string `gorm:"primaryKey;size:64"`
-	TenantID string `gorm:"index;size:64"`
+	TenantID string `gorm:"size:64;uniqueIndex:idx_outbound_policy_tenant_target"`
+	Target   string `gorm:"size:64;uniqueIndex:idx_outbound_policy_tenant_target"`
 	Name     string `gorm:"size:255;not null"`
-	Target   string `gorm:"index;size:64;not null"`
 	Enabled  bool   `gorm:"not null;default:true"`
 
 	AllowedSchemesJSON      string `gorm:"type:text"`

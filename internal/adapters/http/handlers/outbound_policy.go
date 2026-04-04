@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
@@ -18,12 +19,28 @@ func NewOutboundPolicyHandler(uc usecase.OutboundPolicyUseCase) *OutboundPolicyH
 	return &OutboundPolicyHandler{UseCase: uc}
 }
 
+func outboundPolicyActorID(c *gin.Context) string {
+	candidates := []string{
+		c.GetHeader("auth-userid"),
+		c.GetHeader("auth-username"),
+		c.GetHeader("x-auth-userid"),
+		c.GetHeader("x-auth-username"),
+	}
+	for _, v := range candidates {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return "unknown"
+}
+
 // Create godoc
 // @Summary Create outbound policy
 // @Description Creates a new outbound security policy for global or tenant-specific outbound HTTP controls.
 // @Tags Outbound Policies
 // @Accept json
 // @Produce json
+// @Security BearerAuth
 // @Param request body payload.CreateOutboundPolicyRequest true "Create outbound policy request"
 // @Success 201 {object} payload.OutboundPolicyResponse
 // @Failure 400 {object} map[string]interface{}
@@ -36,7 +53,7 @@ func (h *OutboundPolicyHandler) Create(c *gin.Context) {
 		return
 	}
 
-	policy, err := h.UseCase.CreatePolicy(c.Request.Context(), req.ToDomain(), c.ClientIP(), c.Request.UserAgent())
+	policy, err := h.UseCase.CreatePolicy(c.Request.Context(), req.ToDomain(), outboundPolicyActorID(c), c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "create", err))
 		return
@@ -52,6 +69,7 @@ func (h *OutboundPolicyHandler) Create(c *gin.Context) {
 // @Tags Outbound Policies
 // @Accept json
 // @Produce json
+// @Security BearerAuth
 // @Param id path string true "Policy ID"
 // @Success 200 {object} payload.OutboundPolicyResponse
 // @Failure 404 {object} map[string]interface{}
@@ -74,6 +92,7 @@ func (h *OutboundPolicyHandler) Get(c *gin.Context) {
 // @Tags Outbound Policies
 // @Accept json
 // @Produce json
+// @Security BearerAuth
 // @Param tenant_id query string false "Tenant ID"
 // @Success 200 {array} payload.OutboundPolicyResponse
 // @Failure 500 {object} map[string]interface{}
@@ -83,7 +102,7 @@ func (h *OutboundPolicyHandler) List(c *gin.Context) {
 
 	items, err := h.UseCase.ListPolicies(c.Request.Context(), tenantID)
 	if err != nil {
-		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policies", "list", err))
+		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusInternalServerError, "Outbound policies", "list", err))
 		return
 	}
 
@@ -96,6 +115,7 @@ func (h *OutboundPolicyHandler) List(c *gin.Context) {
 // @Tags Outbound Policies
 // @Accept json
 // @Produce json
+// @Security BearerAuth
 // @Param id path string true "Policy ID"
 // @Param request body payload.UpdateOutboundPolicyRequest true "Update outbound policy request"
 // @Success 200 {object} payload.OutboundPolicyResponse
@@ -120,7 +140,7 @@ func (h *OutboundPolicyHandler) Update(c *gin.Context) {
 
 	payload.ApplyOutboundPolicyUpdate(existing, &req)
 
-	updated, err := h.UseCase.UpdatePolicy(c.Request.Context(), existing, c.ClientIP(), c.Request.UserAgent())
+	updated, err := h.UseCase.UpdatePolicy(c.Request.Context(), existing, outboundPolicyActorID(c), c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "update", err))
 		return
@@ -136,6 +156,7 @@ func (h *OutboundPolicyHandler) Update(c *gin.Context) {
 // @Tags Outbound Policies
 // @Accept json
 // @Produce json
+// @Security BearerAuth
 // @Param id path string true "Policy ID"
 // @Success 204
 // @Failure 500 {object} map[string]interface{}
@@ -143,7 +164,7 @@ func (h *OutboundPolicyHandler) Update(c *gin.Context) {
 func (h *OutboundPolicyHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
-	if err := h.UseCase.DeletePolicy(c.Request.Context(), id, c.ClientIP(), c.Request.UserAgent()); err != nil {
+	if err := h.UseCase.DeletePolicy(c.Request.Context(), id, outboundPolicyActorID(c), c.ClientIP(), c.Request.UserAgent()); err != nil {
 		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Outbound policy", "delete", err))
 		return
 	}

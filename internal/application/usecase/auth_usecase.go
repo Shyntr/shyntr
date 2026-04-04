@@ -18,7 +18,7 @@ type AuthUseCase interface {
 	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error)
 	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
 	GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*model.LoginRequest, error)
-	GetLoginRequestBySessionToken(ctx context.Context, sessionToken string) (*model.LoginRequest, error)
+	GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error)
 	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
 	MarkLoginAsProviderStarted(ctx context.Context, challenge, provider, connectionID string, providerContext map[string]interface{}, actorIP, userAgent string) error
@@ -88,11 +88,14 @@ func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context,
 	return u.repo.GetAuthenticatedLoginRequestBySubject(ctx, subject)
 }
 
-func (u *authUseCase) GetLoginRequestBySessionToken(ctx context.Context, sessionToken string) (*model.LoginRequest, error) {
+func (u *authUseCase) GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant id must not be empty")
+	}
 	if sessionToken == "" {
 		return nil, errors.New("session token must not be empty")
 	}
-	return u.repo.GetLoginRequestBySessionToken(ctx, sessionToken)
+	return u.repo.GetLoginRequestBySessionToken(ctx, tenantID, sessionToken)
 }
 
 func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {

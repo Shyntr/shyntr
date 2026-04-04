@@ -303,11 +303,15 @@ func buildRedirectURL(baseIssuerURL, requestURL string, params map[string]string
 		safePath = "/" + safePath
 	}
 
-	q := parsed.Query()
+	q := url.Values{}
 	for k, v := range params {
 		q.Set(k, v)
 	}
 
-	base := strings.TrimRight(baseIssuerURL, "/")
-	return base + safePath + "?" + q.Encode()
+	base := strings.TrimRight(baseIssuerURL, "/") + safePath
+	encoded := q.Encode()
+	if encoded == "" {
+		return base
+	}
+	return base + "?" + encoded
 }

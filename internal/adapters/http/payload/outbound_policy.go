@@ -10,7 +10,7 @@ type CreateOutboundPolicyRequest struct {
 	ID       string `json:"id" example:"policy-123"`
 	TenantID string `json:"tenant_id" example:"tenant-abc"`
 	Name     string `json:"name" binding:"required" example:"Default Webhook Policy"`
-	Target   string `json:"target" binding:"required,oneof=webhook_delivery jwks_fetch oidc_discovery" example:"webhook_delivery"`
+	Target   string `json:"target" binding:"required,oneof=webhook_delivery saml_metadata_fetch oidc_discovery oidc_backchannel_logout" example:"webhook_delivery"`
 	Enabled  bool   `json:"enabled" example:"true"`
 
 	AllowedSchemes      []string `json:"allowed_schemes" example:"https"`

@@ -54,7 +54,10 @@ func (m *mockSAMLRepo) Update(ctx context.Context, client *model.SAMLClient) err
 type mockOutboundGuard struct{}
 
 func (m *mockOutboundGuard) ValidateURL(ctx context.Context, tenantID string, target model.OutboundTargetType, rawURL string) (*url.URL, *model.OutboundPolicy, error) {
-	u, _ := url.Parse(rawURL)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, nil, err
+	}
 	return u, &model.OutboundPolicy{
 		Enabled:               true,
 		AllowedSchemes:        []string{"http", "https"},

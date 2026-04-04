@@ -49,11 +49,15 @@ func shouldDenyFraming(path string) bool {
 }
 
 func contentSecurityPolicyForPath(path string) string {
+	frameAncestors := "frame-ancestors 'none'"
+	if !shouldDenyFraming(path) {
+		frameAncestors = "frame-ancestors 'self'"
+	}
 	if isSAMLHTMLResponsePath(path) || isProtocolBrowserEndpoint(path) {
 		return strings.Join([]string{
 			"default-src 'self'",
 			"base-uri 'none'",
-			"frame-ancestors 'none'",
+			frameAncestors,
 			"object-src 'none'",
 			"img-src 'self' data:",
 			"style-src 'self' 'unsafe-inline'",
@@ -65,7 +69,7 @@ func contentSecurityPolicyForPath(path string) string {
 	return strings.Join([]string{
 		"default-src 'none'",
 		"base-uri 'none'",
-		"frame-ancestors 'none'",
+		frameAncestors,
 		"object-src 'none'",
 		"img-src 'self' data:",
 		"style-src 'self' 'unsafe-inline'",

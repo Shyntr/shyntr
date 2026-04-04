@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,17 @@ func NewWebhookHandler(webhookUse usecase.WebhookUseCase, cfg *config.Config) *W
 	return &WebhookHandler{
 		webhookUse: webhookUse,
 		cfg:        cfg,
+	}
+}
+
+func webhookCreateStatus(err error) int {
+	switch {
+	case errors.Is(err, usecase.ErrWebhookValidation):
+		return http.StatusBadRequest
+	case errors.Is(err, usecase.ErrWebhookPolicyViolation):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
 	}
 }
 
@@ -99,7 +111,7 @@ func (h *WebhookHandler) Create(c *gin.Context) {
 
 	webhook, _, err := h.webhookUse.CreateWebhook(c.Request.Context(), &wh, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		payload.AbortWithAppError(c, payload.NewOperationAppError(http.StatusBadRequest, "Webhook", "create", err))
+		payload.AbortWithAppError(c, payload.NewOperationAppError(webhookCreateStatus(err), "Webhook", "create", err))
 		return
 	}
 

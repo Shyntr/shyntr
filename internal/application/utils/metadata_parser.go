@@ -25,7 +25,7 @@ func FetchAndParseMetadata(
 
 	client := outbound.NewHTTPClient(ctx, tenantID, model.OutboundTargetSAMLMetadataFetch, policy)
 
-	req, err := httpNewRequestWithContext(ctx, safeURL.String())
+	req, err := newSAMLMetadataRequest(ctx, safeURL.String())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to build metadata request: %w", err)
 	}
@@ -45,9 +45,12 @@ func FetchAndParseMetadata(
 		maxBytes = policy.MaxResponseBytes
 	}
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read metadata body: %w", err)
+	}
+	if int64(len(bodyBytes)) > maxBytes {
+		return nil, "", fmt.Errorf("metadata response too large")
 	}
 
 	var descriptor saml.EntityDescriptor

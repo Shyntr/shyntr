@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Shyntr/shyntr/config"
@@ -36,7 +37,26 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 
 	methods, loginReq, err := h.MUC.GetLoginMethods(c.Request.Context(), challenge)
 	if err != nil {
-		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "invalid_login_challenge", "The login challenge is invalid, expired, or no longer active.", "Start the login flow again and use a fresh login_challenge value.", nil, err))
+		if isLoginMethodsClientError(err) {
+			c.Error(payload.NewDetailedAppError(
+				http.StatusBadRequest,
+				"invalid_login_challenge",
+				"The login challenge is invalid, expired, or no longer active.",
+				"Start the login flow again and use a fresh login_challenge value.",
+				nil,
+				err,
+			))
+			return
+		}
+
+		c.Error(payload.NewDetailedAppError(
+			http.StatusInternalServerError,
+			"internal_server_error",
+			"Failed to retrieve login methods.",
+			"Retry the request. If the problem persists, contact the system administrator.",
+			nil,
+			err,
+		))
 		return
 	}
 
@@ -45,4 +65,9 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 		"tenant_id": loginReq.TenantID,
 		"methods":   methods,
 	})
+}
+
+func isLoginMethodsClientError(err error) bool {
+	return errors.Is(err, usecase.ErrLoginChallengeNotFound) ||
+		errors.Is(err, usecase.ErrLoginAlreadyUsed)
 }

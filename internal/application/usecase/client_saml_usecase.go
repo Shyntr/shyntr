@@ -2,7 +2,7 @@ package usecase
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -49,7 +49,7 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 			u.outboundGuard,
 		)
 		if err != nil {
-			return nil, errors.New("Invalid Metadata URL: " + err.Error())
+			return nil, fmt.Errorf("invalid metadata url %q: %w", client.MetadataURL, err)
 		}
 		if descriptor != nil {
 			if client.EntityID == "" {
@@ -92,7 +92,7 @@ func (u *samlClientUseCase) CreateClient(ctx context.Context, client *model.SAML
 		}
 	}
 	if client.EntityID == "" || client.ACSURL == "" {
-		return nil, errors.New("entity_id and acs_url are required if metadata_url is not provided")
+		return nil, fmt.Errorf("entity_id and acs_url are required if metadata_url is not provided")
 	}
 
 	client.SignResponse = true

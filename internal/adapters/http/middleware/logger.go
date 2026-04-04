@@ -62,11 +62,11 @@ func StructuredLogger() gin.HandlerFunc {
 
 		if len(c.Errors) > 0 {
 			logFields = append(logFields, zap.String("errors", c.Errors.String()))
-			logger.Log.Debug("Request failed", logFields...)
+			logger.Log.Error("Request failed", logFields...)
 		} else if status >= 400 && status < 500 {
-			logger.Log.Debug("Client error (4xx)", logFields...)
+			logger.Log.Warn("Client error (4xx)", logFields...)
 		} else if status >= 500 {
-			logger.Log.Debug("Server error (5xx)", logFields...)
+			logger.Log.Error("Server error (5xx)", logFields...)
 		} else {
 			logger.Log.Debug("Request handled", logFields...)
 		}

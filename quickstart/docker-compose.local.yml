@@ -95,6 +95,17 @@ services:
     networks:
       - shyntr-net
 
+  # ----------------------------------------
+  # 5. SHYNTR Test APP
+  # ----------------------------------------
+  shyntr-test-app:
+    image: nevzatcirak/react-oidc-client-basic-app:dev
+    container_name: shyntr_test_app
+    ports:
+      - "3010:80"
+    networks:
+      - shyntr-net
+
 # ----------------------------------------
 # VOLUMES & NETWORKS
 # ----------------------------------------

@@ -84,7 +84,14 @@ func (h *OAuth2Handler) resolveSessionSubject(c *gin.Context, ctx context.Contex
 	if err != nil || sessionToken == "" {
 		return nil
 	}
-	loginReq, err := h.AuthReq.GetLoginRequestBySessionToken(ctx, sessionToken)
+
+	tenantID, _ := ctx.Value(consts.ContextKeyTenantID).(string)
+	if tenantID == "" {
+		logger.FromGin(c).Warn("Session token lookup skipped because tenant context is empty")
+		return nil
+	}
+
+	loginReq, err := h.AuthReq.GetLoginRequestBySessionToken(ctx, tenantID, sessionToken)
 	if err != nil {
 		logger.FromGin(c).Debug("Session token lookup failed, treating as unauthenticated")
 		return nil
@@ -539,9 +546,15 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 
 	c.SetCookie(consts.SessionCookieName, "", -1, "/", "", h.Config.CookieSecure, true)
 	if subject != "" {
-		err := h.OAuth2SessionUse.DeleteByClient(ctx, subject, idTokenAudience)
+		var err error
+		if idTokenAudience != "" {
+			err = h.OAuth2SessionUse.DeleteByClient(ctx, subject, idTokenAudience)
+		} else {
+			err = h.OAuth2SessionUse.Delete(ctx, subject)
+		}
+
 		if err != nil {
-			logger.LogFositeError(c, err, "Failed to delete session in TokenEndpoint")
+			logger.LogFositeError(c, err, "Failed to delete session in logout")
 		}
 		h.OAuth2SessionUse.RecordLogout(ctx, subject, tenantID, idTokenAudience, c.ClientIP(), c.Request.UserAgent(), idTokenHint != "")
 	}

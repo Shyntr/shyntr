@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-func httpNewRequestWithContext(ctx context.Context, targetURL string) (*http.Request, error) {
+func newSAMLMetadataRequest(ctx context.Context, targetURL string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, err

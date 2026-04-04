@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -20,6 +21,18 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+var (
+	ErrWebhookValidation      = errors.New("webhook validation failed")
+	ErrWebhookPolicyViolation = errors.New("webhook policy violation")
+)
+
+func wrapWebhookValidation(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrWebhookValidation, err)
+}
 
 type WebhookUseCase interface {
 	CreateWebhook(ctx context.Context, webhook *model.Webhook, actorIP, userAgent string) (*model.Webhook, string, error)
@@ -61,12 +74,12 @@ func (u *webhookUseCase) CreateWebhook(ctx context.Context, webhook *model.Webho
 	webhook.IsActive = true
 
 	if err := webhook.Validate(); err != nil {
-		return nil, "", err
+		return nil, "", wrapWebhookValidation(err)
 	}
 
 	effectiveTenantID := resolveWebhookPolicyTenantID(webhook.TenantIDs)
 	if _, _, err := u.outbound.ValidateURL(ctx, effectiveTenantID, model.OutboundTargetWebhookDelivery, webhook.URL); err != nil {
-		return nil, "", fmt.Errorf("webhook url violates outbound policy: %w", err)
+		return nil, "", fmt.Errorf("%w: %v", ErrWebhookPolicyViolation, err)
 	}
 
 	if err := u.repo.Create(ctx, webhook); err != nil {

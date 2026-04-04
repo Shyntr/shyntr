@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
@@ -40,10 +41,9 @@ func (h *ScopeHandler) Create(c *gin.Context) {
 		return
 	}
 	req.TenantID = tenantID
-
 	scope, err := h.scopeUse.CreateScope(c.Request.Context(), &req, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scope", "create", err))
+		c.Error(payload.NewOperationAppError(scopeHTTPStatus(err), "Scope", "create", err))
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *ScopeHandler) List(c *gin.Context) {
 	tenantID := c.Param("id")
 	scopes, err := h.scopeUse.ListScopes(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scopes", "list", err))
+		c.Error(payload.NewOperationAppError(scopeHTTPStatus(err), "Scopes", "list", err))
 		return
 	}
 	c.JSON(http.StatusOK, scopes)
@@ -120,7 +120,7 @@ func (h *ScopeHandler) Update(c *gin.Context) {
 	req.ID = id
 
 	if err := h.scopeUse.UpdateScope(c.Request.Context(), &req, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Scope", "update", err))
+		c.Error(payload.NewOperationAppError(scopeHTTPStatus(err), "Scope", "update", err))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
@@ -142,8 +142,25 @@ func (h *ScopeHandler) Delete(c *gin.Context) {
 	id := c.Param("scope_id")
 
 	if err := h.scopeUse.DeleteScope(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Scope", "delete", err))
+		c.Error(payload.NewOperationAppError(scopeHTTPStatus(err), "Scope", "delete", err))
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func scopeHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, usecase.ErrScopeValidation):
+		return http.StatusBadRequest
+	case errors.Is(err, usecase.ErrScopeConflict):
+		return http.StatusConflict
+	case errors.Is(err, usecase.ErrSystemScopeRenameDenied):
+		return http.StatusBadRequest
+	case errors.Is(err, usecase.ErrSystemScopeDeleteDenied):
+		return http.StatusBadRequest
+	case errors.Is(err, usecase.ErrScopeNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
 }

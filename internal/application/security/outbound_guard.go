@@ -34,6 +34,36 @@ func NewOutboundGuard(repo port.OutboundPolicyRepository, skipTLSVerify bool) po
 	}
 }
 
+func validatePolicyIP(policy *model.OutboundPolicy, addr netip.Addr) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.BlockPrivateIPs && addr.IsPrivate() {
+		return fmt.Errorf("%w: private ip %q is blocked", ErrURLNotAllowed, addr.String())
+	}
+	if policy.BlockLoopbackIPs && addr.IsLoopback() {
+		return fmt.Errorf("%w: loopback ip %q is blocked", ErrURLNotAllowed, addr.String())
+	}
+	if policy.BlockLinkLocalIPs && (addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast()) {
+		return fmt.Errorf("%w: link-local ip %q is blocked", ErrURLNotAllowed, addr.String())
+	}
+	if policy.BlockMulticastIPs && addr.IsMulticast() {
+		return fmt.Errorf("%w: multicast ip %q is blocked", ErrURLNotAllowed, addr.String())
+	}
+	if addr.IsUnspecified() {
+		return fmt.Errorf("%w: unspecified ip %q is blocked", ErrURLNotAllowed, addr.String())
+	}
+	return nil
+}
+
+func parseNetIP(ip net.IP) (netip.Addr, error) {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return netip.Addr{}, errors.New("failed to parse resolved ip")
+	}
+	return addr, nil
+}
+
 func (g *outboundGuard) ValidateURL(ctx context.Context, tenantID string, target model.OutboundTargetType, rawURL string) (*url.URL, *model.OutboundPolicy, error) {
 	policy, err := g.repo.GetEffectivePolicy(ctx, tenantID, target)
 	if err != nil {
@@ -65,6 +95,12 @@ func (g *outboundGuard) ValidateURL(ctx context.Context, tenantID string, target
 		return nil, nil, fmt.Errorf("%w: localhost-style hostname is blocked", ErrURLNotAllowed)
 	}
 
+	if literalIP, err := netip.ParseAddr(host); err == nil {
+		if err := validatePolicyIP(policy, literalIP); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if len(policy.AllowedHostPatterns) > 0 && !matchHostPatternList(host, policy.AllowedHostPatterns) {
 		return nil, nil, fmt.Errorf("%w: host %q is not allowed", ErrURLNotAllowed, host)
 	}
@@ -93,24 +129,12 @@ func (g *outboundGuard) ValidateURL(ctx context.Context, tenantID string, target
 			return nil, nil, fmt.Errorf("dns resolution returned no ip for %q", host)
 		}
 		for _, ip := range ips {
-			addr, ok := netip.AddrFromSlice(ip)
-			if !ok {
-				return nil, nil, fmt.Errorf("failed to parse resolved ip for host %q", host)
+			addr, err := parseNetIP(ip)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s for host %q", err.Error(), host)
 			}
-			if policy.BlockPrivateIPs && addr.IsPrivate() {
-				return nil, nil, fmt.Errorf("%w: private ip %q is blocked", ErrURLNotAllowed, addr.String())
-			}
-			if policy.BlockLoopbackIPs && addr.IsLoopback() {
-				return nil, nil, fmt.Errorf("%w: loopback ip %q is blocked", ErrURLNotAllowed, addr.String())
-			}
-			if policy.BlockLinkLocalIPs && (addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast()) {
-				return nil, nil, fmt.Errorf("%w: link-local ip %q is blocked", ErrURLNotAllowed, addr.String())
-			}
-			if policy.BlockMulticastIPs && addr.IsMulticast() {
-				return nil, nil, fmt.Errorf("%w: multicast ip %q is blocked", ErrURLNotAllowed, addr.String())
-			}
-			if addr.IsUnspecified() {
-				return nil, nil, fmt.Errorf("%w: unspecified ip %q is blocked", ErrURLNotAllowed, addr.String())
+			if err := validatePolicyIP(policy, addr); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -128,6 +152,64 @@ func (g *outboundGuard) NewHTTPClient(ctx context.Context, tenantID string, targ
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: g.skipTLSVerify,
 		},
+	}
+
+	dialer := &net.Dialer{Timeout: timeout}
+	transport.DialContext = func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+
+		if host == "" {
+			return nil, fmt.Errorf("%w: empty hostname", ErrURLNotAllowed)
+		}
+
+		if policy != nil {
+			if policy.BlockLocalhostNames && isLocalHostname(host) {
+				return nil, fmt.Errorf("%w: localhost-style hostname is blocked", ErrURLNotAllowed)
+			}
+
+			if literalIP, err := netip.ParseAddr(host); err == nil {
+				if err := validatePolicyIP(policy, literalIP); err != nil {
+					return nil, err
+				}
+				return dialer.DialContext(dialCtx, network, net.JoinHostPort(literalIP.String(), port))
+			}
+
+			ips, err := net.DefaultResolver.LookupIP(dialCtx, "ip", host)
+			if err != nil {
+				return nil, fmt.Errorf("dns resolution failed: %w", err)
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("dns resolution returned no ip for %q", host)
+			}
+
+			var lastErr error
+			for _, ip := range ips {
+				ipAddr, err := parseNetIP(ip)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if err := validatePolicyIP(policy, ipAddr); err != nil {
+					lastErr = err
+					continue
+				}
+
+				conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(ipAddr.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, fmt.Errorf("no allowed ip address available for host %q", host)
+		}
+
+		return dialer.DialContext(dialCtx, network, addr)
 	}
 
 	client := &http.Client{
@@ -224,8 +306,8 @@ func matchPathPattern(path, pattern string) bool {
 		return true
 	}
 	if strings.HasSuffix(pattern, "/*") {
-		prefix := strings.TrimSuffix(pattern, "*")
-		return strings.HasPrefix(path, strings.TrimSuffix(prefix, "/"))
+		base := strings.TrimSuffix(strings.TrimSuffix(pattern, "*"), "/")
+		return path == base || strings.HasPrefix(path, base+"/")
 	}
 	return path == pattern
 }

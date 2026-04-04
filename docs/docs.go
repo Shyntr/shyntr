@@ -115,7 +115,7 @@ const docTemplate = `{
             }
         },
         "/admin/consent/accept": {
-            "post": {
+            "put": {
                 "description": "Accepts a consent request, granting the requested scopes and audiences to the OAuth2 client.",
                 "consumes": [
                     "application/json"
@@ -171,7 +171,7 @@ const docTemplate = `{
             }
         },
         "/admin/consent/reject": {
-            "post": {
+            "put": {
                 "description": "Rejects a consent request (e.g., user denied access to scopes) and aborts the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -269,7 +269,7 @@ const docTemplate = `{
             }
         },
         "/admin/login/accept": {
-            "post": {
+            "put": {
                 "description": "Accepts a login request and confirms the user's identity. Returns a redirection URL to continue the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -325,7 +325,7 @@ const docTemplate = `{
             }
         },
         "/admin/login/reject": {
-            "post": {
+            "put": {
                 "description": "Rejects a login request (e.g., due to invalid credentials or user denial) and aborts the OAuth2 flow.",
                 "consumes": [
                     "application/json"
@@ -881,6 +881,11 @@ const docTemplate = `{
         },
         "/admin/management/outbound-policies": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Lists outbound policies. If tenant_id is provided, returns tenant and global policies.",
                 "consumes": [
                     "application/json"
@@ -920,6 +925,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Creates a new outbound security policy for global or tenant-specific outbound HTTP controls.",
                 "consumes": [
                     "application/json"
@@ -968,6 +978,11 @@ const docTemplate = `{
         },
         "/admin/management/outbound-policies/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns a single outbound policy by id.",
                 "consumes": [
                     "application/json"
@@ -1005,6 +1020,11 @@ const docTemplate = `{
                 }
             },
             "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Updates an existing outbound policy by id.",
                 "consumes": [
                     "application/json"
@@ -1065,6 +1085,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Deletes an outbound policy by id.",
                 "consumes": [
                     "application/json"
@@ -3732,15 +3757,27 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "SAML LogoutRequest",
+                        "description": "SAML LogoutRequest (HTTP-Redirect)",
                         "name": "SAMLRequest",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "SAML LogoutResponse",
+                        "description": "SAML LogoutRequest (HTTP-POST)",
+                        "name": "SAMLRequest",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-Redirect)",
                         "name": "SAMLResponse",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-POST)",
+                        "name": "SAMLResponse",
+                        "in": "formData"
                     },
                     {
                         "type": "string",
@@ -3750,9 +3787,117 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
                         "description": "Relay state",
                         "name": "RelayState",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Logout successful message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "302": {
+                        "description": "Redirects to external IdP or RelayState",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid logout request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Handles logout requests acting as a Service Provider against an external IdP.",
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SAML Federation"
+                ],
+                "summary": "SAML SP Single Logout",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutRequest (HTTP-Redirect)",
+                        "name": "SAMLRequest",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutRequest (HTTP-POST)",
+                        "name": "SAMLRequest",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-Redirect)",
+                        "name": "SAMLResponse",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SAML LogoutResponse (HTTP-POST)",
+                        "name": "SAMLResponse",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "IdP Connection ID for SP-initiated SLO",
+                        "name": "connection_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relay state",
+                        "name": "RelayState",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -4433,6 +4578,20 @@ const docTemplate = `{
         "payload.AppError": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "validation_failed"
+                },
+                "field_errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/payload.FieldError"
+                    }
+                },
+                "hint": {
+                    "type": "string",
+                    "example": "Check the highlighted fields and send the request again."
+                },
                 "status_code": {
                     "type": "integer",
                     "example": 400
@@ -4751,8 +4910,9 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "webhook_delivery",
-                        "jwks_fetch",
-                        "oidc_discovery"
+                        "saml_metadata_fetch",
+                        "oidc_discovery",
+                        "oidc_backchannel_logout"
                     ],
                     "example": "webhook_delivery"
                 },
@@ -4913,6 +5073,19 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "alpha-production"
+                }
+            }
+        },
+        "payload.FieldError": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "example": "id"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Must be a valid UUID."
                 }
             }
         },

@@ -67,13 +67,16 @@ func (r *authRequestRepository) GetAuthenticatedLoginRequestBySubject(ctx contex
 	return dbModel.ToDomain(), nil
 }
 
-func (r *authRequestRepository) GetLoginRequestBySessionToken(ctx context.Context, sessionToken string) (*model.LoginRequest, error) {
+func (r *authRequestRepository) GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant id must not be empty")
+	}
 	if sessionToken == "" {
 		return nil, errors.New("session token must not be empty")
 	}
 	var dbModel models.LoginRequestGORM
 	if err := r.db.WithContext(ctx).
-		Where("session_id = ? AND authenticated = ?", sessionToken, true).
+		Where("session_id = ? AND authenticated = ? AND active = ? AND tenant_id = ?", sessionToken, true, true, tenantID).
 		Order("created_at DESC").
 		First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

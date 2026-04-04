@@ -17,6 +17,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func allowAllJWKSURIs(_ context.Context, _ string) error {
+	return nil
+}
+
+func newTestJWKSCache(client *http.Client, opts ...JWKSCacheOption) *JWKSCache {
+	baseOpts := []JWKSCacheOption{
+		WithHTTPClient(client),
+		WithJWKSURIValidator(allowAllJWKSURIs),
+	}
+	baseOpts = append(baseOpts, opts...)
+	return NewJWKSCache(baseOpts...)
+}
+
 func generateEncJWKS(alg string) (jose.JSONWebKeySet, *rsa.PublicKey) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -113,14 +126,15 @@ func TestJWKSCache_Fetch_PositivePath(t *testing.T) {
 	t.Parallel()
 
 	jwks, expectedKey := generateEncJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -138,30 +152,30 @@ func TestJWKSCache_UsesCachedValueWithinTTL(t *testing.T) {
 	t.Parallel()
 
 	jwks, expectedKey := generateEncJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	var requestCount atomic.Int32
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
 	baseTime := time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC)
-	currentTime := baseTime
+	var currentTime atomic.Value
+	currentTime.Store(baseTime)
 
-	cache := NewJWKSCache(
-		WithHTTPClient(server.Client()),
-		WithClock(func() time.Time { return currentTime }),
-		WithTTL(10*time.Minute),
-	)
+	cache := newTestJWKSCache(server.Client(), WithClock(func() time.Time {
+		return currentTime.Load().(time.Time)
+	}), WithTTL(10*time.Minute))
 	ctx := testJWKSContext()
 
 	key1, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.NoError(t, err)
 
-	currentTime = baseTime.Add(3 * time.Minute)
+	currentTime.Store(baseTime.Add(3 * time.Minute))
 
 	key2, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.NoError(t, err)
@@ -178,7 +192,8 @@ func TestJWKSCache_NetworkFailure_GracePeriod(t *testing.T) {
 	t.Parallel()
 
 	jwks, expectedKey := generateEncJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	var shouldFail atomic.Bool
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -187,26 +202,24 @@ func TestJWKSCache_NetworkFailure_GracePeriod(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
 	baseTime := time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC)
-	currentTime := baseTime
+	var currentTime atomic.Value
+	currentTime.Store(baseTime)
 
-	cache := NewJWKSCache(
-		WithHTTPClient(server.Client()),
-		WithClock(func() time.Time { return currentTime }),
-		WithTTL(10*time.Minute),
-		WithGracePeriod(5*time.Minute),
-	)
+	cache := newTestJWKSCache(server.Client(), WithClock(func() time.Time {
+		return currentTime.Load().(time.Time)
+	}), WithTTL(10*time.Minute), WithGracePeriod(30*time.Second))
 	ctx := testJWKSContext()
 
 	key1, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.NoError(t, err)
 
 	shouldFail.Store(true)
-	currentTime = baseTime.Add(12 * time.Minute)
+	currentTime.Store(baseTime.Add(10*time.Minute + 15*time.Second))
 
 	key2, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.NoError(t, err)
@@ -221,7 +234,8 @@ func TestJWKSCache_GracePeriodExpired_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	jwks, _ := generateEncJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	var shouldFail atomic.Bool
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,26 +244,24 @@ func TestJWKSCache_GracePeriodExpired_ReturnsError(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
 	baseTime := time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC)
-	currentTime := baseTime
+	var currentTime atomic.Value
+	currentTime.Store(baseTime)
 
-	cache := NewJWKSCache(
-		WithHTTPClient(server.Client()),
-		WithClock(func() time.Time { return currentTime }),
-		WithTTL(10*time.Minute),
-		WithGracePeriod(5*time.Minute),
-	)
+	cache := newTestJWKSCache(server.Client(), WithClock(func() time.Time {
+		return currentTime.Load().(time.Time)
+	}), WithTTL(10*time.Minute), WithGracePeriod(30*time.Second))
 	ctx := testJWKSContext()
 
-	_, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
+	_, err = cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.NoError(t, err)
 
 	shouldFail.Store(true)
-	currentTime = baseTime.Add(16 * time.Minute)
+	currentTime.Store(baseTime.Add(16 * time.Minute))
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
 	require.Error(t, err)
@@ -266,7 +278,7 @@ func TestJWKSCache_NegativePath_InvalidPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -282,7 +294,7 @@ func TestJWKSCache_NegativePath_Non200(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -295,14 +307,15 @@ func TestJWKSCache_FallbackKey_WhenAlgorithmEmpty(t *testing.T) {
 	t.Parallel()
 
 	jwks, expectedKey := generateFallbackJWKS()
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -318,14 +331,15 @@ func TestJWKSCache_IgnoreSignatureKeys_UsesEncryptionKey(t *testing.T) {
 	t.Parallel()
 
 	jwks, expectedKey := generateMixedJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -340,14 +354,15 @@ func TestJWKSCache_SignatureOnlyJWKS_ReturnsNoMatchingKey(t *testing.T) {
 	t.Parallel()
 
 	jwks := generateSigOnlyJWKS()
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	key, err := cache.GetEncryptionKey(ctx, server.URL, "RSA-OAEP")
@@ -360,17 +375,18 @@ func TestJWKSCache_Concurrency_MutexLockContention(t *testing.T) {
 	t.Parallel()
 
 	jwks, _ := generateEncJWKS("RSA-OAEP")
-
+	jwksJSON, err := json.Marshal(jwks)
+	require.NoError(t, err)
 	var requestCount atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 		time.Sleep(50 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer server.Close()
 
-	cache := NewJWKSCache(WithHTTPClient(server.Client()))
+	cache := newTestJWKSCache(server.Client())
 	ctx := testJWKSContext()
 
 	var wg sync.WaitGroup
@@ -415,5 +431,5 @@ func TestJWKSCache_ValidationFailure_PrivateIPWithoutOverride(t *testing.T) {
 	key, err := cache.GetEncryptionKey(context.Background(), "https://127.0.0.1/jwks", "RSA-OAEP")
 	require.Error(t, err)
 	require.Nil(t, key)
-	assert.Contains(t, err.Error(), "restricted or private IP address")
+	assert.Contains(t, err.Error(), "restricted IP address")
 }

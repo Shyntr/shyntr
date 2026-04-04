@@ -73,9 +73,14 @@ type federationStateManager struct {
 	clock  func() time.Time
 }
 
+func deriveFederationStateKey(secret string) []byte {
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:]
+}
+
 func NewFederationStateProvider(cfg *config.Config) FederationStateProvider {
 	return &federationStateManager{
-		secret: []byte(cfg.AppSecret),
+		secret: deriveFederationStateKey(cfg.AppSecret),
 		clock:  func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -85,7 +90,7 @@ func NewFederationStateProviderWithClock(cfg *config.Config, clock func() time.T
 		clock = func() time.Time { return time.Now().UTC() }
 	}
 	return &federationStateManager{
-		secret: []byte(cfg.AppSecret),
+		secret: deriveFederationStateKey(cfg.AppSecret),
 		clock:  clock,
 	}
 }
@@ -181,14 +186,16 @@ func (m *federationStateManager) Verify(ctx context.Context, token string, input
 		return nil, ErrUserMismatch
 	}
 
-	if input.CSRFToken != "" {
-		if payload.CSRFHash == "" {
+	if payload.CSRFHash != "" {
+		if input.CSRFToken == "" {
 			return nil, ErrCSRFMismatch
 		}
 		expectedHash := sha256Hex(input.CSRFToken)
 		if subtle.ConstantTimeCompare([]byte(payload.CSRFHash), []byte(expectedHash)) != 1 {
 			return nil, ErrCSRFMismatch
 		}
+	} else if input.CSRFToken != "" {
+		return nil, ErrCSRFMismatch
 	}
 
 	return &payload, nil

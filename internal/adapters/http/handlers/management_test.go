@@ -14,6 +14,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/http/middleware"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
 	"github.com/Shyntr/shyntr/internal/application/security"
@@ -34,13 +35,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
-	db.AutoMigrate(
-		&models.TenantGORM{},
-		&models.OAuth2ClientGORM{},
-		&models.AuditLogGORM{},
-		&models.CryptoKeyGORM{},
-		&models.OutboundPolicyGORM{},
-	)
+	err = persistence.MigrateDB(db)
 
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
 	db.Create(&models.TenantGORM{ID: "tenant-a", Name: "Tenant A"})
@@ -113,7 +108,7 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Cannot delete the default tenant")
+		assert.Contains(t, w.Body.String(), `"code":"default_tenant_protected"`)
 	})
 
 	t.Run("Prevent Cross-Tenant Data Leakage (Client Listing)", func(t *testing.T) {
@@ -141,6 +136,6 @@ func TestManagementAPI_Security(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "The specified tenant does not exist")
+		assert.Contains(t, w.Body.String(), `"code":"resource_not_found"`)
 	})
 }

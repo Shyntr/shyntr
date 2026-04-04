@@ -88,6 +88,7 @@ func SetupRouter(
 
 	// Authentication UI Redirects (User facing)
 	uiGroup := public.Group("/auth")
+	uiGroup.Use(middleware.ErrorHandlerMiddleware())
 	{
 		uiGroup.GET("/methods", loginHandler.GetLoginMethods)
 	}

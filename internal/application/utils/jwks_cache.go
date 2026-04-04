@@ -49,6 +49,12 @@ func WithHTTPClient(client *http.Client) JWKSCacheOption {
 	}
 }
 
+func WithJWKSURIValidator(validator func(context.Context, string) error) JWKSCacheOption {
+	return func(c *JWKSCache) {
+		c.validateURI = validator
+	}
+}
+
 type cacheEntry struct {
 	keys      *jose.JSONWebKeySet
 	fetchedAt time.Time
@@ -67,9 +73,9 @@ type JWKSCache struct {
 	gracePeriod time.Duration
 	now         func() time.Time
 	client      *http.Client
-
-	inflightMu sync.Mutex
-	inflight   map[string]*inflightFetch
+	validateURI func(context.Context, string) error
+	inflightMu  sync.Mutex
+	inflight    map[string]*inflightFetch
 }
 
 func NewJWKSCache(opts ...JWKSCacheOption) *JWKSCache {
@@ -86,7 +92,8 @@ func NewJWKSCache(opts ...JWKSCacheOption) *JWKSCache {
 				},
 			},
 		},
-		inflight: make(map[string]*inflightFetch),
+		validateURI: validateJWKSURI,
+		inflight:    make(map[string]*inflightFetch),
 	}
 
 	for _, opt := range opts {
@@ -121,11 +128,11 @@ func validateJWKSURI(ctx context.Context, jwksURI string) error {
 	}
 
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-			if allowPrivateIPs {
-				continue
-			}
-			return fmt.Errorf("security violation: JWKS URI hostname resolves to a restricted or private IP address (%s)", ip.String())
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("security violation: JWKS URI hostname resolves to a restricted IP address (%s)", ip.String())
+		}
+		if ip.IsPrivate() && !allowPrivateIPs {
+			return fmt.Errorf("security violation: JWKS URI hostname resolves to a private IP address (%s)", ip.String())
 		}
 	}
 
@@ -134,7 +141,7 @@ func validateJWKSURI(ctx context.Context, jwksURI string) error {
 
 // GetEncryptionKey fetches or retrieves a cached key matching the algorithm.
 func (c *JWKSCache) GetEncryptionKey(ctx context.Context, jwksURI string, alg string) (interface{}, error) {
-	if err := validateJWKSURI(ctx, jwksURI); err != nil {
+	if err := c.validateURI(ctx, jwksURI); err != nil {
 		return nil, fmt.Errorf("SSRF validation failed for JWKS URI: %w", err)
 	}
 
@@ -173,8 +180,12 @@ func (c *JWKSCache) getOrFetchJWKS(ctx context.Context, uri string) (*jose.JSONW
 	c.inflightMu.Lock()
 	if existing := c.inflight[uri]; existing != nil {
 		c.inflightMu.Unlock()
-		<-existing.done
-		return existing.keys, existing.err
+		select {
+		case <-existing.done:
+			return existing.keys, existing.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	call := &inflightFetch{
@@ -196,7 +207,7 @@ func (c *JWKSCache) getOrFetchJWKS(ctx context.Context, uri string) (*jose.JSONW
 }
 
 func (c *JWKSCache) fetchJWKS(ctx context.Context, uri string) (*jose.JSONWebKeySet, error) {
-	if err := validateJWKSURI(ctx, uri); err != nil {
+	if err := c.validateURI(ctx, uri); err != nil {
 		return nil, fmt.Errorf("SSRF validation blocked fetch: %w", err)
 	}
 

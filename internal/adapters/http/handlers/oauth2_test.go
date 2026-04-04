@@ -12,6 +12,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/audit"
 	"github.com/Shyntr/shyntr/internal/adapters/http/handlers"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
 	"github.com/Shyntr/shyntr/internal/application/security"
@@ -36,15 +37,10 @@ func setupTestDB() *gorm.DB {
 		panic("failed to connect database")
 	}
 
-	db.AutoMigrate(
-		&models.OAuth2ClientGORM{},
-		&models.OAuth2SessionGORM{},
-		&models.LoginRequestGORM{},
-		&models.ConsentRequestGORM{},
-		&models.AuditLogGORM{},
-		&models.CryptoKeyGORM{},
-		&models.OutboundPolicyGORM{},
-	)
+	err = persistence.MigrateDB(db)
+	if err != nil {
+		return nil
+	}
 	return db
 }
 
