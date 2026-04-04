@@ -84,7 +84,8 @@ func (r *oauth2ClientRepository) GetByTenantAndID(ctx context.Context, tenantID,
 func (r *oauth2ClientRepository) Update(ctx context.Context, client *model.OAuth2Client) error {
 	dbModel := models.FromDomainOAuth2Client(client)
 	return r.db.WithContext(ctx).Model(&models.OAuth2ClientGORM{}).
-		Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
+		//Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
+		Where("id = ?", client.ID).
 		Updates(dbModel).Error
 }
 

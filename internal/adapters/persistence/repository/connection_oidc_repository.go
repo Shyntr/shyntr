@@ -59,7 +59,8 @@ func (r *oidcConnectionRepository) GetConnectionCount(ctx context.Context, tenan
 func (r *oidcConnectionRepository) Update(ctx context.Context, conn *model.OIDCConnection) error {
 	dbModel := models.FromDomainOIDCConnection(conn)
 	return r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{}).
-		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		//Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		Where("id = ?", conn.ID).
 		Updates(dbModel).Error
 }
 

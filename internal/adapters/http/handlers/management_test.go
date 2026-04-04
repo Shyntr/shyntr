@@ -36,7 +36,9 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 		t.Fatalf("failed to connect database: %v", err)
 	}
 	err = persistence.MigrateDB(db)
-
+	if err != nil {
+		t.Fatalf("failed to migrate database: %v", err)
+	}
 	db.Create(&models.TenantGORM{ID: "default", Name: "default"})
 	db.Create(&models.TenantGORM{ID: "tenant-a", Name: "Tenant A"})
 	db.Create(&models.TenantGORM{ID: "tenant-b", Name: "Tenant B"})

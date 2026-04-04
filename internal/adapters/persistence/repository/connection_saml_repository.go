@@ -71,7 +71,8 @@ func (r *samlConnectionRepository) GetConnectionByIdpEntity(ctx context.Context,
 func (r *samlConnectionRepository) Update(ctx context.Context, conn *model.SAMLConnection) error {
 	dbModel := models.FromDomainSAMLConnection(conn)
 	return r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{}).
-		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		//Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		Where("id = ?", conn.ID).
 		Updates(dbModel).Error
 }
 

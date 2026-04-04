@@ -55,6 +55,14 @@ func printJSON(v interface{}) {
 	fmt.Println(string(b))
 }
 
+func parseRequiredDuration(name, value string) time.Duration {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		log.Fatalf("Invalid %s duration %q: %v", name, value, err)
+	}
+	return d
+}
+
 func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "shyntr",
@@ -375,7 +383,10 @@ func main() {
 				clientName = "New Client " + clientID
 			}
 			if clientSecret == "" && !isPublic {
-				clientSecret, _ = utils.GenerateRandomHex(32)
+				clientSecret, err = utils.GenerateRandomHex(32)
+				if err != nil {
+					log.Fatalf("Failed to generate client secret: %v", err)
+				}
 			}
 			if len(redirectURIs) == 0 {
 				redirectURIs = []string{"http://localhost:8080/callback"}
@@ -387,7 +398,10 @@ func main() {
 			hashedSecret := ""
 			if clientSecret != "" {
 				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
-				hashedSecret, _ = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				hashedSecret, err = shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				if err != nil {
+					log.Fatalf("Failed to hash client secret: %v", err)
+				}
 			}
 
 			if authMethod == "" {
@@ -515,11 +529,21 @@ func main() {
 			}
 			if clientSecret != "" {
 				fositeCfg := &fosite.Config{GlobalSecret: []byte(cfg.AppSecret)}
-				hashed, _ := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				hashed, hashErr := shcrypto.HashSecret(context.Background(), fositeCfg, clientSecret)
+				if hashErr != nil {
+					log.Fatalf("Failed to hash client secret: %v", hashErr)
+				}
 				updates["secret"] = hashed
 			}
+			if len(updates) == 0 {
+				log.Println("No changes detected.")
+				return
+			}
+
 			var client models.OAuth2ClientGORM
-			db.Select("tenant_id").First(&client, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Client not found: %v", err)
+			}
 			if err := db.Model(&models.OAuth2ClientGORM{}).Where("id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
@@ -545,7 +569,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var client models.OAuth2ClientGORM
-			db.Select("tenant_id").First(&client, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("Client not found: %v", err)
+			}
 			if err := db.Delete(&models.OAuth2ClientGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient failed: %v", err)
 			}
@@ -663,7 +689,9 @@ func main() {
 				return
 			}
 			var client models.SAMLClientGORM
-			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "entity_id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML client not found: %v", err)
+			}
 			if err := db.Model(&models.SAMLClientGORM{}).Where("entity_id = ?", args[0]).Updates(updates).Error; err != nil {
 				log.Fatalf("Update failed: %v", err)
 			}
@@ -688,7 +716,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var client models.SAMLClientGORM
-			db.Select("tenant_id").First(&client, "entity_id = ?", args[0])
+			if err := db.Select("tenant_id").First(&client, "entity_id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML client not found: %v", err)
+			}
 			if err := db.Where("entity_id = ?", args[0]).Delete(&models.SAMLClientGORM{}).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -733,14 +763,22 @@ func main() {
 				}
 
 				meta := &saml.EntityDescriptor{}
-				_ = xml.Unmarshal(xmlBytes, meta)
+				if err := xml.Unmarshal(xmlBytes, meta); err != nil {
+					log.Fatalf("Failed to parse metadata XML: %v", err)
+				}
 				entityID = meta.EntityID
+				if entityID == "" {
+					log.Fatal("Parsed metadata XML does not contain an EntityID")
+				}
 			} else if metadataURL != "" {
 				outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
 				outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
 				descriptor, rawXML, fetchErr := utils2.FetchAndParseMetadata(context.Background(), tenantID, metadataURL, outboundGuard)
 				if fetchErr != nil {
 					log.Fatalf("Failed to fetch metadata URL: %v", fetchErr)
+				}
+				if descriptor == nil || descriptor.EntityID == "" {
+					log.Fatal("Fetched metadata does not contain a valid EntityID")
 				}
 				xmlBytes = []byte(rawXML)
 				entityID = descriptor.EntityID
@@ -797,7 +835,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var conn models.SAMLConnectionGORM
-			db.Select("tenant_id").First(&conn, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&conn, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("SAML connection not found: %v", err)
+			}
 			if err := db.Delete(&models.SAMLConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -904,7 +944,9 @@ func main() {
 			}
 			auditLogger := audit.NewAuditLogger(db)
 			var conn models.OIDCConnectionGORM
-			db.Select("tenant_id").First(&conn, "id = ?", args[0])
+			if err := db.Select("tenant_id").First(&conn, "id = ?", args[0]).Error; err != nil {
+				log.Fatalf("OIDC connection not found: %v", err)
+			}
 			if err := db.Delete(&models.OIDCConnectionGORM{}, "id = ?", args[0]).Error; err != nil {
 				log.Fatalf("DeleteByClient Failed: %v", err)
 			}
@@ -1015,6 +1057,10 @@ func runServer() {
 	cfg := config.LoadConfig()
 	logger.InitLogger(cfg.LogLevel)
 
+	accessTokenLifespan := parseRequiredDuration("ACCESS_TOKEN_LIFESPAN", cfg.AccessTokenLifespan)
+	refreshTokenLifespan := parseRequiredDuration("REFRESH_TOKEN_LIFESPAN", cfg.RefreshTokenLifespan)
+	idTokenLifespan := parseRequiredDuration("ID_TOKEN_LIFESPAN", cfg.IDTokenLifespan)
+
 	db, err := persistence.ConnectDB(cfg)
 	if err != nil {
 		logger.Log.Fatal("Database connection failed", zap.Error(err))
@@ -1027,13 +1073,13 @@ func runServer() {
 	}
 
 	fositeConfig := &fosite.Config{
-		AccessTokenLifespan:        1 * time.Hour,
+		AccessTokenLifespan:        accessTokenLifespan,
 		AuthorizeCodeLifespan:      10 * time.Minute,
-		IDTokenLifespan:            1 * time.Hour,
-		RefreshTokenLifespan:       30 * 24 * time.Hour, // 30 Days
+		IDTokenLifespan:            idTokenLifespan,
+		RefreshTokenLifespan:       refreshTokenLifespan,
 		GlobalSecret:               []byte(cfg.AppSecret),
 		IDTokenIssuer:              cfg.BaseIssuerURL,
-		SendDebugMessagesToClients: true, //TODO, Make it false for Production
+		SendDebugMessagesToClients: false,
 
 		EnforcePKCE:                    true,
 		EnforcePKCEForPublicClients:    true,
@@ -1100,21 +1146,30 @@ func runServer() {
 	swaggerRouter := router.SetupSwaggerRouter()
 
 	publicSrv := &http.Server{
-		Addr:        ":" + cfg.Port,
-		Handler:     publicRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           publicRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	adminSrv := &http.Server{
-		Addr:        ":" + cfg.AdminPort,
-		Handler:     adminRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.AdminPort,
+		Handler:           adminRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	swaggerSrv := &http.Server{
-		Addr:        ":" + cfg.SwaggerPort,
-		Handler:     swaggerRouter,
-		ReadTimeout: 5 * time.Second,
+		Addr:              ":" + cfg.SwaggerPort,
+		Handler:           swaggerRouter,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())

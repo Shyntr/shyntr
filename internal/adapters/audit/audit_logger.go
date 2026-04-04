@@ -7,7 +7,9 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/application/port"
+	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -21,9 +23,20 @@ func NewAuditLogger(db *gorm.DB) port.AuditLogger {
 
 func (a *AuditLogger) Log(tenantID, actor, action, ip, ua string, details map[string]interface{}) {
 	go func() {
-		var detailsBytes []byte
+		detailsBytes := []byte("{}")
+
 		if details != nil {
-			detailsBytes, _ = json.Marshal(details)
+			marshaled, err := json.Marshal(details)
+			if err != nil {
+				logger.Log.Error("Failed to marshal audit log details",
+					zap.Error(err),
+					zap.String("tenant_id", tenantID),
+					zap.String("actor", actor),
+					zap.String("action", action),
+				)
+			} else {
+				detailsBytes = marshaled
+			}
 		}
 
 		logEntry := models.AuditLogGORM{
@@ -36,6 +49,15 @@ func (a *AuditLogger) Log(tenantID, actor, action, ip, ua string, details map[st
 			Details:   detailsBytes,
 			CreatedAt: time.Now(),
 		}
-		a.db.Create(&logEntry)
+
+		if err := a.db.Create(&logEntry).Error; err != nil {
+			logger.Log.Error("Failed to persist audit log",
+				zap.Error(err),
+				zap.String("tenant_id", tenantID),
+				zap.String("actor", actor),
+				zap.String("action", action),
+				zap.String("audit_id", logEntry.ID),
+			)
+		}
 	}()
 }

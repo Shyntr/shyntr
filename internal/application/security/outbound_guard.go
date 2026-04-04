@@ -254,7 +254,7 @@ func containsInt(values []int, target int) bool {
 }
 
 func isLocalHostname(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
+	host = strings.TrimRight(strings.ToLower(strings.TrimSpace(host)), ".")
 	return host == "localhost" ||
 		host == "localhost.localdomain" ||
 		strings.HasSuffix(host, ".local")

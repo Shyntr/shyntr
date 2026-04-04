@@ -82,7 +82,8 @@ func (r *samlClientRepository) GetByTenantAndEntityID(ctx context.Context, tenan
 func (r *samlClientRepository) Update(ctx context.Context, client *model.SAMLClient) error {
 	dbModel := models.FromDomainSAMLClient(client)
 	return r.db.WithContext(ctx).Model(&models.SAMLClientGORM{}).
-		Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
+		//Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
+		Where("id = ?", client.ID).
 		Updates(dbModel).Error
 }
 
