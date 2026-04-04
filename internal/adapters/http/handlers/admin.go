@@ -303,7 +303,7 @@ func buildRedirectURL(baseIssuerURL, requestURL string, params map[string]string
 		safePath = "/" + safePath
 	}
 
-	q := url.Values{}
+	q := parsed.Query()
 	for k, v := range params {
 		q.Set(k, v)
 	}

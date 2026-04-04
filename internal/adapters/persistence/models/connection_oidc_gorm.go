@@ -1,12 +1,9 @@
 package models
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/domain/model"
-	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
@@ -18,7 +15,7 @@ type OIDCConnectionGORM struct {
 	Name                  string                                `gorm:"type:varchar(255);not null"`
 	IssuerURL             string                                `gorm:"type:varchar(255);not null"`
 	ClientID              string                                `gorm:"type:varchar(255);not null"`
-	ClientSecret          string                                `gorm:"type:text"`
+	ClientSecret          string                                `gorm:"type:varchar(255)"`
 	AuthorizationEndpoint string                                `gorm:"type:varchar(255)"`
 	TokenEndpoint         string                                `gorm:"type:varchar(255)"`
 	UserInfoEndpoint      string                                `gorm:"type:varchar(255)"`
@@ -34,19 +31,11 @@ type OIDCConnectionGORM struct {
 
 func (OIDCConnectionGORM) TableName() string { return "oidc_connections" }
 
-func (c *OIDCConnectionGORM) BeforeCreate(tx *gorm.DB) error {
+func (c *OIDCConnectionGORM) BeforeCreate(tx *gorm.DB) (err error) {
 	if c.ID == "" {
 		c.ID = uuid.New().String()
 	}
-	return c.encryptClientSecret()
-}
-
-func (c *OIDCConnectionGORM) BeforeSave(tx *gorm.DB) error {
-	return c.encryptClientSecret()
-}
-
-func (c *OIDCConnectionGORM) AfterFind(tx *gorm.DB) error {
-	return c.decryptClientSecret()
+	return
 }
 
 func (m *OIDCConnectionGORM) ToDomain() *model.OIDCConnection {
@@ -87,41 +76,4 @@ func FromDomainOIDCConnection(e *model.OIDCConnection) *OIDCConnectionGORM {
 		AttributeMapping:      e.AttributeMapping,
 		Active:                e.Active,
 	}
-}
-
-func (c *OIDCConnectionGORM) encryptClientSecret() error {
-	if c.ClientSecret == "" {
-		return nil
-	}
-
-	cfg := config.LoadConfig()
-
-	decrypted, err := shcrypto.DecryptAES(c.ClientSecret, []byte(cfg.AppSecret))
-	if err == nil && len(decrypted) > 0 {
-		return nil
-	}
-
-	encrypted, err := shcrypto.EncryptAES([]byte(c.ClientSecret), []byte(cfg.AppSecret))
-	if err != nil {
-		return fmt.Errorf("failed to encrypt oidc connection client secret: %w", err)
-	}
-
-	c.ClientSecret = encrypted
-	return nil
-}
-
-func (c *OIDCConnectionGORM) decryptClientSecret() error {
-	if c.ClientSecret == "" {
-		return nil
-	}
-
-	cfg := config.LoadConfig()
-
-	decrypted, err := shcrypto.DecryptAES(c.ClientSecret, []byte(cfg.AppSecret))
-	if err != nil {
-		return fmt.Errorf("failed to decrypt oidc connection client secret: %w", err)
-	}
-
-	c.ClientSecret = string(decrypted)
-	return nil
 }
