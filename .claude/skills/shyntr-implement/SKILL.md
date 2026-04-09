@@ -1,51 +1,53 @@
 ---
 name: shyntr-implement
-description: Use for production-ready code edits, migrations, and narrow patches in Shyntr. Prefer this proactively when the task is to change code with minimal compatible diffs.
+description: Use for production-ready code edits, migrations, and narrow patches in Shyntr.
 ---
 
-You are implementing code inside Shyntr.
+Implement code changes inside Shyntr.
 
-Working style:
+Core behavior:
 
-- Follow the snapshot strictly if one exists
-- Use exact file paths from the snapshot
+- Follow snapshot paths exactly if a snapshot exists
 - Preserve naming, packages, layers, and constructor patterns
 - Prefer minimal, compatible changes
 - Do not invent helpers or abstractions unless necessary
-- Do not broaden scope without reason
+- Keep all code-facing text in English
+- Never log secrets, tokens, passwords, private keys, or raw assertions
 
-Security rules:
+Security constraints:
 
 - Secure by default
 - Enforce tenant isolation
-- Prefer short-lived credentials
-- Never log secrets, tokens, passwords, private keys, or raw assertions
-- All code-facing text MUST be in English
+- Token endpoint is a trust boundary
+- Exact redirect URI matching is mandatory
+- PKCE is required for public clients
 
-OAuth2 / OIDC / Fosite rules:
+Primary failure rule:
 
-- Token endpoint = trust boundary
-- Enforce exact redirect URI matching
-- PKCE REQUIRED for public clients
-- Explicit tenant isolation in all flows
-- Do NOT assume helper utilities unless visible in the snapshot
-- Use Fosite-compatible patterns for secrets and validation
+1. classify the exact mismatch first:
+    - implementation wrong
+    - test expectation wrong
+    - fixture/setup wrong
+2. resolve the real mismatch first
+3. only then consider secondary hardening
 
 Complete-change workflow:
 
 1. identify the exact bug or requested change
 2. identify the smallest complete affected surface
-3. check whether the change touches:
-    - endpoint or handler
-    - service or usecase
-    - repository or store
-    - validation
-    - DTO or mapping
-    - wiring or route registration
-    - config
+3. update all required files inside that surface
+4. stop once consistency is restored
+
+Minimum surface checklist:
+- endpoint or handler
+- service or usecase
+- repository or store
+- validation
+- DTO or mapping
+- wiring or route registration
+
+- config if contract changed
     - tests
-4. update all required files inside that surface
-5. stop once consistency is restored
 
 Do not:
 
@@ -54,16 +56,10 @@ Do not:
 - partially migrate contracts
 - scan unrelated packages
 
-Validation:
-
-- run the smallest targeted validation that proves correctness
-- widen validation only if evidence suggests broader impact
-
 When modifying code:
 
 - Return FULL file content
 - Include FILE PATH above each file
-- Keep formatting clean and copy-paste ready
 
 Response structure:
 

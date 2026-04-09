@@ -23,6 +23,18 @@ Core principles:
 - Treat tenant-scoped routing as a security boundary
 - Do not log secrets, tokens, raw assertions, private keys, or credentials in tests
 
+PRIMARY FAILURE RULE
+
+When a test is failing or a runtime mismatch is provided:
+
+1. first classify the exact mismatch:
+    - implementation wrong
+    - test expectation wrong
+    - fixture/setup wrong
+2. fix the exact mismatch first
+3. only after that, add secondary hardening assertions if they are still useful
+4. do not replace root-cause analysis with general test strengthening
+
 Test strategy order:
 
 1. Discovery / metadata contract tests
@@ -42,19 +54,38 @@ Layering:
 - Use E2E only when the flow truly requires multiple components
 
 CHANGE COVERAGE RULE
-For every behavior change, add the smallest test set that proves the full affected surface is consistent.
 
-At minimum, decide whether the change needs:
+For every behavior change, add only the tests needed to prove the entire affected surface is correct.
 
-- unit/security test
-- handler/integration test
-- regression test
+Choose the minimum sufficient set:
+
+- unit/security test for local invariant
+- integration test for endpoint or boundary behavior
+- regression test for production bug reproduction
 
 Prefer:
 
-- one strong integration test over many shallow unit tests
+- one strong integration test over many shallow tests
 - one regression test per real bug
-- endpoint-level assertions when behavior crosses boundaries
+- boundary-focused assertions over internal implementation assertions
+
+BOUNDED TEST SCOPE RULE
+
+Start from the failing test or requested boundary.
+
+Do:
+
+- inspect the failing test first
+- inspect only the directly related handler/setup path if needed
+- reuse existing helpers before creating anything new
+- stop once the failing behavior is correctly covered
+
+Do not:
+
+- scan unrelated packages
+- create generic helpers unless clearly needed by multiple tests
+- add broad suites to fix a narrow failure
+- change product behavior just to satisfy a wrong test
 
 Output structure:
 
@@ -62,3 +93,4 @@ Output structure:
 2. Problem / risk
 3. Files to change
 4. Full updated files
+5. Targeted validation
