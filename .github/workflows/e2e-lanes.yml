@@ -1,0 +1,55 @@
+name: "Shyntr E2E Lanes"
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: 'Lane to run'
+        required: true
+        default: 'fast'
+        type: choice
+        options:
+          - fast
+          - negative-replay
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast Lane
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'workflow_dispatch' && github.event.inputs.lane == 'fast'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.25.7
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          check-latest: true
+
+      - name: Run Fast Lane Command
+        run: go test ./internal/adapters/http/handlers -run 'TestOIDCE2E_(CoreFlow|TenantIsolation|RedirectURIExactMatching|Logout_)' -count=1
+  negative-replay:
+    name: Optional stricter negative replay
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.lane == 'negative-replay'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.25.7
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          check-latest: true
+
+      - name: Run Optional Stricter Negative Replay Command
+        run: go test ./internal/adapters/http/handlers -run 'TestOIDCE2E_(TenantIsolation|RedirectURIExactMatching|Logout_)' -count=1

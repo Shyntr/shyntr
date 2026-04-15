@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,6 +214,87 @@ func TestOAuth2Handler_Authorize_RejectsCrossTenantClientUsage(t *testing.T) {
 
 	// Fosite cannot trust the redirect_uri of an unknown client, so it writes the
 	// error directly rather than redirecting. invalid_client is HTTP 401 per Fosite.
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_client")
+}
+
+func TestOAuth2Handler_Authorize_RejectsRedirectURIExactMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupTestDB()
+	require.NotNil(t, db)
+
+	require.NoError(t, db.Create(&models.TenantGORM{
+		ID:          "default",
+		Name:        "default",
+		DisplayName: "Default Tenant",
+		Description: "Default tenant for redirect URI tests",
+	}).Error)
+
+	require.NoError(t, db.Create(&models.OAuth2ClientGORM{
+		ID:                      "public-client",
+		TenantID:                "default",
+		Name:                    "Public Client",
+		Public:                  true,
+		EnforcePKCE:             true,
+		TokenEndpointAuthMethod: "none",
+		RedirectURIs:            []string{"http://localhost:3000/callback"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		ResponseModes:           []string{"query"},
+		Scopes:                  []string{"openid"},
+	}).Error)
+
+	handler := setupOAuth2HandlerWithDBForPKCETests(t, db)
+
+	r := gin.New()
+	r.GET("/oauth2/auth", handler.Authorize)
+
+	reqURL := "/oauth2/auth?client_id=public-client&response_type=code&redirect_uri=" +
+		url.QueryEscape("http://localhost:3000/callback/") +
+		"&scope=openid&state=test-state&code_challenge=test-challenge&code_challenge_method=S256"
+
+	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_request")
+}
+
+func TestOAuth2Handler_Token_RejectsCrossTenantClientUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupTestDB()
+	require.NotNil(t, db)
+
+	require.NoError(t, db.Create(&models.TenantGORM{ID: "tenant-a", Name: "tenant-a"}).Error)
+	require.NoError(t, db.Create(&models.TenantGORM{ID: "tenant-b", Name: "tenant-b"}).Error)
+	require.NoError(t, db.Create(&models.OAuth2ClientGORM{
+		ID:                      "client-a",
+		TenantID:                "tenant-a",
+		Name:                    "Client A",
+		Secret:                  "secret-a",
+		TokenEndpointAuthMethod: "client_secret_basic",
+		GrantTypes:              []string{"client_credentials"},
+		Scopes:                  []string{"openid"},
+	}).Error)
+
+	handler := setupOAuth2HandlerWithDBForPKCETests(t, db)
+
+	r := gin.New()
+	r.POST("/t/:tenant_id/oauth2/token", handler.Token)
+
+	req, err := http.NewRequest(http.MethodPost, "/t/tenant-b/oauth2/token", strings.NewReader("grant_type=client_credentials"))
+	require.NoError(t, err)
+	req.SetBasicAuth("client-a", "secret-a")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Contains(t, w.Body.String(), "invalid_client")
 }
