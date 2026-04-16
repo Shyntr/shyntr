@@ -21,6 +21,7 @@ type ManagementHandler struct {
 	SAMLClientUse    usecase.SAMLClientUseCase
 	SAMLConnUse      usecase.SAMLConnectionUseCase
 	OIDCConnUse      usecase.OIDCConnectionUseCase
+	LDAPConnUse      usecase.LDAPConnectionUseCase
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
@@ -30,10 +31,11 @@ type ManagementHandler struct {
 func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase, SAMLClientUse usecase.SAMLClientUseCase,
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
+	LDAPConnUse usecase.LDAPConnectionUseCase,
 	TenantUse usecase.TenantUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
-		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, OutboundGuard: OutboundGuard}
+		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse, OutboundGuard: OutboundGuard}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -1098,4 +1100,194 @@ func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
 	}
 	logger.FromGin(c).Info("OIDC connection deleted successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusNoContent, nil)
+}
+
+// --- LDAP Connection Management ---
+
+// CreateLDAPConnection godoc
+// @Summary Create LDAP Connection (IdP)
+// @Description Registers an external LDAP/Active-Directory Identity Provider for federated authentication.
+// @Tags LDAP Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateLDAPConnectionRequest true "LDAP Connection Configuration"
+// @Success 201 {object} payload.LDAPConnectionResponse
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to create LDAP connection"
+// @Router /admin/management/ldap-connections [post]
+func (h *ManagementHandler) CreateLDAPConnection(c *gin.Context) {
+	var req payload.CreateLDAPConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, req.TenantID)
+	if !ok {
+		return
+	}
+	req.TenantID = realTenantID
+
+	conn := req.ToDomain()
+	saved, err := h.LDAPConnUse.CreateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "create", err))
+		return
+	}
+	logger.FromGin(c).Info("LDAP connection created successfully",
+		zap.String("connection_id", saved.ID),
+		zap.String("target_tenant_id", saved.TenantID),
+		zap.String("protocol", "ldap"),
+	)
+	c.JSON(http.StatusCreated, payload.FromDomainLDAPConnection(saved))
+}
+
+// ListLDAPConnections godoc
+// @Summary List All LDAP Connections
+// @Description Lists all federated LDAP Identity Providers.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} payload.LDAPConnectionResponse
+// @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections"
+// @Router /admin/management/ldap-connections [get]
+func (h *ManagementHandler) ListLDAPConnections(c *gin.Context) {
+	connections, err := h.LDAPConnUse.ListConnections(c.Request.Context(), "")
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
+		return
+	}
+	resp := make([]*payload.LDAPConnectionResponse, 0, len(connections))
+	for _, conn := range connections {
+		resp = append(resp, payload.FromDomainLDAPConnection(conn))
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// ListLDAPConnectionsByTenant godoc
+// @Summary List LDAP Connections By Tenant
+// @Description Lists all federated LDAP Identity Providers for a specific tenant.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} payload.LDAPConnectionResponse
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections for tenant"
+// @Router /admin/management/tenants/{tenant_id}/ldap-connections [get]
+func (h *ManagementHandler) ListLDAPConnectionsByTenant(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
+		return
+	}
+	connections, err := h.LDAPConnUse.ListConnections(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
+		return
+	}
+	resp := make([]*payload.LDAPConnectionResponse, 0, len(connections))
+	for _, conn := range connections {
+		resp = append(resp, payload.FromDomainLDAPConnection(conn))
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// GetLDAPConnection godoc
+// @Summary Get LDAP Connection
+// @Description Retrieves details of a specific LDAP Identity Provider. BindPassword is never returned.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} payload.LDAPConnectionResponse
+// @Failure 404 {object} payload.AppError "LDAP Connection not found"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [get]
+func (h *ManagementHandler) GetLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	conn, err := h.LDAPConnUse.GetConnection(c.Request.Context(), tenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.FromDomainLDAPConnection(conn))
+}
+
+// UpdateLDAPConnection godoc
+// @Summary Update LDAP Connection
+// @Description Updates an existing LDAP Identity Provider. Pass empty string or "*****" for bind_password to keep the existing value.
+// @Tags LDAP Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Connection ID"
+// @Param request body payload.CreateLDAPConnectionRequest true "LDAP Connection Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to update LDAP connection"
+// @Router /admin/management/ldap-connections/{id} [put]
+func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
+	var req payload.CreateLDAPConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+
+	conn := req.ToDomain()
+	// Use case handles the "*****" / empty password sentinel (keep existing).
+	if err := h.LDAPConnUse.UpdateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "update", err))
+		return
+	}
+	logger.FromGin(c).Info("LDAP connection updated successfully",
+		zap.String("server_url", conn.ServerURL),
+		zap.String("target_tenant_id", conn.TenantID),
+		zap.String("protocol", "ldap"),
+	)
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+// DeleteLDAPConnection godoc
+// @Summary Delete LDAP Connection
+// @Description Deletes a federated LDAP Identity Provider from a tenant.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete LDAP connection"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [delete]
+func (h *ManagementHandler) DeleteLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	if err := h.LDAPConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "delete", err))
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// TestLDAPConnection godoc
+// @Summary Test LDAP Connection
+// @Description Verifies connectivity and service-account bind credentials for an LDAP connection.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} map[string]string "status: ok"
+// @Failure 400 {object} payload.AppError "Connection test failed"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id}/test [post]
+func (h *ManagementHandler) TestLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	if err := h.LDAPConnUse.TestConnection(c.Request.Context(), tenantID, id); err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "test", err))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

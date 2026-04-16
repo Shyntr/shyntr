@@ -29,6 +29,7 @@ func SetupRouter(
 	samlClientUseCase usecase.SAMLClientUseCase,
 	connectionUseCase usecase.OIDCConnectionUseCase,
 	samlConnectionUseCase usecase.SAMLConnectionUseCase,
+	ldapConnectionUseCase usecase.LDAPConnectionUseCase,
 	managementUseCase usecase.ManagementUseCase,
 	auth2SessionUseCase usecase.OAuth2SessionUseCase,
 	webhookUseCase usecase.WebhookUseCase,
@@ -52,7 +53,7 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, outboundGuard)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
@@ -230,6 +231,14 @@ func SetupRouter(
 			mgmtGroup.POST("/oidc-connections", mgmtHandler.CreateOIDCConnection)
 			mgmtGroup.PUT("/oidc-connections/:id", mgmtHandler.UpdateOIDCConnection)
 			mgmtGroup.DELETE("/oidc-connections/:tenant_id/:id", mgmtHandler.DeleteOIDCConnection)
+
+			// LDAP Connections
+			mgmtGroup.GET("/ldap-connections", mgmtHandler.ListLDAPConnections)
+			mgmtGroup.GET("/ldap-connections/:tenant_id/:id", mgmtHandler.GetLDAPConnection)
+			mgmtGroup.POST("/ldap-connections", mgmtHandler.CreateLDAPConnection)
+			mgmtGroup.PUT("/ldap-connections/:id", mgmtHandler.UpdateLDAPConnection)
+			mgmtGroup.DELETE("/ldap-connections/:tenant_id/:id", mgmtHandler.DeleteLDAPConnection)
+			mgmtGroup.POST("/ldap-connections/:tenant_id/:id/test", mgmtHandler.TestLDAPConnection)
 
 			//Webhook
 			mgmtGroup.POST("/webhooks", webhookHandler.Create)

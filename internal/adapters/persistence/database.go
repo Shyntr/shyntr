@@ -47,6 +47,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.SAMLClientGORM{},
 		&models.SAMLReplayCache{},
 		&models.OIDCConnectionGORM{},
+		&models.LDAPConnectionGORM{},
 		&models.OAuth2SessionGORM{},
 		&models.CryptoKeyGORM{},
 		&models.LoginRequestGORM{},
@@ -191,9 +192,19 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			Name:   "Global Outbound Policy - OIDC Backchannel",
 			Target: model.OutboundTargetOIDCBackchannel,
 		},
+		{
+			ID:     "global-outbound-policy-ldap-auth",
+			Name:   "Global Outbound Policy - LDAP Auth",
+			Target: model.OutboundTargetLDAPAuth,
+		},
 	}
 
-	allowedSchemesJSON, err := json.Marshal([]string{"https"})
+	allowedSchemesHTTPS, err := json.Marshal([]string{"https"})
+	if err != nil {
+		return err
+	}
+
+	allowedSchemesLDAP, err := json.Marshal([]string{"ldap", "ldaps"})
 	if err != nil {
 		return err
 	}
@@ -208,7 +219,13 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 		return err
 	}
 
-	allowedPortsJSON, err := json.Marshal([]int{443})
+	allowedPortsHTTPS, err := json.Marshal([]int{443})
+	if err != nil {
+		return err
+	}
+
+	// LDAP uses no path concept; an empty ports list means no port restriction.
+	allowedPortsLDAP, err := json.Marshal([]int{})
 	if err != nil {
 		return err
 	}
@@ -225,16 +242,26 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			continue
 		}
 
+		// LDAP connections use ldap/ldaps schemes and have no HTTP redirects.
+		schemesJSON := string(allowedSchemesHTTPS)
+		portsJSON := string(allowedPortsHTTPS)
+		pathsJSON := string(allowedPathPatternsJSON)
+		if item.Target == model.OutboundTargetLDAPAuth {
+			schemesJSON = string(allowedSchemesLDAP)
+			portsJSON = string(allowedPortsLDAP)
+			pathsJSON = `["/*"]`
+		}
+
 		row := &models.OutboundPolicyGORM{
 			ID:                      item.ID,
 			TenantID:                "",
 			Name:                    item.Name,
 			Target:                  string(item.Target),
 			Enabled:                 true,
-			AllowedSchemesJSON:      string(allowedSchemesJSON),
+			AllowedSchemesJSON:      schemesJSON,
 			AllowedHostPatternsJSON: string(allowedHostPatternsJSON),
-			AllowedPathPatternsJSON: string(allowedPathPatternsJSON),
-			AllowedPortsJSON:        string(allowedPortsJSON),
+			AllowedPathPatternsJSON: pathsJSON,
+			AllowedPortsJSON:        portsJSON,
 			BlockPrivateIPs:         true,
 			BlockLoopbackIPs:        true,
 			BlockLinkLocalIPs:       true,
@@ -242,7 +269,7 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			BlockLocalhostNames:     true,
 			DisableRedirects:        true,
 			RequireDNSResolve:       true,
-			RequestTimeoutSeconds:   5,
+			RequestTimeoutSeconds:   10,
 			MaxResponseBytes:        2 << 20,
 		}
 
