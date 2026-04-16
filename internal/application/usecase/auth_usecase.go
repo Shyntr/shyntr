@@ -126,8 +126,9 @@ func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, 
 		return nil, err
 	}
 	u.audit.Log(req.ID, subject, "auth.login.accept", actorIP, userAgent, map[string]interface{}{
-		"client_id": req.ClientID,
-		"protocol":  req.Protocol,
+		"client_id":         req.ClientID,
+		"protocol":          req.Protocol,
+		"relying_party_url": req.RequestURL,
 	})
 
 	return req, nil
@@ -149,6 +150,7 @@ func (u *authUseCase) RejectLoginRequest(ctx context.Context, challenge string, 
 		"protocol":          req.Protocol,
 		"error_name":        errName,
 		"error_description": errDesc,
+		"relying_party_url": req.RequestURL,
 	})
 	return req, nil
 }

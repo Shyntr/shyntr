@@ -37,6 +37,7 @@ func SetupRouter(
 	scopeUseCase usecase.ScopeUseCase,
 	outboundPolicyUseCase usecase.OutboundPolicyUseCase,
 	outboundGuard port.OutboundGuard,
+	auditLogger port.AuditLogger,
 	fositeCfg *fosite.Config,
 	cfg *config.Config,
 	Provider *utils2.Provider,
@@ -50,7 +51,7 @@ func SetupRouter(
 	// Handlers
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
-	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase)
+	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
 	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)

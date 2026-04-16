@@ -6,6 +6,7 @@ import (
 
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -13,10 +14,11 @@ import (
 type LoginHandler struct {
 	Config *config.Config
 	MUC    usecase.ManagementUseCase
+	Audit  port.AuditLogger
 }
 
-func NewLoginHandler(cfg *config.Config, MUC usecase.ManagementUseCase) *LoginHandler {
-	return &LoginHandler{Config: cfg, MUC: MUC}
+func NewLoginHandler(cfg *config.Config, MUC usecase.ManagementUseCase, audit port.AuditLogger) *LoginHandler {
+	return &LoginHandler{Config: cfg, MUC: MUC, Audit: audit}
 }
 
 // GetLoginMethods godoc
@@ -58,6 +60,14 @@ func (h *LoginHandler) GetLoginMethods(c *gin.Context) {
 			err,
 		))
 		return
+	}
+
+	if h.Audit != nil {
+		h.Audit.Log(loginReq.TenantID, loginReq.Subject, "auth.login.methods_fetched",
+			c.ClientIP(), c.Request.UserAgent(), map[string]interface{}{
+				"client_id":         loginReq.ClientID,
+				"relying_party_url": loginReq.RequestURL,
+			})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
