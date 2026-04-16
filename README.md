@@ -326,6 +326,26 @@ Shyntr is ideal when you need to:
 
 ---
 
+## Testing & Security Model
+
+Shyntr uses a repository-local, deterministic E2E testing approach to validate
+real authentication trust boundaries across OIDC and SAML flows.
+
+The test suite covers:
+- strict tenant isolation
+- redirect URI exact matching
+- PKCE enforcement
+- federation callback continuity
+- SAML ACS and SLO flows
+- replay protection and signature validation
+
+All critical scenarios are executed through CI lanes:
+- Fast Lane (PR safety)
+- Main Lane (integration confidence)
+- Release Lane (security gate)
+
+See: [TEST_ARCHITECTURE_PROGRESS.md](docs/testing/TEST_ARCHITECTURE_PROGRESS.md)
+
 ## 📚 Documentation
 
 [Shyntr Documentation Website](https://docs.shyntr.com)

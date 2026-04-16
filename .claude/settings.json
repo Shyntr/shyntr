@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read(./.claude/**)",
+      "Read(./CLAUDE.md)",
+      "Read(./cmd/**)",
+      "Read(./internal/**)",
+      "Read(./pkg/**)",
+      "Read(./config/**)",
+      "Read(./docs/**)",
+      "Read(./k6/**)",
+      "Read(./quickstart/**)",
+      "Read(./go.mod)",
+      "Read(./go.sum)",
+      "Read(./README.md)",
+      "Read(./CONFIG.md)",
+      "Read(./CLI.md)",
+      "Read(./CONTRIBUTING.md)",
+      "Read(./Makefile)",
+      "Read(./Dockerfile)",
+      "Read(./docker-compose*.yml)",
+      "Bash(git status)",
+      "Bash(git diff -- *)",
+      "Bash(git diff --name-only *)",
+      "Bash(git ls-files)",
+      "Bash(ls *)",
+      "Bash(find cmd internal pkg config docs k6 quickstart -type f *)",
+      "Bash(grep -R --line-number --include=*.go *)",
+      "Bash(go build ./cmd/server*)",
+      "Bash(go test ./... -run *)",
+      "Bash(go test ./... -count=1*)",
+      "Bash(go test ./internal/...*)",
+      "Bash(go test ./pkg/...*)",
+      "Bash(go test ./cmd/...*)",
+      "Bash(go vet ./...)",
+      "Bash(go generate ./...)",
+      "Bash(gofmt -w *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/secrets/**)",
+      "Read(./**/*secret*.*)",
+      "Read(./**/*token*.*)",
+      "Read(./**/*credential*.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/*.p12)",
+      "Read(./**/*.pfx)",
+      "Read(./**/id_rsa)",
+      "Read(./**/id_ed25519)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(nc *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(docker system prune*)",
+      "Bash(docker compose down -v*)",
+      "Bash(kubectl delete *)",
+      "Bash(terraform destroy*)"
+    ]
+  },
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'files=$(git diff --name-only -- \"*.go\"); if [ -n \"$files\" ]; then gofmt -w $files; fi'"
+          }
+        ]
+      }
+    ]
+  }
+}

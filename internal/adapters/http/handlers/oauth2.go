@@ -463,7 +463,8 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 // @Router /oauth2/logout [get]
 // @Router /t/{tenant_id}/oauth2/logout [get]
 func (h *OAuth2Handler) Logout(c *gin.Context) {
-	tenantID := h.resolveTenantID(c)
+	routeTenantID := h.resolveTenantID(c)
+	tenantID := routeTenantID
 	postLogoutRedirectURI := c.Query("post_logout_redirect_uri")
 	idTokenHint := c.Query("id_token_hint")
 	state := c.Query("state")
@@ -490,8 +491,12 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 					if len(claims.Audience) > 0 {
 						idTokenAudience = claims.Audience[0]
 					}
-					if claims.TenantID != "" {
+					if claims.TenantID != "" && claims.TenantID == routeTenantID {
 						tenantID = claims.TenantID
+					} else if claims.TenantID != "" && claims.TenantID != routeTenantID {
+						logger.FromGin(c).Warn("Logout tenant mismatch detected", zap.String("route_tenant_id", routeTenantID), zap.String("token_tenant_id", claims.TenantID))
+						postLogoutRedirectURI = ""
+						idTokenAudience = ""
 					}
 				} else {
 					logger.FromGin(c).Warn("id_token_hint signature verification failed during logout attempt", zap.Error(err))
@@ -563,7 +568,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	var lastLogin *model.LoginRequest
 	if subject != "" {
 		var err error
-		lastLogin, err = h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, subject)
+		lastLogin, err = h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, tenantID, subject)
 		if err == nil {
 			if len(lastLogin.Context) > 0 {
 				var ctxData map[string]interface{}
@@ -641,6 +646,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 // @Router /t/{tenant_id}/userinfo [get]
 func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	tenantID := h.resolveTenantID(c)
+	ctx := context.WithValue(c.Request.Context(), consts.ContextKeyTenantID, tenantID)
 	token := fosite.AccessTokenFromRequest(c.Request)
 	if token == "" {
 		payload.WriteOAuth2Error(c, http.StatusUnauthorized, "invalid_token", "Access token is missing.", nil)
@@ -648,7 +654,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	}
 
 	session := model.NewJWTSession("", "")
-	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(c.Request.Context(), token, fosite.AccessToken, session)
+	_, accessRequest, err := h.Provider.GetFosite(tenantID).IntrospectToken(ctx, token, fosite.AccessToken, session)
 	if err != nil {
 		payload.WriteOAuth2Error(c, http.StatusUnauthorized, "invalid_token", "The access token is invalid, expired, or revoked.", err)
 		return
@@ -668,7 +674,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	var userCtx map[string]interface{}
 
 	if subject != "" {
-		loginReq, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(c, subject)
+		loginReq, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, tenantID, subject)
 		if err == nil && len(loginReq.Context) > 0 {
 			json.Unmarshal(loginReq.Context, &userCtx)
 		}
@@ -690,7 +696,7 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 		}
 	}
 
-	scopeEntities, err := h.ScopeUse.GetScopesByNames(c.Request.Context(), tenantID, grantedScopes)
+	scopeEntities, err := h.ScopeUse.GetScopesByNames(ctx, tenantID, grantedScopes)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to fetch dynamic scopes", zap.Error(err))
 	}

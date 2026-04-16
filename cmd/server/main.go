@@ -1140,7 +1140,7 @@ func runServer() {
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, outboundPolicyUseCase, outboundGuard, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, auditLogger, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()

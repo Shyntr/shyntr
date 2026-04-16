@@ -10,6 +10,24 @@ permissions:
   packages: write
 
 jobs:
+  e2e-main:
+    name: Main Lane
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.25.7
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.7'
+          check-latest: true
+
+      # Federation and SAML flows are kept in a dedicated lane job to isolate bind-sensitive fixtures.
+      - name: Run Main Lane Command
+        run: go test ./internal/adapters/http/handlers -run 'TestOIDCE2E_(CoreFlow|TenantIsolation|RedirectURIExactMatching|Logout_|FederationCallback|SAMLACS|SAMLSLO)' -count=1
+
   release-docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest

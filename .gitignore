@@ -37,3 +37,12 @@ go.work.sum
 .qodo/
 k6/*
 .aider*
+
+# macOS metadata
+.DS_Store
+
+# Repository-local Codex files are versioned on purpose.
+# Ignore only local throwaway variants.
+.codex/*.local.toml
+.codex/*.bak
+.codex/*.tmp

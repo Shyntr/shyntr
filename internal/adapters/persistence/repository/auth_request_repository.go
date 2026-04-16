@@ -56,9 +56,9 @@ func (r *authRequestRepository) GetAuthenticatedLoginRequest(ctx context.Context
 	return dbModel.ToDomain(), nil
 }
 
-func (r *authRequestRepository) GetAuthenticatedLoginRequestBySubject(ctx context.Context, userID string) (*model.LoginRequest, error) {
+func (r *authRequestRepository) GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, userID string) (*model.LoginRequest, error) {
 	var dbModel models.LoginRequestGORM
-	if err := r.db.WithContext(ctx).First(&dbModel, "subject = ? AND authenticated = ?", userID, true).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&dbModel, "tenant_id = ? AND subject = ? AND authenticated = ?", tenantID, userID, true).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("login request not found")
 		}

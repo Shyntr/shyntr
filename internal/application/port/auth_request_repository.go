@@ -11,7 +11,7 @@ type AuthRequestRepository interface {
 	GetLoginRequest(ctx context.Context, id string) (*model.LoginRequest, error)
 	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error)
 	GetAuthenticatedLoginRequest(ctx context.Context, id string) (*model.LoginRequest, error)
-	GetAuthenticatedLoginRequestBySubject(ctx context.Context, userID string) (*model.LoginRequest, error)
+	GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, userID string) (*model.LoginRequest, error)
 	GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error)
 	UpdateLoginRequest(ctx context.Context, req *model.LoginRequest) error
 

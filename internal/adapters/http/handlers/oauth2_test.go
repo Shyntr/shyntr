@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"context"
 	"crypto/rsa"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,7 +33,8 @@ import (
 
 func setupTestDB() *gorm.DB {
 	logger.InitLogger("info")
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	dbName := fmt.Sprintf("file:oauth2_handler_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database")
 	}
@@ -76,10 +78,19 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 		Secret:                 "secret",
 		PostLogoutRedirectURIs: pq.StringArray{logoutURI},
 	})
+	db.Create(&models.OAuth2SessionGORM{
+		Signature:   "session-sig-1",
+		RequestID:   "req-1",
+		TenantID:    "default",
+		ClientID:    clientID,
+		Subject:     "user-123",
+		TokenType:   "access_token",
+		Active:      true,
+		SessionData: []byte(`{}`),
+	})
 	keyRepository := repository.NewCryptoKeyRepository(db)
 	keyMgr := utils2.NewKeyManager(keyRepository, cfg)
 	activePrivKey, _, _ := keyMgr.GetActivePrivateKey(context.Background(), "sig")
-
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:        1 * time.Hour,
 		AuthorizeCodeLifespan:      10 * time.Minute,
@@ -129,6 +140,7 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 
 		req, _ := http.NewRequest("GET", "/oauth2/logout?id_token_hint="+validIDToken+"&post_logout_redirect_uri=http://localhost:3000/bye&state=xyz", nil)
 		c.Request = req
+		c.Params = gin.Params{{Key: "tenant_id", Value: "default"}}
 		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: "user-123"})
 		handler.Logout(c)
 
@@ -154,6 +166,23 @@ func TestOAuth2Handler_Logout(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.NotEqual(t, evilURI, w.Header().Get("Location"))
+		assert.Contains(t, w.Body.String(), "Redirect blocked")
+	})
+
+	t.Run("Logout Preserves State With Existing Query", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		validIDToken, err := generateMockIDToken(activePrivKey, "user-123", clientID)
+		assert.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/oauth2/logout?id_token_hint="+validIDToken+"&post_logout_redirect_uri=http://localhost:3000/bye?return=1&state=xyz", nil)
+		c.Request = req
+		c.Params = gin.Params{{Key: "tenant_id", Value: "default"}}
+		req.AddCookie(&http.Cookie{Name: consts.SessionCookieName, Value: "user-123"})
+		handler.Logout(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "Redirect blocked")
 	})
 }

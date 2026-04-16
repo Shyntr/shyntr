@@ -17,7 +17,7 @@ type AuthUseCase interface {
 	GetLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
 	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error)
 	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
-	GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*model.LoginRequest, error)
+	GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, subject string) (*model.LoginRequest, error)
 	GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error)
 	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
@@ -84,8 +84,11 @@ func (u *authUseCase) GetAuthenticatedLoginRequest(ctx context.Context, challeng
 	return u.repo.GetAuthenticatedLoginRequest(ctx, challenge)
 }
 
-func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context, subject string) (*model.LoginRequest, error) {
-	return u.repo.GetAuthenticatedLoginRequestBySubject(ctx, subject)
+func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, subject string) (*model.LoginRequest, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant id must not be empty")
+	}
+	return u.repo.GetAuthenticatedLoginRequestBySubject(ctx, tenantID, subject)
 }
 
 func (u *authUseCase) GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error) {
@@ -123,8 +126,9 @@ func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, 
 		return nil, err
 	}
 	u.audit.Log(req.ID, subject, "auth.login.accept", actorIP, userAgent, map[string]interface{}{
-		"client_id": req.ClientID,
-		"protocol":  req.Protocol,
+		"client_id":         req.ClientID,
+		"protocol":          req.Protocol,
+		"relying_party_url": req.RequestURL,
 	})
 
 	return req, nil
@@ -146,6 +150,7 @@ func (u *authUseCase) RejectLoginRequest(ctx context.Context, challenge string, 
 		"protocol":          req.Protocol,
 		"error_name":        errName,
 		"error_description": errDesc,
+		"relying_party_url": req.RequestURL,
 	})
 	return req, nil
 }
