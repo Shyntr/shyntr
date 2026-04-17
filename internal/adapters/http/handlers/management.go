@@ -1251,7 +1251,7 @@ func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
 	// Use case handles the "*****" / empty password sentinel (keep existing).
 	if err := h.LDAPConnUse.UpdateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent()); err != nil {
 		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
-			c.Error(payload.NewOperationAppError(http.StatusForbidden, "LDAP connection", "update", err))
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
 			return
 		}
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "update", err))
@@ -1280,6 +1280,10 @@ func (h *ManagementHandler) DeleteLDAPConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	if err := h.LDAPConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+			return
+		}
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "delete", err))
 		return
 	}
@@ -1301,6 +1305,10 @@ func (h *ManagementHandler) TestLDAPConnection(c *gin.Context) {
 	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
 	if err := h.LDAPConnUse.TestConnection(c.Request.Context(), tenantID, id); err != nil {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+			return
+		}
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "test", err))
 		return
 	}
