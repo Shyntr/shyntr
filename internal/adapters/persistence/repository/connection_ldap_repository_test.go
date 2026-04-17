@@ -3,8 +3,8 @@ package repository_test
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
@@ -20,7 +20,7 @@ var testLDAPAppSecret = []byte("test-secret-key-must-be-32bytes!")
 
 func setupLDAPRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dbName := fmt.Sprintf("file:ldap_repo_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	dbName := filepath.Join(t.TempDir(), fmt.Sprintf("%s.db", t.Name()))
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.LDAPConnectionGORM{}))
@@ -103,11 +103,24 @@ func TestLDAPConnectionRepository_TenantIsolation(t *testing.T) {
 	// Tenant B cannot access tenant A's connection.
 	_, err := repo.GetByTenantAndID(ctx, "tnt_B", connA.ID)
 	assert.Error(t, err, "cross-tenant GetByTenantAndID must fail")
-	assert.Equal(t, "ldap connection not found", err.Error())
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionNotFound)
 
 	// Tenant A cannot delete tenant B's connection.
 	err = repo.Delete(ctx, "tnt_A", connB.ID)
 	assert.Error(t, err, "cross-tenant Delete must fail")
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionNotFound)
+
+	// Tenant A cannot update tenant B's connection.
+	connB.Name = "pwned"
+	connB.TenantID = "tnt_A"
+	err = repo.Update(ctx, connB)
+	assert.Error(t, err, "cross-tenant Update must fail")
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionNotFound)
+
+	fetched, fetchErr := repo.GetByTenantAndID(ctx, "tnt_B", connB.ID)
+	require.NoError(t, fetchErr)
+	assert.Equal(t, "Dir B", fetched.Name)
+	assert.Equal(t, "tnt_B", fetched.TenantID)
 }
 
 func TestLDAPConnectionRepository_Update(t *testing.T) {
@@ -160,6 +173,28 @@ func TestLDAPConnectionRepository_ListByTenant(t *testing.T) {
 	list, err := repo.ListByTenant(ctx, "tnt_list")
 	require.NoError(t, err)
 	assert.Len(t, list, 3, "ListByTenant must return only the requested tenant's connections")
+}
+
+func TestLDAPConnectionRepository_ListByTenant_RequiresTenant(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+
+	list, err := repo.ListByTenant(context.Background(), "")
+	require.Error(t, err)
+	assert.Nil(t, list)
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionTenantRequired)
+}
+
+func TestLDAPConnectionRepository_GetConnectionCount_RequiresTenant(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+
+	count, err := repo.GetConnectionCount(context.Background(), "")
+	require.Error(t, err)
+	assert.Zero(t, count)
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionTenantRequired)
 }
 
 func TestLDAPConnectionRepository_AnonymousBind(t *testing.T) {

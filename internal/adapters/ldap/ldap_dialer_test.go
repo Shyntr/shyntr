@@ -141,7 +141,7 @@ func TestLDAPDialer_Search_FindsAdminEntry(t *testing.T) {
 
 	session, err := dialer.Dial(ctx, conn)
 	require.NoError(t, err)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// The base object itself always exists.
 	entries, err := session.Search(ctx, "(objectClass=*)", []string{"dn"})
@@ -165,7 +165,7 @@ func TestLDAPDialer_Authenticate_AdminUser(t *testing.T) {
 
 	session, err := dialer.Dial(ctx, conn)
 	require.NoError(t, err)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Correct password.
 	err = session.Authenticate(ctx, ldapAdminDN, ldapAdminPW)

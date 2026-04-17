@@ -17,6 +17,9 @@ type ldapConnectionRepository struct {
 	appSecret []byte
 }
 
+var ErrLDAPConnectionNotFound = errors.New("ldap connection not found")
+var ErrLDAPConnectionTenantRequired = errors.New("tenant_id is required")
+
 // NewLDAPConnectionRepository creates a repository that transparently encrypts
 // and decrypts BindPassword using AES-256-GCM (same key as CryptoKey.KeyData).
 // appSecret must be exactly 32 bytes (enforced by config.LoadConfig).
@@ -79,7 +82,7 @@ func (r *ldapConnectionRepository) GetByID(ctx context.Context, id string) (*mod
 	var dbModel models.LDAPConnectionGORM
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("ldap connection not found")
+			return nil, ErrLDAPConnectionNotFound
 		}
 		return nil, err
 	}
@@ -90,7 +93,7 @@ func (r *ldapConnectionRepository) GetByTenantAndID(ctx context.Context, tenantI
 	var dbModel models.LDAPConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("ldap connection not found")
+			return nil, ErrLDAPConnectionNotFound
 		}
 		return nil, err
 	}
@@ -98,27 +101,39 @@ func (r *ldapConnectionRepository) GetByTenantAndID(ctx context.Context, tenantI
 }
 
 func (r *ldapConnectionRepository) GetConnectionCount(ctx context.Context, tenantID string) (int64, error) {
-	var count int64
-	query := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{})
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	if tenantID == "" {
+		return 0, ErrLDAPConnectionTenantRequired
 	}
-	if err := query.Count(&count).Error; err != nil {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{}).
+		Where("tenant_id = ?", tenantID).
+		Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
 func (r *ldapConnectionRepository) Update(ctx context.Context, conn *model.LDAPConnection) error {
+	if conn == nil || conn.TenantID == "" || conn.ID == "" {
+		return ErrLDAPConnectionNotFound
+	}
 	dbModel := models.FromDomainLDAPConnection(conn)
 	encrypted, err := r.encryptBindPassword(conn.BindPassword)
 	if err != nil {
 		return err
 	}
 	dbModel.BindPasswordEncrypted = encrypted
-	return r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{}).
-		Where("id = ?", conn.ID).
-		Updates(dbModel).Error
+	result := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{}).
+		Where("id = ? AND tenant_id = ?", conn.ID, conn.TenantID).
+		Omit("tenant_id").
+		Updates(dbModel)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrLDAPConnectionNotFound
+	}
+	return nil
 }
 
 func (r *ldapConnectionRepository) Delete(ctx context.Context, tenantID, id string) error {
@@ -127,18 +142,19 @@ func (r *ldapConnectionRepository) Delete(ctx context.Context, tenantID, id stri
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("ldap connection not found or already deleted")
+		return ErrLDAPConnectionNotFound
 	}
 	return nil
 }
 
 func (r *ldapConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error) {
-	var dbModels []models.LDAPConnectionGORM
-	query := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{})
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	if tenantID == "" {
+		return nil, ErrLDAPConnectionTenantRequired
 	}
-	if err := query.Find(&dbModels).Error; err != nil {
+	var dbModels []models.LDAPConnectionGORM
+	if err := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{}).
+		Where("tenant_id = ?", tenantID).
+		Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
 	entities := make([]*model.LDAPConnection, 0, len(dbModels))

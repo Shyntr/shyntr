@@ -80,7 +80,10 @@ func (d *ldapDialer) Dial(ctx context.Context, conn *model.LDAPConnection) (port
 func (d *ldapDialer) dialInternal(conn *model.LDAPConnection) (*ldapSession, error) {
 	var opts []ldaplib.DialOpt
 	if conn.TLSInsecureSkipVerify {
-		opts = append(opts, ldaplib.DialWithTLSConfig(&tls.Config{InsecureSkipVerify: true})) //nolint:gosec // user-controlled flag
+		opts = append(opts, ldaplib.DialWithTLSConfig(&tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // user-controlled flag
+			MinVersion:         tls.VersionTLS12,
+		}))
 	}
 
 	l, err := ldaplib.DialURL(conn.ServerURL, opts...)
@@ -89,7 +92,10 @@ func (d *ldapDialer) dialInternal(conn *model.LDAPConnection) (*ldapSession, err
 	}
 
 	if conn.StartTLS {
-		tlsCfg := &tls.Config{InsecureSkipVerify: conn.TLSInsecureSkipVerify} //nolint:gosec
+		tlsCfg := &tls.Config{
+			InsecureSkipVerify: conn.TLSInsecureSkipVerify, //nolint:gosec
+			MinVersion:         tls.VersionTLS12,
+		}
 		if err := l.StartTLS(tlsCfg); err != nil {
 			_ = l.Close()
 			return nil, fmt.Errorf("ldap: StartTLS: %w", err)
@@ -115,13 +121,13 @@ type ldapSession struct {
 }
 
 // Authenticate binds as userDN with the supplied password to verify credentials.
-// The password is never logged. On success the connection is rebound to the
-// service account if the session was originally bound.
+// The password is never logged. Callers are expected to Close the session after
+// credential verification; this flow does not rebind to the service account.
 func (s *ldapSession) Authenticate(ctx context.Context, userDN, password string) error {
 	type result struct{ err error }
 	ch := make(chan result, 1)
 	go func() {
-		ch <- result{s.l.Bind(userDN, password)}
+		ch <- result{err: s.l.Bind(userDN, password)}
 	}()
 	select {
 	case r := <-ch:

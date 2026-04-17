@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
@@ -1248,7 +1250,7 @@ func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
 
 	// Use case handles the "*****" / empty password sentinel (keep existing).
 	if err := h.LDAPConnUse.UpdateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		if err.Error() == "ldap connection not found" {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
 			c.Error(payload.NewOperationAppError(http.StatusForbidden, "LDAP connection", "update", err))
 			return
 		}

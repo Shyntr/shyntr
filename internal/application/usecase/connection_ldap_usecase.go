@@ -171,6 +171,9 @@ func (u *ldapConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 }
 
 func (u *ldapConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error) {
+	if tenantID == "" {
+		return u.repo.List(ctx)
+	}
 	return u.repo.ListByTenant(ctx, tenantID)
 }
 
@@ -196,7 +199,7 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 		})
 		return nil, fmt.Errorf("ldap: failed to open session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Build the user search filter by substituting {0} with the sanitised username.
 	filter := conn.UserSearchFilter
@@ -223,7 +226,8 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 			"connection_id": id,
 			"reason":        "user not found",
 		})
-		return nil, fmt.Errorf("ldap: user not found")
+		_ = session.Authenticate(ctx, fmt.Sprintf("cn=__shyntr_not_found__,%s", conn.BaseDN), password)
+		return nil, fmt.Errorf("ldap: authentication failed")
 	}
 
 	userDN := entries[0].DN
@@ -241,12 +245,15 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 // classifyDialError maps a low-level dial error to a stable audit reason category.
 // Raw error strings from the ldap library are never exposed; only the category.
 func classifyDialError(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		msg := err.Error()
 		if strings.Contains(msg, "pool") {
 			return "pool_exhausted"
 		}
 		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "tls") || strings.Contains(msg, "certificate") || strings.Contains(msg, "x509") {

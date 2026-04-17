@@ -70,6 +70,8 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 	// Validate the login challenge is still active.
 	loginReq, err := h.auth.GetLoginRequest(c.Request.Context(), req.LoginChallenge)
 	if err != nil {
+		// TODO: Distinguish inactive/replayed login challenges once the auth use case
+		// exposes a typed error instead of a string-only message.
 		payload.WriteOIDCError(c, http.StatusNotFound, "login_request_not_found", "The login request was not found or has expired.", err)
 		return
 	}
@@ -131,7 +133,13 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 	// Merge login_claims into the existing login request context.
 	existingCtx := make(map[string]interface{})
 	if len(loginReq.Context) > 0 {
-		_ = json.Unmarshal(loginReq.Context, &existingCtx)
+		if err := json.Unmarshal(loginReq.Context, &existingCtx); err != nil {
+			logger.FromGin(c).Warn("LDAP login: failed to parse stored login request context, overwriting",
+				zap.Error(err),
+				zap.String("protocol", "ldap"),
+			)
+			existingCtx = make(map[string]interface{})
+		}
 	}
 	existingCtx["login_claims"] = finalAttributes
 

@@ -231,6 +231,7 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 	}
 
 	for _, item := range items {
+		isLDAPAuthTarget := item.Target == model.OutboundTargetLDAPAuth
 		var count int64
 		if err := db.Model(&models.OutboundPolicyGORM{}).
 			Where("id = ?", item.ID).
@@ -239,6 +240,20 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 		}
 
 		if count > 0 {
+			if isLDAPAuthTarget {
+				if err := db.Model(&models.OutboundPolicyGORM{}).
+					Where("id = ?", item.ID).
+					Updates(map[string]interface{}{
+						"allowed_path_patterns_json": `[]`,
+						"block_private_ips":          false,
+						"block_loopback_ips":         true,
+						"block_link_local_ips":       true,
+						"block_localhost_names":      true,
+						"require_dns_resolve":        true,
+					}).Error; err != nil {
+					return err
+				}
+			}
 			continue
 		}
 
@@ -249,7 +264,7 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 		if item.Target == model.OutboundTargetLDAPAuth {
 			schemesJSON = string(allowedSchemesLDAP)
 			portsJSON = string(allowedPortsLDAP)
-			pathsJSON = `["/*"]`
+			pathsJSON = `[]`
 		}
 
 		row := &models.OutboundPolicyGORM{
@@ -262,7 +277,7 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			AllowedHostPatternsJSON: string(allowedHostPatternsJSON),
 			AllowedPathPatternsJSON: pathsJSON,
 			AllowedPortsJSON:        portsJSON,
-			BlockPrivateIPs:         true,
+			BlockPrivateIPs:         !isLDAPAuthTarget,
 			BlockLoopbackIPs:        true,
 			BlockLinkLocalIPs:       true,
 			BlockMulticastIPs:       true,
@@ -275,6 +290,19 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 
 		if err := db.Create(row).Error; err != nil {
 			return err
+		}
+		if isLDAPAuthTarget {
+			if err := db.Model(&models.OutboundPolicyGORM{}).
+				Where("id = ?", row.ID).
+				Updates(map[string]interface{}{
+					"block_private_ips":     false,
+					"block_loopback_ips":    true,
+					"block_link_local_ips":  true,
+					"block_localhost_names": true,
+					"require_dns_resolve":   true,
+				}).Error; err != nil {
+				return err
+			}
 		}
 
 		logger.Log.Info("Seeded global outbound policy",

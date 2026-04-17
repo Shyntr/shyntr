@@ -50,13 +50,19 @@ func (r *stubLDAPRepo) List(_ context.Context) ([]*model.LDAPConnection, error) 
 // ---------------------------------------------------------------------------
 
 type stubLDAPSession struct {
-	entries   []model.LDAPEntry
-	searchErr error
-	authErr   error
+	entries    []model.LDAPEntry
+	searchErr  error
+	authErr    error
+	lastFilter string
+	authCalls  []string
 }
 
-func (s *stubLDAPSession) Authenticate(_ context.Context, _, _ string) error { return s.authErr }
-func (s *stubLDAPSession) Search(_ context.Context, _ string, _ []string) ([]model.LDAPEntry, error) {
+func (s *stubLDAPSession) Authenticate(_ context.Context, userDN, _ string) error {
+	s.authCalls = append(s.authCalls, userDN)
+	return s.authErr
+}
+func (s *stubLDAPSession) Search(_ context.Context, filter string, _ []string) ([]model.LDAPEntry, error) {
+	s.lastFilter = filter
 	return s.entries, s.searchErr
 }
 func (s *stubLDAPSession) Close() error { return nil }
@@ -215,6 +221,8 @@ func TestAuthenticateUser_UserNotFound(t *testing.T) {
 	require.True(t, audit.hasAction("auth.ldap.bind.fail"))
 	call, _ := audit.lastWithAction("auth.ldap.bind.fail")
 	assert.Equal(t, "user not found", call.details["reason"])
+	require.Len(t, session.authCalls, 1)
+	assert.Equal(t, "cn=__shyntr_not_found__,", session.authCalls[0])
 }
 
 func TestAuthenticateUser_LDAPUnreachable(t *testing.T) {
@@ -266,6 +274,8 @@ func TestAuthenticateUser_FilterInjection_CannotBind(t *testing.T) {
 	assert.Nil(t, entry)
 	// Must emit bind.fail, not panic or succeed.
 	assert.True(t, audit.hasAction("auth.ldap.bind.fail"))
+	assert.Equal(t, "(uid="+ldapEscapeFilter("alice)(uid=*")+")", session.lastFilter)
+	assert.NotContains(t, session.lastFilter, "alice)(uid=*")
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +322,7 @@ func TestClassifyDialError(t *testing.T) {
 		expected string
 	}{
 		{"context deadline exceeded", context.DeadlineExceeded, "timeout"},
-		{"context cancelled", context.Canceled, "timeout"},
+		{"context cancelled", context.Canceled, "canceled"},
 		{"pool exhausted", fmt.Errorf("ldap: connection pool full: %w", context.DeadlineExceeded), "pool_exhausted"},
 		{"tls error", errors.New("tls: failed to verify certificate"), "tls_error"},
 		{"certificate error", errors.New("x509: certificate signed by unknown authority"), "tls_error"},
@@ -340,6 +350,7 @@ type extendedStubLDAPRepo struct {
 	updated   *model.LDAPConnection
 	deleted   bool
 	listed    []*model.LDAPConnection
+	allListed []*model.LDAPConnection
 	listErr   error
 	createErr error
 	updateErr error
@@ -364,6 +375,9 @@ func (r *extendedStubLDAPRepo) Delete(_ context.Context, _, _ string) error {
 }
 func (r *extendedStubLDAPRepo) ListByTenant(_ context.Context, _ string) ([]*model.LDAPConnection, error) {
 	return r.listed, r.listErr
+}
+func (r *extendedStubLDAPRepo) List(_ context.Context) ([]*model.LDAPConnection, error) {
+	return r.allListed, r.listErr
 }
 
 // noopScopeUseCase satisfies ScopeUseCase with no-ops.
@@ -550,6 +564,21 @@ func TestListConnections_Success(t *testing.T) {
 	list, err := uc.ListConnections(context.Background(), "tnt")
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
+}
+
+func TestListConnections_GlobalSuccess(t *testing.T) {
+	conns := []*model.LDAPConnection{
+		{ID: "c1", TenantID: "tnt-a", Name: "C1"},
+		{ID: "c2", TenantID: "tnt-b", Name: "C2"},
+	}
+	repo := &extendedStubLDAPRepo{allListed: conns}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	list, err := uc.ListConnections(context.Background(), "")
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+	assert.Equal(t, "tnt-a", list[0].TenantID)
+	assert.Equal(t, "tnt-b", list[1].TenantID)
 }
 
 func TestTestConnection_Success(t *testing.T) {

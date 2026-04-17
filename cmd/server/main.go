@@ -984,7 +984,12 @@ func main() {
 				clientName = "LDAP Directory"
 			}
 			ldapRepo := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
-			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), audit.NewAuditLogger(db), nil, nil)
+			auditLogger := audit.NewAuditLogger(db)
+			scopeRepository := repository.NewScopeRepository(db)
+			scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
+			outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+			outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), auditLogger, scopeUseCase, outboundGuard)
 			conn, connErr := ldapUseCase.CreateConnection(context.Background(), &model.LDAPConnection{
 				TenantID:              tenantID,
 				Name:                  clientName,
@@ -1024,22 +1029,21 @@ func main() {
 			}
 			ldapRepo := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
 			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), audit.NewAuditLogger(db), nil, nil)
-			conn, connErr := ldapUseCase.GetConnection(context.Background(), "", args[0])
+			conn, connErr := ldapUseCase.GetConnection(context.Background(), tenantID, args[0])
 			if connErr != nil {
 				log.Fatalf("Not found: %v", connErr)
 			}
 			printJSON(conn)
 		},
 	}
+	getLDAPConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "", "Tenant ID (Required)")
+	_ = getLDAPConnectionCmd.MarkFlagRequired("tenant-id")
 
 	var deleteLDAPConnectionCmd = &cobra.Command{
 		Use:   "delete-ldap-connection [id]",
 		Short: "Delete LDAP Connection",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			if tenantID == "" {
-				log.Fatal("--tenant-id is required")
-			}
 			cfg := config.LoadConfig()
 			db, err := persistence.ConnectDB(cfg)
 			if err != nil {
