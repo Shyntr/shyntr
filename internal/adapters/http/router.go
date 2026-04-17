@@ -53,7 +53,7 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, outboundGuard)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, outboundGuard)
 	ldapHandler := handlers.NewLDAPHandler(cfg, authUseCase, ldapConnectionUseCase, webhookUseCase, attrMapper)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
@@ -195,6 +195,7 @@ func SetupRouter(
 		{
 			// Dashboard Stats
 			mgmtGroup.GET("/dashboard/stats", mgmtHandler.GetDashboardStats)
+			mgmtGroup.GET("/dashboard/auth-activity", mgmtHandler.GetAuthActivity)
 
 			// Tenants
 			mgmtGroup.GET("/tenants", mgmtHandler.ListTenants)

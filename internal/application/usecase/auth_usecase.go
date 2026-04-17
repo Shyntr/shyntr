@@ -22,7 +22,7 @@ type AuthUseCase interface {
 	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
 	MarkLoginAsProviderStarted(ctx context.Context, challenge, provider, connectionID string, providerContext map[string]interface{}, actorIP, userAgent string) error
-	CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
+	CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName, providerType string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 
 	CreateConsentRequest(ctx context.Context, req *model.ConsentRequest) (*model.ConsentRequest, error)
 	GetConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error)
@@ -186,7 +186,7 @@ func (u *authUseCase) MarkLoginAsProviderStarted(ctx context.Context, challenge,
 	return nil
 }
 
-func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
+func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName, providerType string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error) {
 	req, err := u.repo.GetLoginRequest(ctx, challenge)
 	if err != nil {
 		return nil, err
@@ -212,6 +212,7 @@ func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subj
 	u.audit.Log(req.ID, req.Subject, "provider.login.success", actorIP, userAgent, map[string]interface{}{
 		"client_id":          req.ClientID,
 		"connection":         connectionName,
+		"provider_type":      providerType,
 		"requested_scopes":   req.RequestedScope,
 		"requested_audience": req.RequestedAudience,
 		"protocol":           req.Protocol,

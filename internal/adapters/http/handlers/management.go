@@ -27,6 +27,7 @@ type ManagementHandler struct {
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
+	AuditUse         usecase.AuditUseCase
 	OutboundGuard    port.OutboundGuard
 }
 
@@ -34,10 +35,11 @@ func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAut
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
 	LDAPConnUse usecase.LDAPConnectionUseCase,
-	TenantUse usecase.TenantUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
+	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
-		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse, OutboundGuard: OutboundGuard}
+		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse,
+		AuditUse: AuditUse, OutboundGuard: OutboundGuard}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -77,6 +79,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 		TotalSAMLClients     int64                    `json:"total_saml_clients"`
 		TotalSAMLConnections int64                    `json:"total_saml_connections"`
 		TotalOIDCConnections int64                    `json:"total_oidc_connections"`
+		TotalLDAPConnections int64                    `json:"total_ldap_connections"`
 		TotalTenants         int64                    `json:"total_tenants"`
 		PublicClients        int64                    `json:"public_clients"`
 		ConfidentialClients  int64                    `json:"confidential_clients"`
@@ -89,6 +92,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	stats.TotalSAMLClients, _ = h.SAMLClientUse.GetClientCount(ctx, tenantID)
 	stats.TotalSAMLConnections, _ = h.SAMLConnUse.GetConnectionCount(ctx, tenantID)
 	stats.TotalOIDCConnections, _ = h.OIDCConnUse.GetConnectionCount(ctx, tenantID)
+	stats.TotalLDAPConnections, _ = h.LDAPConnUse.GetConnectionCount(ctx, tenantID)
 	stats.TotalTenants, _ = h.TenantUse.GetCount(ctx)
 
 	recentLogins, _ := h.AuthReq.GetRecentLogins(ctx, tenantID, 10)
@@ -106,6 +110,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 			"id":              l.ID,
 			"subject":         l.Subject,
 			"client_id":       l.ClientID,
+			"protocol":        l.Protocol,
 			"saml_request_id": l.SAMLRequestID,
 			"status":          status,
 			"timestamp":       l.CreatedAt,
@@ -114,6 +119,27 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// GetAuthActivity godoc
+// @Summary Get Authentication Activity
+// @Description Retrieves real-time authentication success and failure counts by protocol for a given time range across all tenants.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.AuthActivity
+// @Router /admin/management/dashboard/auth-activity [get]
+func (h *ManagementHandler) GetAuthActivity(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	activity, err := h.AuditUse.GetAuthActivity(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Auth activity", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, activity)
 }
 
 // ListTenants godoc

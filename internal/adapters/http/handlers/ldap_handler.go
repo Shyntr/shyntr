@@ -148,6 +148,7 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 		req.LoginChallenge,
 		subject,
 		conn.Name,
+		"ldap",
 		existingCtx,
 		c.ClientIP(),
 		c.Request.UserAgent(),

@@ -347,6 +347,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		loginChallenge,
 		subject,
 		conn.Name,
+		"saml",
 		existingCtx,
 		c.ClientIP(),
 		c.Request.UserAgent(),

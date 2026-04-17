@@ -74,6 +74,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
 	auditLogger := audit.NewAuditLogger(db)
+	auditLogRepository := repository.NewAuditLogRepository(db)
+	auditUseCase := usecase.NewAuditUseCase(auditLogRepository)
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
@@ -85,7 +87,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	// These tests only cover tenant/client routes, so LDAPConnUse is intentionally nil.
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, nil, tenantUseCase, outboundGuard)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, nil, tenantUseCase, auditUseCase, outboundGuard)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -95,6 +97,7 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	r.DELETE("/tenants/:id", handler.DeleteTenant)
 	r.GET("/clients/tenant/:tenant_id", handler.ListClientsByTenant)
 	r.POST("/clients", handler.CreateClient)
+	r.GET("/admin/management/dashboard/auth-activity", handler.GetAuthActivity)
 
 	return r, db
 }
