@@ -11,16 +11,24 @@ Shyntr follows the **12-Factor App** methodology. All configurations are managed
 | `SWAGGER_PORT`       | `7498`                  | The port number on which the **Swagger/OpenAPI API** runs.                                                                                                                                                          |
 | `ISSUER_URL`         | `http://localhost:7496` | The authoritative base URL of the Identity Hub. **CRITICAL:** This value is embedded into the `iss` claim of all JWT Access and ID Tokens. Downstream resource servers will reject tokens if this does not match exactly, and as the base for SAML metadata endpoints. |
 | `LOG_LEVEL`          | `info`                  | Defines the verbosity of the logger. Valid values: `debug`, `info`, `warn`, `error`, `fatal`.                                                                                                                                                                          |
-| `GO_ENV`             | `development`           | Setting this to `production` switches the logger output to JSON format and disables human-readable console colors.                                                                                                                                                     |
-| `GIN_MODE`           | `debug`                 | Set to `release` in production to disable Gin framework's route debugging output and optimize routing performance.                                                                                                                                                     |
+| `DEVELOPMENT`        | `false`                 | Application config flag loaded by `config/config.go`. In current code it is used by webhook URL validation to relax development-only restrictions.                                                                                                                                                     |
+
+### Framework / Process Environment
+
+The following environment variables affect runtime behavior, but they are **not loaded through `config/config.go`**:
+
+| Environment Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `GO_ENV` | `development` | Read directly by the logger. Setting this to `production` switches logger output to the production Zap configuration. |
+| `GIN_MODE` | Framework default | Gin framework environment variable. It is framework-level behavior, not part of the Shyntr config loader. |
 
 ## 2. Database Configuration
 
 | Environment Variable | Default Value | Description |
 | :--- | :--- | :--- |
 | `DSN` (or `DATABASE_URL`) | `postgres://shyntr:secretpassword@localhost:5432/shyntr?sslmode=disable` | The PostgreSQL connection string. |
-| `DB_MAX_IDLE_CONNS` | `10` | The maximum number of connections in the idle connection pool. |
-| `DB_MAX_OPEN_CONNS` | `100` | The maximum number of open connections to the database. |
+| `DB_MAX_IDLE_CONNS` | `20` | The maximum number of connections in the idle connection pool. |
+| `DB_MAX_OPEN_CONNS` | `80` | The maximum number of open connections to the database. |
 
 ## 3. Cryptography & Security
 
@@ -92,8 +100,8 @@ These URLs tell Shyntr where your custom front-end application (Auth Portal) is 
 
 | Environment Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:3274` | Comma-separated list of origins allowed to call the **Public API**. |
-| `ADMIN_CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:3274,http://localhost:7497` | Comma-separated list of origins allowed to call the **Admin API**. |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of origins allowed to call the **Public API**. |
+| `ADMIN_CORS_ALLOWED_ORIGINS` | `http://localhost:3010,http://localhost:3000,http://localhost:3274,http://localhost:7497` | Comma-separated list of origins allowed to call the **Admin API**. |
 
 ## 7. Multi-Tenancy
 

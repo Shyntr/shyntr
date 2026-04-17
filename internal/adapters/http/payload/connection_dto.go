@@ -138,6 +138,88 @@ func (req *CreateSAMLConnectionRequest) ToDomain() *model.SAMLConnection {
 	}
 }
 
+// --- LDAP Connection DTOs ---
+
+// CreateLDAPConnectionRequest is accepted on POST and PUT.
+// BindPassword is accepted in requests but never returned in responses.
+type CreateLDAPConnectionRequest struct {
+	ID                    string                                `json:"id" example:"conn_ldap_123"`
+	TenantID              string                                `json:"tenant_id" binding:"required" example:"tnt_alpha01"`
+	Name                  string                                `json:"name" binding:"required" example:"Corporate AD"`
+	ServerURL             string                                `json:"server_url" binding:"required" example:"ldaps://ldap.corp.example.com:636"`
+	BindDN                string                                `json:"bind_dn" example:"cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com"`
+	BindPassword          string                                `json:"bind_password" example:"s3cr3t"` // write-only; never in response
+	BaseDN                string                                `json:"base_dn" binding:"required" example:"dc=corp,dc=example,dc=com"`
+	UserSearchFilter      string                                `json:"user_search_filter" example:"(sAMAccountName={0})"`
+	UserSearchAttributes  []string                              `json:"user_search_attributes" example:"cn,mail,memberOf"`
+	GroupSearchFilter     string                                `json:"group_search_filter" example:"(member={0})"`
+	GroupSearchBaseDN     string                                `json:"group_search_base_dn" example:"ou=Groups,dc=corp,dc=example,dc=com"`
+	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	StartTLS              bool                                  `json:"start_tls" example:"false"`
+	TLSInsecureSkipVerify bool                                  `json:"tls_insecure_skip_verify" example:"false"`
+}
+
+// LDAPConnectionResponse is returned by all read endpoints.
+// BindPassword is intentionally omitted.
+type LDAPConnectionResponse struct {
+	ID                    string                                `json:"id" example:"conn_ldap_123"`
+	TenantID              string                                `json:"tenant_id" example:"tnt_alpha01"`
+	Name                  string                                `json:"name" example:"Corporate AD"`
+	ServerURL             string                                `json:"server_url" example:"ldaps://ldap.corp.example.com:636"`
+	BindDN                string                                `json:"bind_dn" example:"cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com"`
+	BaseDN                string                                `json:"base_dn" example:"dc=corp,dc=example,dc=com"`
+	UserSearchFilter      string                                `json:"user_search_filter"`
+	UserSearchAttributes  []string                              `json:"user_search_attributes"`
+	GroupSearchFilter     string                                `json:"group_search_filter"`
+	GroupSearchBaseDN     string                                `json:"group_search_base_dn"`
+	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	StartTLS              bool                                  `json:"start_tls"`
+	TLSInsecureSkipVerify bool                                  `json:"tls_insecure_skip_verify"`
+	Active                bool                                  `json:"active" example:"true"`
+	CreatedAt             string                                `json:"created_at" example:"2026-03-14T12:00:00Z"`
+	UpdatedAt             string                                `json:"updated_at,omitempty"`
+}
+
+func (req *CreateLDAPConnectionRequest) ToDomain() *model.LDAPConnection {
+	return &model.LDAPConnection{
+		ID:                    req.ID,
+		TenantID:              req.TenantID,
+		Name:                  req.Name,
+		ServerURL:             normalizeURL(req.ServerURL),
+		BindDN:                req.BindDN,
+		BindPassword:          req.BindPassword,
+		BaseDN:                req.BaseDN,
+		UserSearchFilter:      req.UserSearchFilter,
+		UserSearchAttributes:  req.UserSearchAttributes,
+		GroupSearchFilter:     req.GroupSearchFilter,
+		GroupSearchBaseDN:     req.GroupSearchBaseDN,
+		AttributeMapping:      req.AttributeMapping,
+		StartTLS:              req.StartTLS,
+		TLSInsecureSkipVerify: req.TLSInsecureSkipVerify,
+	}
+}
+
+func FromDomainLDAPConnection(c *model.LDAPConnection) *LDAPConnectionResponse {
+	return &LDAPConnectionResponse{
+		ID:                    c.ID,
+		TenantID:              c.TenantID,
+		Name:                  c.Name,
+		ServerURL:             c.ServerURL,
+		BindDN:                c.BindDN,
+		BaseDN:                c.BaseDN,
+		UserSearchFilter:      c.UserSearchFilter,
+		UserSearchAttributes:  c.UserSearchAttributes,
+		GroupSearchFilter:     c.GroupSearchFilter,
+		GroupSearchBaseDN:     c.GroupSearchBaseDN,
+		AttributeMapping:      c.AttributeMapping,
+		StartTLS:              c.StartTLS,
+		TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
+		Active:                c.Active,
+		CreatedAt:             c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:             c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
 func FromDomainSAMLConnection(c *model.SAMLConnection) *SAMLConnectionResponse {
 	return &SAMLConnectionResponse{
 		ID:                       c.ID,

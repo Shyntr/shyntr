@@ -485,6 +485,7 @@ func (s *FositeStore) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, re
 	return s.db.WithContext(ctx).Model(&models.OAuth2SessionGORM{}).
 		Where("signature = ? AND token_type = ? AND tenant_id = ?", signature, "refresh_token", tenantID).
 		Updates(map[string]interface{}{
+			"active":           false,
 			"grace_expires_at": graceExp,
 		}).Error
 }

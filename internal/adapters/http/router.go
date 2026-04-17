@@ -29,6 +29,7 @@ func SetupRouter(
 	samlClientUseCase usecase.SAMLClientUseCase,
 	connectionUseCase usecase.OIDCConnectionUseCase,
 	samlConnectionUseCase usecase.SAMLConnectionUseCase,
+	ldapConnectionUseCase usecase.LDAPConnectionUseCase,
 	managementUseCase usecase.ManagementUseCase,
 	auth2SessionUseCase usecase.OAuth2SessionUseCase,
 	webhookUseCase usecase.WebhookUseCase,
@@ -52,7 +53,8 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
+	ldapHandler := handlers.NewLDAPHandler(cfg, authUseCase, ldapConnectionUseCase, webhookUseCase, attrMapper)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
@@ -157,6 +159,11 @@ func SetupRouter(
 			oidcGroup.GET("/login/:connection_id", oidcHandler.Login)
 			oidcGroup.GET("/callback", oidcHandler.Callback)
 		}
+
+		ldapGroup := tenantGroup.Group("/ldap")
+		{
+			ldapGroup.POST("/login/:connection_id", ldapHandler.Login)
+		}
 	}
 
 	admin := gin.New()
@@ -167,7 +174,7 @@ func SetupRouter(
 	admin.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AdminAllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Admin-Key"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
@@ -188,6 +195,10 @@ func SetupRouter(
 		{
 			// Dashboard Stats
 			mgmtGroup.GET("/dashboard/stats", mgmtHandler.GetDashboardStats)
+			mgmtGroup.GET("/dashboard/auth-activity", mgmtHandler.GetAuthActivity)
+			mgmtGroup.GET("/dashboard/auth-failures", mgmtHandler.GetAuthFailures)
+			mgmtGroup.GET("/dashboard/routing-insights", mgmtHandler.GetRoutingInsights)
+			mgmtGroup.GET("/dashboard/health-summary", mgmtHandler.GetHealthSummary)
 
 			// Tenants
 			mgmtGroup.GET("/tenants", mgmtHandler.ListTenants)
@@ -230,6 +241,14 @@ func SetupRouter(
 			mgmtGroup.POST("/oidc-connections", mgmtHandler.CreateOIDCConnection)
 			mgmtGroup.PUT("/oidc-connections/:id", mgmtHandler.UpdateOIDCConnection)
 			mgmtGroup.DELETE("/oidc-connections/:tenant_id/:id", mgmtHandler.DeleteOIDCConnection)
+
+			// LDAP Connections
+			mgmtGroup.GET("/ldap-connections", mgmtHandler.ListLDAPConnections)
+			mgmtGroup.GET("/ldap-connections/:tenant_id/:id", mgmtHandler.GetLDAPConnection)
+			mgmtGroup.POST("/ldap-connections", mgmtHandler.CreateLDAPConnection)
+			mgmtGroup.PUT("/ldap-connections/:tenant_id/:id", mgmtHandler.UpdateLDAPConnection)
+			mgmtGroup.DELETE("/ldap-connections/:tenant_id/:id", mgmtHandler.DeleteLDAPConnection)
+			mgmtGroup.POST("/ldap-connections/:tenant_id/:id/test", mgmtHandler.TestLDAPConnection)
 
 			//Webhook
 			mgmtGroup.POST("/webhooks", webhookHandler.Create)

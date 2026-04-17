@@ -30,3 +30,15 @@ type SAMLConnectionRepository interface {
 	ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
 	List(ctx context.Context) ([]*model.SAMLConnection, error)
 }
+
+type LDAPConnectionRepository interface {
+	Create(ctx context.Context, conn *model.LDAPConnection) error
+	GetByID(ctx context.Context, id string) (*model.LDAPConnection, error)
+	GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.LDAPConnection, error)
+	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
+	Update(ctx context.Context, conn *model.LDAPConnection) error
+	Delete(ctx context.Context, tenantID, id string) error
+	ListByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error)
+	ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error)
+	List(ctx context.Context) ([]*model.LDAPConnection, error)
+}
