@@ -28,6 +28,7 @@ type ManagementHandler struct {
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
 	AuditUse         usecase.AuditUseCase
+	HealthUse        usecase.HealthUseCase
 	OutboundGuard    port.OutboundGuard
 }
 
@@ -35,11 +36,11 @@ func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAut
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
 	LDAPConnUse usecase.LDAPConnectionUseCase,
-	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
+	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, HealthUse usecase.HealthUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
 		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse,
-		AuditUse: AuditUse, OutboundGuard: OutboundGuard}
+		AuditUse: AuditUse, HealthUse: HealthUse, OutboundGuard: OutboundGuard}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -140,6 +141,66 @@ func (h *ManagementHandler) GetAuthActivity(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, activity)
+}
+
+// GetAuthFailures godoc
+// @Summary Get Authentication Failures
+// @Description Retrieves failure intelligence and breakdown by reason and protocol across all tenants.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.AuthFailures
+// @Router /admin/management/dashboard/auth-failures [get]
+func (h *ManagementHandler) GetAuthFailures(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	failures, err := h.AuditUse.GetAuthFailures(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Auth failures", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, failures)
+}
+
+// GetRoutingInsights godoc
+// @Summary Get Protocol Routing Insights
+// @Description Retrieves patterns of protocol transitions (e.g., OIDC -> SAML) across all authentication flows.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.RoutingInsights
+// @Router /admin/management/dashboard/routing-insights [get]
+func (h *ManagementHandler) GetRoutingInsights(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	insights, err := h.AuditUse.GetRoutingInsights(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Routing insights", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, insights)
+}
+
+// GetHealthSummary godoc
+// @Summary Get Dashboard Health Summary
+// @Description Retrieves a high-level health summary of critical system components (database, keys, migrations).
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} model.HealthSummary
+// @Router /admin/management/dashboard/health-summary [get]
+func (h *ManagementHandler) GetHealthSummary(c *gin.Context) {
+	summary, err := h.HealthUse.GetHealthSummary(c.Request.Context())
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Health summary", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, summary)
 }
 
 // ListTenants godoc

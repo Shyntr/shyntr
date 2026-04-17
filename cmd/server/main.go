@@ -1245,7 +1245,7 @@ func runServer() {
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)
-	healthUseCase := usecase.NewHealthUseCase(healthRepository)
+	healthUseCase := usecase.NewHealthUseCase(healthRepository, keyMgr)
 	outboundPolicyUseCase := usecase.NewOutboundPolicyUseCase(policyRepository, auditLogger)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,

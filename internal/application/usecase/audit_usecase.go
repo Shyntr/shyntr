@@ -11,6 +11,8 @@ import (
 type AuditUseCase interface {
 	GetTenantLogs(ctx context.Context, tenantID string, limit, offset int) ([]*model.AuditLog, error)
 	GetAuthActivity(ctx context.Context, timeRange string) (*model.AuthActivity, error)
+	GetAuthFailures(ctx context.Context, timeRange string) (*model.AuthFailures, error)
+	GetRoutingInsights(ctx context.Context, timeRange string) (*model.RoutingInsights, error)
 }
 
 type auditUseCase struct {
@@ -72,4 +74,54 @@ func (u *auditUseCase) GetAuthActivity(ctx context.Context, timeRange string) (*
 	}
 
 	return activity, nil
+}
+
+func (u *auditUseCase) GetAuthFailures(ctx context.Context, timeRange string) (*model.AuthFailures, error) {
+	var since time.Time
+	now := time.Now()
+
+	switch timeRange {
+	case "1h":
+		since = now.Add(-1 * time.Hour)
+	case "24h":
+		since = now.Add(-24 * time.Hour)
+	case "7d":
+		since = now.Add(-7 * 24 * time.Hour)
+	default:
+		timeRange = "24h"
+		since = now.Add(-24 * time.Hour)
+	}
+
+	metrics, err := u.repo.GetAuthFailureMetrics(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.Range = timeRange
+	return metrics, nil
+}
+
+func (u *auditUseCase) GetRoutingInsights(ctx context.Context, timeRange string) (*model.RoutingInsights, error) {
+	var since time.Time
+	now := time.Now()
+
+	switch timeRange {
+	case "1h":
+		since = now.Add(-1 * time.Hour)
+	case "24h":
+		since = now.Add(-24 * time.Hour)
+	case "7d":
+		since = now.Add(-7 * 24 * time.Hour)
+	default:
+		timeRange = "24h"
+		since = now.Add(-24 * time.Hour)
+	}
+
+	insights, err := u.repo.GetRoutingInsights(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+
+	insights.Range = timeRange
+	return insights, nil
 }

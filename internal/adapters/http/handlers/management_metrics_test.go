@@ -14,6 +14,7 @@ import (
 
 func TestGetAuthActivity(t *testing.T) {
 	r, db := setupManagementAPI(t)
+	db.Exec("DELETE FROM audit_logs")
 
 	// Create some audit logs for multiple tenants
 	tenantA := "tenant-a"
@@ -95,4 +96,141 @@ func TestGetAuthActivity(t *testing.T) {
 	var activity2 model.AuthActivity
 	json.Unmarshal(w2.Body.Bytes(), &activity2)
 	assert.Equal(t, int64(3), activity2.Protocols["oidc"].Success) // aud1, aud3, aud5
+}
+
+func TestGetAuthFailures(t *testing.T) {
+	r, db := setupManagementAPI(t)
+	db.Exec("DELETE FROM audit_logs")
+
+	// Create some failure audit logs
+	tenantA := "tenant-a"
+	now := time.Now()
+
+	// LDAP Invalid Credentials
+	detailsLDAP, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "provider_type": "ldap", "reason": "invalid credentials"})
+	db.Create(&models.AuditLogGORM{
+		ID:        "f1",
+		TenantID:  tenantA,
+		Action:    "auth.ldap.bind.fail",
+		Details:   detailsLDAP,
+		CreatedAt: now.Add(-10 * time.Minute),
+	})
+
+	// OIDC Invalid Request
+	detailsOIDC, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "error_name": "invalid_request"})
+	db.Create(&models.AuditLogGORM{
+		ID:        "f2",
+		TenantID:  tenantA,
+		Action:    "auth.login.reject",
+		Details:   detailsOIDC,
+		CreatedAt: now.Add(-20 * time.Minute),
+	})
+
+	// SAML Unknown Failure
+	detailsSAML, _ := json.Marshal(map[string]interface{}{"protocol": "saml", "error_name": "unknown_error"})
+	db.Create(&models.AuditLogGORM{
+		ID:        "f3",
+		TenantID:  tenantA,
+		Action:    "auth.login.reject",
+		Details:   detailsSAML,
+		CreatedAt: now.Add(-30 * time.Minute),
+	})
+
+	// Test 1h range
+	req, _ := http.NewRequest("GET", "/admin/management/dashboard/auth-failures?range=1h", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var failures model.AuthFailures
+	err := json.Unmarshal(w.Body.Bytes(), &failures)
+	assert.NoError(t, err)
+
+	assert.Equal(t, int64(3), failures.Totals.Failure)
+	assert.Equal(t, int64(2), failures.Protocols["oidc"].Failure) // f1 and f2
+	assert.Equal(t, int64(1), failures.Protocols["ldap"].Failure) // f1
+	assert.Equal(t, int64(1), failures.Protocols["saml"].Failure) // f3
+
+	// OIDC has 1 invalid_credentials (f1) and 1 invalid_request (f2).
+	// Both have count 1, so top_reason depends on map iteration order.
+	// Let's accept either for now or refine the test.
+	assert.Contains(t, []string{"invalid_request", "invalid_credentials"}, failures.Protocols["oidc"].TopReason)
+	assert.Equal(t, "invalid_credentials", failures.Protocols["ldap"].TopReason)
+	assert.Equal(t, "unknown", failures.Protocols["saml"].TopReason)
+
+	// Verify reasons list
+	reasons := make(map[string]int64)
+	for _, r := range failures.Reasons {
+		reasons[r.Key] = r.Count
+	}
+	assert.Equal(t, int64(1), reasons["invalid_credentials"])
+	assert.Equal(t, int64(1), reasons["invalid_request"])
+	assert.Equal(t, int64(1), reasons["unknown"])
+}
+
+func TestGetHealthSummary(t *testing.T) {
+	r, _ := setupManagementAPI(t)
+
+	req, _ := http.NewRequest("GET", "/admin/management/dashboard/health-summary", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary model.HealthSummary
+	err := json.Unmarshal(w.Body.Bytes(), &summary)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "ok", summary.Status)
+	assert.Equal(t, "ok", summary.Checks.Database)
+	assert.Equal(t, "ok", summary.Checks.SigningKeys)
+	assert.Equal(t, "ok", summary.Checks.Migrations)
+}
+
+func TestGetRoutingInsights(t *testing.T) {
+	r, db := setupManagementAPI(t)
+	db.Exec("DELETE FROM audit_logs")
+
+	now := time.Now()
+
+	// OIDC -> OIDC
+	details1, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "provider_type": "oidc"})
+	db.Create(&models.AuditLogGORM{ID: "r1", Action: "provider.login.success", Details: details1, CreatedAt: now.Add(-5 * time.Minute)})
+
+	// OIDC -> SAML
+	details2, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "provider_type": "saml"})
+	db.Create(&models.AuditLogGORM{ID: "r2", Action: "provider.login.success", Details: details2, CreatedAt: now.Add(-10 * time.Minute)})
+
+	// SAML -> OIDC
+	details3, _ := json.Marshal(map[string]interface{}{"protocol": "saml", "provider_type": "oidc"})
+	db.Create(&models.AuditLogGORM{ID: "r3", Action: "provider.login.success", Details: details3, CreatedAt: now.Add(-15 * time.Minute)})
+
+	// OIDC -> LDAP
+	details4, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "provider_type": "ldap"})
+	db.Create(&models.AuditLogGORM{ID: "r4", Action: "provider.login.success", Details: details4, CreatedAt: now.Add(-20 * time.Minute)})
+
+	// Test GET /admin/management/dashboard/routing-insights
+	req, _ := http.NewRequest("GET", "/admin/management/dashboard/routing-insights?range=1h", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var insights model.RoutingInsights
+	err := json.Unmarshal(w.Body.Bytes(), &insights)
+	assert.NoError(t, err)
+
+	assert.Equal(t, int64(1), insights.Totals.SameProtocol) // oidc -> oidc
+	assert.Equal(t, int64(3), insights.Totals.Routed)       // oidc->saml, saml->oidc, oidc->ldap
+
+	// Check transitions
+	transitions := make(map[string]int64)
+	for _, t := range insights.Transitions {
+		transitions[t.From+"->"+t.To] = t.Count
+	}
+	assert.Equal(t, int64(1), transitions["oidc->oidc"])
+	assert.Equal(t, int64(1), transitions["oidc->saml"])
+	assert.Equal(t, int64(1), transitions["saml->oidc"])
+	assert.Equal(t, int64(1), transitions["oidc->ldap"])
 }

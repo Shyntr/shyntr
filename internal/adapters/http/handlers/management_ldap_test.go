@@ -88,6 +88,8 @@ func setupManagementLDAPAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	auditLogger := audit.NewAuditLogger(db)
 	auditLogRepository := repository.NewAuditLogRepository(db)
 	auditUseCase := usecase.NewAuditUseCase(auditLogRepository)
+	healthRepository := repository.NewHealthRepository(db)
+	healthUseCase := usecase.NewHealthUseCase(healthRepository, keyMgr)
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 	auth2ClientUseCase := usecase.NewOAuth2ClientUseCase(clientRepository, connectionRepository, tenantRepository, auditLogger, fositeSecretHasher, keyMgr, outboundGuard, cfg)
@@ -100,7 +102,7 @@ func setupManagementLDAPAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
 	ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepository, &mgmtLDAPDialerStub{}, auditLogger, scopeUseCase, outboundGuard)
 
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, ldapUseCase, tenantUseCase, auditUseCase, outboundGuard)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, ldapUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

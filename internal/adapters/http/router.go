@@ -53,7 +53,7 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, outboundGuard)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
 	ldapHandler := handlers.NewLDAPHandler(cfg, authUseCase, ldapConnectionUseCase, webhookUseCase, attrMapper)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
@@ -196,6 +196,9 @@ func SetupRouter(
 			// Dashboard Stats
 			mgmtGroup.GET("/dashboard/stats", mgmtHandler.GetDashboardStats)
 			mgmtGroup.GET("/dashboard/auth-activity", mgmtHandler.GetAuthActivity)
+			mgmtGroup.GET("/dashboard/auth-failures", mgmtHandler.GetAuthFailures)
+			mgmtGroup.GET("/dashboard/routing-insights", mgmtHandler.GetRoutingInsights)
+			mgmtGroup.GET("/dashboard/health-summary", mgmtHandler.GetHealthSummary)
 
 			// Tenants
 			mgmtGroup.GET("/tenants", mgmtHandler.ListTenants)
