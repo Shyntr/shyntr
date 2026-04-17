@@ -196,3 +196,67 @@ func TestLDAPDialer_ContextCancellation(t *testing.T) {
 		_ = session.Close()
 	}
 }
+
+// startOpenLDAPWithTLS starts an openldap container that also exposes the LDAPS port (636).
+func startOpenLDAPWithTLS(t *testing.T) (host, plainPort, tlsPort string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("requires Docker")
+	}
+	ctx := context.Background()
+
+	req := testcontainers.ContainerRequest{
+		Image:        ldapImage,
+		ExposedPorts: []string{ldapPort, "636/tcp"},
+		Env: map[string]string{
+			"LDAP_ORGANISATION":   "Example Inc.",
+			"LDAP_DOMAIN":         "example.org",
+			"LDAP_ADMIN_PASSWORD": ldapAdminPW,
+			"LDAP_TLS":            "true",
+		},
+		WaitingFor: wait.ForLog("slapd starting").
+			WithStartupTimeout(90 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
+
+	h, err := container.Host(ctx)
+	require.NoError(t, err)
+
+	pp, err := container.MappedPort(ctx, ldapPort)
+	require.NoError(t, err)
+
+	tp, err := container.MappedPort(ctx, "636/tcp")
+	require.NoError(t, err)
+
+	return h, pp.Port(), tp.Port()
+}
+
+func TestLDAPDialer_TLSInsecureSkipVerify(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires Docker")
+	}
+	host, _, tlsPort := startOpenLDAPWithTLS(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:             fmt.Sprintf("ldaps://%s:%s", host, tlsPort),
+		BindDN:                ldapAdminDN,
+		BindPassword:          ldapAdminPW,
+		BaseDN:                ldapBaseDN,
+		TLSInsecureSkipVerify: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "ldaps:// dial with InsecureSkipVerify must succeed against self-signed cert")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}

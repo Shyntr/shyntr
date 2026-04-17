@@ -185,3 +185,79 @@ func TestLDAPConnectionRepository_AnonymousBind(t *testing.T) {
 	require.NoError(t, db.Where("id = ?", conn.ID).First(&raw).Error)
 	assert.Empty(t, raw.BindPasswordEncrypted, "anonymous bind must store nil ciphertext")
 }
+
+func TestLDAPConnectionRepository_ListActiveByTenant(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	// 2 active for tenant-a
+	connA1 := &model.LDAPConnection{
+		TenantID:  "tnt_active_a",
+		Name:      "Active 1",
+		ServerURL: "ldap://a1.example.com",
+		BaseDN:    "dc=example,dc=com",
+		Active:    true,
+	}
+	connA2 := &model.LDAPConnection{
+		TenantID:  "tnt_active_a",
+		Name:      "Active 2",
+		ServerURL: "ldap://a2.example.com",
+		BaseDN:    "dc=example,dc=com",
+		Active:    true,
+	}
+	// 1 inactive for tenant-a — create active then explicitly deactivate in DB
+	connA3inactive := &model.LDAPConnection{
+		TenantID:  "tnt_active_a",
+		Name:      "Inactive",
+		ServerURL: "ldap://a3.example.com",
+		BaseDN:    "dc=example,dc=com",
+		Active:    true, // will be deactivated below
+	}
+	// 1 active for tenant-b — must not appear in tenant-a results
+	connB1 := &model.LDAPConnection{
+		TenantID:  "tnt_active_b",
+		Name:      "B Active",
+		ServerURL: "ldap://b1.example.com",
+		BaseDN:    "dc=b,dc=com",
+		Active:    true,
+	}
+
+	require.NoError(t, repo.Create(ctx, connA1))
+	require.NoError(t, repo.Create(ctx, connA2))
+	require.NoError(t, repo.Create(ctx, connA3inactive))
+	// Deactivate connA3inactive directly in the DB to bypass GORM zero-value default.
+	require.NoError(t, db.Model(&models.LDAPConnectionGORM{}).
+		Where("id = ?", connA3inactive.ID).
+		Update("active", false).Error)
+	require.NoError(t, repo.Create(ctx, connB1))
+
+	// ListActiveByTenant for tenant-a must return exactly the 2 active records.
+	listA, err := repo.ListActiveByTenant(ctx, "tnt_active_a")
+	require.NoError(t, err)
+	assert.Len(t, listA, 2, "must return only the 2 active connections for tenant-a")
+	for _, c := range listA {
+		assert.Equal(t, "tnt_active_a", c.TenantID)
+		assert.True(t, c.Active, "all returned connections must be active")
+	}
+
+	// ListActiveByTenant for unknown tenant must return empty slice, nil error.
+	listX, err := repo.ListActiveByTenant(ctx, "tnt_nonexistent")
+	require.NoError(t, err)
+	assert.Empty(t, listX, "must return empty slice for unknown tenant")
+}
+
+func TestLDAPConnectionRepository_ListActiveByTenant_BrokenDB(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+
+	// Close the underlying connection to simulate a broken DB.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	_, err = repo.ListActiveByTenant(context.Background(), "any-tenant")
+	assert.Error(t, err, "a broken DB must return an error")
+}

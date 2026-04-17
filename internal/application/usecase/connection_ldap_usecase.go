@@ -181,6 +181,10 @@ func (u *ldapConnectionUseCase) ListConnections(ctx context.Context, tenantID st
 func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, id, username, password string) (*model.LDAPEntry, error) {
 	conn, err := u.repo.GetByTenantAndID(ctx, tenantID, id)
 	if err != nil {
+		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
+			"connection_id": id,
+			"reason":        "connection_not_found",
+		})
 		return nil, err
 	}
 

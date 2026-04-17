@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -130,6 +132,27 @@ func buildLDAPUseCase(repo *stubLDAPRepo, dialer *stubLDAPDialer, audit *capture
 		scopeUse: nil,
 		outbound: nil,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TestAuthenticateUser — connection_not_found regression
+// ---------------------------------------------------------------------------
+
+func TestAuthenticateUser_ConnectionNotFound(t *testing.T) {
+	auditLog := &captureAuditLogger{}
+	repo := &stubLDAPRepo{conn: nil, err: errors.New("not found")}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{}, auditLog)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt_test", "conn_missing", "alice", "pass")
+
+	require.Error(t, err, "repo error must propagate")
+	assert.Nil(t, entry)
+	require.True(t, auditLog.hasAction("auth.ldap.connection.fail"),
+		"auth.ldap.connection.fail must be emitted when connection lookup fails")
+	call, ok := auditLog.lastWithAction("auth.ldap.connection.fail")
+	require.True(t, ok)
+	assert.Equal(t, "connection_not_found", call.details["reason"])
+	assert.Equal(t, "conn_missing", call.details["connection_id"])
 }
 
 // ---------------------------------------------------------------------------
@@ -304,4 +327,247 @@ func TestClassifyDialError(t *testing.T) {
 			assert.Equal(t, tc.expected, got)
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional stubs for management CRUD tests
+// ---------------------------------------------------------------------------
+
+// extendedStubLDAPRepo adds per-method tracking for management tests.
+type extendedStubLDAPRepo struct {
+	stubLDAPRepo
+	created   *model.LDAPConnection
+	updated   *model.LDAPConnection
+	deleted   bool
+	listed    []*model.LDAPConnection
+	listErr   error
+	createErr error
+	updateErr error
+	deleteErr error
+}
+
+func (r *extendedStubLDAPRepo) Create(_ context.Context, conn *model.LDAPConnection) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	conn.ID = "generated-id"
+	r.created = conn
+	return nil
+}
+func (r *extendedStubLDAPRepo) Update(_ context.Context, conn *model.LDAPConnection) error {
+	r.updated = conn
+	return r.updateErr
+}
+func (r *extendedStubLDAPRepo) Delete(_ context.Context, _, _ string) error {
+	r.deleted = true
+	return r.deleteErr
+}
+func (r *extendedStubLDAPRepo) ListByTenant(_ context.Context, _ string) ([]*model.LDAPConnection, error) {
+	return r.listed, r.listErr
+}
+
+// noopScopeUseCase satisfies ScopeUseCase with no-ops.
+type noopScopeUseCase struct{}
+
+func (n *noopScopeUseCase) CreateScope(_ context.Context, _ *model.Scope, _, _ string) (*model.Scope, error) {
+	return nil, nil
+}
+func (n *noopScopeUseCase) GetScope(_ context.Context, _, _ string) (*model.Scope, error) {
+	return nil, nil
+}
+func (n *noopScopeUseCase) GetScopesByNames(_ context.Context, _ string, _ []string) ([]*model.Scope, error) {
+	return nil, nil
+}
+func (n *noopScopeUseCase) ListScopes(_ context.Context, _ string) ([]*model.Scope, error) {
+	return nil, nil
+}
+func (n *noopScopeUseCase) UpdateScope(_ context.Context, _ *model.Scope, _, _ string) error {
+	return nil
+}
+func (n *noopScopeUseCase) DeleteScope(_ context.Context, _, _, _, _ string) error { return nil }
+func (n *noopScopeUseCase) AddClaimToScopes(_ context.Context, _ string, _ string, _ []string) error {
+	return nil
+}
+
+// compile-time check
+var _ ScopeUseCase = (*noopScopeUseCase)(nil)
+
+// allowAllGuard implements port.OutboundGuard and approves every URL.
+type allowAllGuard struct{}
+
+func (g *allowAllGuard) ValidateURL(_ context.Context, _ string, _ model.OutboundTargetType, rawURL string) (*url.URL, *model.OutboundPolicy, error) {
+	u, _ := url.Parse(rawURL)
+	return u, nil, nil
+}
+func (g *allowAllGuard) NewHTTPClient(_ context.Context, _ string, _ model.OutboundTargetType, _ *model.OutboundPolicy) *http.Client {
+	return http.DefaultClient
+}
+
+// compile-time check
+var _ port.OutboundGuard = (*allowAllGuard)(nil)
+
+// buildFullLDAPUseCase constructs the concrete ldapConnectionUseCase with all deps set.
+func buildFullLDAPUseCase(repo port.LDAPConnectionRepository, dialer port.LDAPDialer, al port.AuditLogger) LDAPConnectionUseCase {
+	return &ldapConnectionUseCase{
+		repo:     repo,
+		dialer:   dialer,
+		audit:    al,
+		scopeUse: &noopScopeUseCase{},
+		outbound: &allowAllGuard{},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Item 10 — LDAP management CRUD use-case tests
+// ---------------------------------------------------------------------------
+
+func TestCreateConnection_Success(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{}
+
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		Name:      "Corp AD",
+		ServerURL: "ldap://ldap.corp.com:389",
+		BaseDN:    "dc=corp,dc=com",
+	}
+	created, err := uc.CreateConnection(context.Background(), conn, "127.0.0.1", "test-agent")
+
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.True(t, al.hasAction("management.connection.ldap.create"))
+}
+
+func TestCreateConnection_ValidationError(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	// Missing BaseDN — Validate() should fail.
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		ServerURL: "ldap://ldap.corp.com:389",
+		// BaseDN intentionally missing
+	}
+	_, err := uc.CreateConnection(context.Background(), conn, "", "")
+	assert.Error(t, err)
+}
+
+func TestGetConnection_Success(t *testing.T) {
+	existing := &model.LDAPConnection{ID: "conn-1", TenantID: "tnt", Name: "AD"}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: existing}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	got, err := uc.GetConnection(context.Background(), "tnt", "conn-1")
+	require.NoError(t, err)
+	assert.Equal(t, "conn-1", got.ID)
+}
+
+func TestGetConnection_NotFound(t *testing.T) {
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{err: errors.New("ldap connection not found")}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	_, err := uc.GetConnection(context.Background(), "tnt", "missing")
+	assert.Error(t, err)
+}
+
+func TestUpdateConnection_Success(t *testing.T) {
+	existing := &model.LDAPConnection{
+		ID:           "conn-1",
+		TenantID:     "tnt",
+		Name:         "Old",
+		ServerURL:    "ldap://ldap.corp.com",
+		BaseDN:       "dc=corp,dc=com",
+		BindPassword: "secret",
+		Active:       true,
+	}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: existing}}
+	al := &captureAuditLogger{}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	updated := &model.LDAPConnection{
+		ID:        "conn-1",
+		TenantID:  "tnt",
+		Name:      "New Name",
+		ServerURL: "ldap://ldap.corp.com",
+		BaseDN:    "dc=corp,dc=com",
+	}
+	err := uc.UpdateConnection(context.Background(), updated, "127.0.0.1", "agent")
+	require.NoError(t, err)
+	assert.True(t, al.hasAction("management.connection.ldap.update"))
+}
+
+func TestUpdateConnection_SentinelPassword(t *testing.T) {
+	existing := &model.LDAPConnection{
+		ID:           "conn-sentinel",
+		TenantID:     "tnt",
+		Name:         "AD",
+		ServerURL:    "ldap://ldap.corp.com",
+		BaseDN:       "dc=corp,dc=com",
+		BindPassword: "original-secret",
+		Active:       true,
+	}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: existing}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	// Caller sends sentinel password — must not overwrite the existing password.
+	updated := &model.LDAPConnection{
+		ID:           "conn-sentinel",
+		TenantID:     "tnt",
+		Name:         "AD Updated",
+		ServerURL:    "ldap://ldap.corp.com",
+		BaseDN:       "dc=corp,dc=com",
+		BindPassword: "*****",
+	}
+	err := uc.UpdateConnection(context.Background(), updated, "", "")
+	require.NoError(t, err)
+	// The repo.Update should have been called with the preserved password.
+	require.NotNil(t, repo.updated)
+	assert.Equal(t, "original-secret", repo.updated.BindPassword,
+		"sentinel password must be replaced with the existing encrypted password")
+}
+
+func TestDeleteConnection_Success(t *testing.T) {
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: nil}}
+	al := &captureAuditLogger{}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	err := uc.DeleteConnection(context.Background(), "tnt", "conn-1", "127.0.0.1", "agent")
+	require.NoError(t, err)
+	assert.True(t, repo.deleted)
+	assert.True(t, al.hasAction("management.connection.ldap.delete"))
+}
+
+func TestListConnections_Success(t *testing.T) {
+	conns := []*model.LDAPConnection{
+		{ID: "c1", TenantID: "tnt", Name: "C1"},
+		{ID: "c2", TenantID: "tnt", Name: "C2"},
+	}
+	repo := &extendedStubLDAPRepo{listed: conns}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	list, err := uc.ListConnections(context.Background(), "tnt")
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+}
+
+func TestTestConnection_Success(t *testing.T) {
+	conn := &model.LDAPConnection{ID: "c1", TenantID: "tnt", ServerURL: "ldap://ldap.corp.com"}
+	session := &stubLDAPSession{}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: conn}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{session: session}, &captureAuditLogger{})
+
+	err := uc.TestConnection(context.Background(), "tnt", "c1")
+	assert.NoError(t, err)
+}
+
+func TestTestConnection_DialFailure(t *testing.T) {
+	conn := &model.LDAPConnection{ID: "c1", TenantID: "tnt", ServerURL: "ldap://127.0.0.1:1"}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: conn}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{err: errors.New("connection refused")}, &captureAuditLogger{})
+
+	err := uc.TestConnection(context.Background(), "tnt", "c1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ldap test failed")
 }
