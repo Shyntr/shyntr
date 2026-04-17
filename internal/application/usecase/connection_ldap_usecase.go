@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/google/uuid"
@@ -111,6 +112,9 @@ func (u *ldapConnectionUseCase) TestConnection(ctx context.Context, tenantID, id
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	session, err := u.dialer.Dial(ctx, conn)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -83,8 +84,16 @@ func (d *stubLDAPDialer) Dial(_ context.Context, _ *model.LDAPConnection) (port.
 	return d.session, d.err
 }
 
+type blockingLDAPDialer struct{}
+
+func (d *blockingLDAPDialer) Dial(ctx context.Context, _ *model.LDAPConnection) (port.LDAPSession, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 // Compile-time check.
 var _ port.LDAPDialer = (*stubLDAPDialer)(nil)
+var _ port.LDAPDialer = (*blockingLDAPDialer)(nil)
 
 // ---------------------------------------------------------------------------
 // Stub: port.AuditLogger — captures every Log call for assertion
@@ -726,4 +735,21 @@ func TestTestConnection_DialFailure(t *testing.T) {
 	err := uc.TestConnection(context.Background(), "tnt", "c1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ldap test failed")
+}
+
+func TestTestConnection_RespectsContextDeadline(t *testing.T) {
+	conn := &model.LDAPConnection{ID: "c1", TenantID: "tnt", ServerURL: "ldap://ldap.corp.com"}
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: conn}}
+	uc := buildFullLDAPUseCase(repo, &blockingLDAPDialer{}, &captureAuditLogger{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := uc.TestConnection(ctx, "tnt", "c1")
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, elapsed, time.Second, "TestConnection should fail promptly when the caller context expires")
 }

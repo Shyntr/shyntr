@@ -188,6 +188,9 @@ func (r *ldapConnectionRepository) ListByTenant(ctx context.Context, tenantID st
 }
 
 func (r *ldapConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error) {
+	if tenantID == "" {
+		return nil, ErrLDAPConnectionTenantRequired
+	}
 	var dbModels []models.LDAPConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND active = ?", tenantID, true).Find(&dbModels).Error; err != nil {
 		return nil, err

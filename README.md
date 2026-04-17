@@ -75,7 +75,7 @@ Shyntr creates a routing mesh between:
 * SAML
 * OpenID Connect (OIDC)
 * OAuth2 APIs
-* LDAP *(Soon)*
+* LDAP
 * Local / Custom User Store
 
 Instead of building one-off bridges, Shyntr enables **any-to-any routing** between identity clients and identity sources.
@@ -115,8 +115,8 @@ Examples include:
 * SAML Client -> OIDC Provider
 * OIDC Client -> SAML Provider
 * SAML Client -> SAML Provider
-* SAML Client -> LDAP *(Soon)*
-* OIDC Client -> LDAP *(Soon)*
+* SAML Client -> LDAP
+* OIDC Client -> LDAP
 * OIDC Client -> Local User Store
 * SAML Client -> Local User Store
 * OIDC Client -> OAuth2 Resource Server

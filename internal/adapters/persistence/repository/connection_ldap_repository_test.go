@@ -283,6 +283,16 @@ func TestLDAPConnectionRepository_ListActiveByTenant(t *testing.T) {
 	assert.Empty(t, listX, "must return empty slice for unknown tenant")
 }
 
+func TestLDAPConnectionRepository_ListActiveByTenant_EmptyTenant(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+
+	list, err := repo.ListActiveByTenant(context.Background(), "")
+	assert.Nil(t, list)
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionTenantRequired)
+}
+
 func TestLDAPConnectionRepository_Update_BooleanFieldsPersistedWhenFalse(t *testing.T) {
 	t.Parallel()
 	db := setupLDAPRepoTestDB(t)
