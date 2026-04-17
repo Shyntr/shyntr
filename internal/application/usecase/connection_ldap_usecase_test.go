@@ -420,6 +420,19 @@ func (g *allowAllGuard) NewHTTPClient(_ context.Context, _ string, _ model.Outbo
 // compile-time check
 var _ port.OutboundGuard = (*allowAllGuard)(nil)
 
+type denyAllGuard struct {
+	err error
+}
+
+func (g *denyAllGuard) ValidateURL(_ context.Context, _ string, _ model.OutboundTargetType, _ string) (*url.URL, *model.OutboundPolicy, error) {
+	return nil, nil, g.err
+}
+func (g *denyAllGuard) NewHTTPClient(_ context.Context, _ string, _ model.OutboundTargetType, _ *model.OutboundPolicy) *http.Client {
+	return http.DefaultClient
+}
+
+var _ port.OutboundGuard = (*denyAllGuard)(nil)
+
 // buildFullLDAPUseCase constructs the concrete ldapConnectionUseCase with all deps set.
 func buildFullLDAPUseCase(repo port.LDAPConnectionRepository, dialer port.LDAPDialer, al port.AuditLogger) LDAPConnectionUseCase {
 	return &ldapConnectionUseCase{
@@ -468,6 +481,48 @@ func TestCreateConnection_ValidationError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCreateConnection_DuplicateNameError(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{createErr: errors.New("duplicate ldap connection name")}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		Name:      "Corp AD",
+		ServerURL: "ldap://ldap.corp.com:389",
+		BaseDN:    "dc=corp,dc=com",
+	}
+	_, err := uc.CreateConnection(context.Background(), conn, "", "")
+
+	require.Error(t, err)
+	assert.Equal(t, "duplicate ldap connection name", err.Error())
+	assert.False(t, al.hasAction("management.connection.ldap.create"))
+}
+
+func TestCreateConnection_OutboundPolicyViolation(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{}
+	uc := &ldapConnectionUseCase{
+		repo:     repo,
+		dialer:   &stubLDAPDialer{},
+		audit:    al,
+		scopeUse: &noopScopeUseCase{},
+		outbound: &denyAllGuard{err: errors.New("blocked by policy")},
+	}
+
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		Name:      "Corp AD",
+		ServerURL: "ldap://ldap.corp.com:389",
+		BaseDN:    "dc=corp,dc=com",
+	}
+	_, err := uc.CreateConnection(context.Background(), conn, "", "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server_url violates outbound policy")
+	assert.False(t, al.hasAction("management.connection.ldap.create"))
+}
+
 func TestGetConnection_Success(t *testing.T) {
 	existing := &model.LDAPConnection{ID: "conn-1", TenantID: "tnt", Name: "AD"}
 	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: existing}}
@@ -484,6 +539,15 @@ func TestGetConnection_NotFound(t *testing.T) {
 
 	_, err := uc.GetConnection(context.Background(), "tnt", "missing")
 	assert.Error(t, err)
+}
+
+func TestGetConnection_WrongTenant(t *testing.T) {
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{err: errors.New("ldap connection not found")}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	_, err := uc.GetConnection(context.Background(), "other-tenant", "conn-1")
+	require.Error(t, err)
+	assert.Equal(t, "ldap connection not found", err.Error())
 }
 
 func TestUpdateConnection_Success(t *testing.T) {
@@ -542,6 +606,21 @@ func TestUpdateConnection_SentinelPassword(t *testing.T) {
 		"sentinel password must be replaced with the existing encrypted password")
 }
 
+func TestUpdateConnection_WrongTenant(t *testing.T) {
+	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{err: errors.New("ldap connection not found")}}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	err := uc.UpdateConnection(context.Background(), &model.LDAPConnection{
+		ID:        "conn-1",
+		TenantID:  "other-tenant",
+		Name:      "AD",
+		ServerURL: "ldap://ldap.corp.com",
+		BaseDN:    "dc=corp,dc=com",
+	}, "", "")
+	require.Error(t, err)
+	assert.Equal(t, "ldap connection not found", err.Error())
+}
+
 func TestDeleteConnection_Success(t *testing.T) {
 	repo := &extendedStubLDAPRepo{stubLDAPRepo: stubLDAPRepo{conn: nil}}
 	al := &captureAuditLogger{}
@@ -551,6 +630,15 @@ func TestDeleteConnection_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, repo.deleted)
 	assert.True(t, al.hasAction("management.connection.ldap.delete"))
+}
+
+func TestDeleteConnection_NotFound(t *testing.T) {
+	repo := &extendedStubLDAPRepo{deleteErr: errors.New("ldap connection not found")}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
+
+	err := uc.DeleteConnection(context.Background(), "tnt", "missing", "", "")
+	require.Error(t, err)
+	assert.Equal(t, "ldap connection not found", err.Error())
 }
 
 func TestListConnections_Success(t *testing.T) {

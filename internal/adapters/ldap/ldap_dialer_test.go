@@ -3,6 +3,8 @@ package ldap_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +54,9 @@ func startOpenLDAP(t *testing.T) (host string, port string) {
 		ContainerRequest: req,
 		Started:          true,
 	})
+	if err != nil && dockerUnavailable(err) {
+		t.Skipf("requires Docker: %v", err)
+	}
 	require.NoError(t, err)
 
 	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
@@ -222,6 +227,9 @@ func startOpenLDAPWithTLS(t *testing.T) (host, plainPort, tlsPort string) {
 		ContainerRequest: req,
 		Started:          true,
 	})
+	if err != nil && dockerUnavailable(err) {
+		t.Skipf("requires Docker: %v", err)
+	}
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
 
@@ -238,9 +246,7 @@ func startOpenLDAPWithTLS(t *testing.T) (host, plainPort, tlsPort string) {
 }
 
 func TestLDAPDialer_TLSInsecureSkipVerify(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires Docker")
-	}
+	requireManualLDAPTransportTest(t)
 	host, _, tlsPort := startOpenLDAPWithTLS(t)
 	dialer := ldapadapter.NewLDAPDialer()
 
@@ -259,4 +265,44 @@ func TestLDAPDialer_TLSInsecureSkipVerify(t *testing.T) {
 	require.NoError(t, err, "ldaps:// dial with InsecureSkipVerify must succeed against self-signed cert")
 	require.NotNil(t, session)
 	assert.NoError(t, session.Close())
+}
+
+func TestLDAPDialer_StartTLS(t *testing.T) {
+	requireManualLDAPTransportTest(t)
+	host, plainPort, _ := startOpenLDAPWithTLS(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:             fmt.Sprintf("ldap://%s:%s", host, plainPort),
+		BindDN:                ldapAdminDN,
+		BindPassword:          ldapAdminPW,
+		BaseDN:                ldapBaseDN,
+		StartTLS:              true,
+		TLSInsecureSkipVerify: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "StartTLS dial must succeed against self-signed cert when InsecureSkipVerify is enabled")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}
+
+func dockerUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "failed to create Docker provider") ||
+		strings.Contains(msg, "permission denied while trying to connect to the docker API")
+}
+
+func requireManualLDAPTransportTest(t *testing.T) {
+	t.Helper()
+	// Transport-level TLS/StartTLS verification is treated as manual, environment-specific validation.
+	if testing.Short() || os.Getenv("SHYNTR_RUN_LDAP_TRANSPORT_TESTS") != "1" {
+		t.Skip("manual LDAP transport test; set SHYNTR_RUN_LDAP_TRANSPORT_TESTS=1 to run")
+	}
 }

@@ -298,6 +298,41 @@ func TestFositeStore_RefreshToken_GracePeriod_Expired(t *testing.T) {
 		"expired grace period must make token inaccessible, got: %v", err)
 }
 
+func TestFositeStore_RefreshToken_MaybeGracePeriod_Within(t *testing.T) {
+	store, _, tenantID, clientID := setupFositeStoreWithRepos(t)
+	ctx := tenantCtxFor(tenantID)
+
+	req := newFositeRequest(clientID, "alice", time.Hour)
+	sig := "rt-maybe-grace-within"
+
+	require.NoError(t, store.CreateRefreshTokenSession(ctx, sig, req))
+	require.NoError(t, store.RevokeRefreshTokenMaybeGracePeriod(ctx, req.GetID(), sig))
+
+	got, err := store.GetRefreshTokenSession(ctx, sig, model.NewJWTSession("", ""))
+	require.NoError(t, err)
+	assert.Equal(t, clientID, got.GetClient().GetID())
+}
+
+func TestFositeStore_RefreshToken_MaybeGracePeriod_Expired(t *testing.T) {
+	store, db, tenantID, clientID := setupFositeStoreWithRepos(t)
+	ctx := tenantCtxFor(tenantID)
+
+	req := newFositeRequest(clientID, "alice", time.Hour)
+	sig := "rt-maybe-grace-expired"
+
+	require.NoError(t, store.CreateRefreshTokenSession(ctx, sig, req))
+	require.NoError(t, store.RevokeRefreshTokenMaybeGracePeriod(ctx, req.GetID(), sig))
+
+	past := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, db.Model(&models.OAuth2SessionGORM{}).
+		Where("signature = ? AND token_type = ?", sig, "refresh_token").
+		Update("grace_expires_at", past).Error)
+
+	_, err := store.GetRefreshTokenSession(ctx, sig, model.NewJWTSession("", ""))
+	assert.True(t, errors.Is(err, fosite.ErrInactiveToken) || errors.Is(err, fosite.ErrNotFound),
+		"expired grace period must make token inaccessible, got: %v", err)
+}
+
 func TestFositeStore_AccessToken_RevokeAndGet(t *testing.T) {
 	store, _, tenantID, clientID := setupFositeStoreWithRepos(t)
 	ctx := tenantCtxFor(tenantID)

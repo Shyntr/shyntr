@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/mapper"
 	"github.com/Shyntr/shyntr/internal/application/security"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
+	ldaplib "github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -170,6 +172,9 @@ func startOpenLDAPForHandler(t *testing.T) (host, port string) {
 		ContainerRequest: req,
 		Started:          true,
 	})
+	if err != nil && handlerDockerUnavailable(err) {
+		t.Skipf("requires Docker: %v", err)
+	}
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
 	h, err := container.Host(ctx)
@@ -232,7 +237,7 @@ func setupDockerLDAPEnv(t *testing.T, containerHost, containerPort string) *oidc
 		ServerURL:        serverURL,
 		BindDN:           "cn=admin,dc=example,dc=org",
 		BaseDN:           "dc=example,dc=org",
-		UserSearchFilter: "(objectClass=*)",
+		UserSearchFilter: "(uid={0})",
 		Active:           true,
 	}).Error)
 	// Persist bind password via repo so it gets encrypted.
@@ -240,8 +245,30 @@ func setupDockerLDAPEnv(t *testing.T, containerHost, containerPort string) *oidc
 	require.NoError(t, err)
 	conn.BindPassword = "admin"
 	require.NoError(t, ldapRepo.Update(context.Background(), conn))
+	seedLDAPLoginUser(t, serverURL)
 
 	return env
+}
+
+func seedLDAPLoginUser(t *testing.T, serverURL string) {
+	t.Helper()
+
+	l, err := ldaplib.DialURL(serverURL)
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	require.NoError(t, l.Bind("cn=admin,dc=example,dc=org", "admin"))
+
+	addReq := ldaplib.NewAddRequest("uid=alice,dc=example,dc=org", nil)
+	addReq.Attribute("objectClass", []string{"top", "person", "organizationalPerson", "inetOrgPerson"})
+	addReq.Attribute("uid", []string{"alice"})
+	addReq.Attribute("cn", []string{"alice"})
+	addReq.Attribute("sn", []string{"alice"})
+	addReq.Attribute("userPassword", []string{"alice-password"})
+	err = l.Add(addReq)
+	if err != nil && !ldaplib.IsErrorWithCode(err, ldaplib.LDAPResultEntryAlreadyExists) {
+		require.NoError(t, err)
+	}
 }
 
 func TestLDAPHandler_Login_Success_OIDC(t *testing.T) {
@@ -255,8 +282,8 @@ func TestLDAPHandler_Login_Success_OIDC(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"login_challenge": loginChallenge,
-		"username":        "admin",
-		"password":        "admin",
+		"username":        "alice",
+		"password":        "alice-password",
 	})
 	w := serveRequest(t, env.router, http.MethodPost,
 		"/t/tenant-a/ldap/login/ldap-docker",
@@ -291,8 +318,8 @@ func TestLDAPHandler_Login_Success_SAML(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"login_challenge": samlReqID,
-		"username":        "admin",
-		"password":        "admin",
+		"username":        "alice",
+		"password":        "alice-password",
 	})
 	w := serveRequest(t, env.router, http.MethodPost,
 		"/t/tenant-a/ldap/login/ldap-docker",
@@ -303,4 +330,13 @@ func TestLDAPHandler_Login_Success_SAML(t *testing.T) {
 	loc := w.Header().Get("Location")
 	require.NotEmpty(t, loc)
 	assert.Contains(t, loc, "/saml/resume")
+}
+
+func handlerDockerUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "failed to create Docker provider") ||
+		strings.Contains(msg, "permission denied while trying to connect to the docker API")
 }

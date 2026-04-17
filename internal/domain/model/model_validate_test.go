@@ -5,6 +5,7 @@ import (
 
 	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ func TestLDAPConnection_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		conn    model.LDAPConnection
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "happy path",
@@ -24,22 +25,22 @@ func TestLDAPConnection_Validate(t *testing.T) {
 				ServerURL: "ldap://ldap.example.com:389",
 				BaseDN:    "dc=example,dc=com",
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing tenant_id",
 			conn:    model.LDAPConnection{ServerURL: "ldap://ldap.example.com", BaseDN: "dc=example,dc=com"},
-			wantErr: true,
+			wantErr: "tenant_id is required",
 		},
 		{
 			name:    "missing server_url",
 			conn:    model.LDAPConnection{TenantID: "tnt", BaseDN: "dc=example,dc=com"},
-			wantErr: true,
+			wantErr: "server_url is required",
 		},
 		{
 			name:    "missing base_dn",
 			conn:    model.LDAPConnection{TenantID: "tnt", ServerURL: "ldap://ldap.example.com"},
-			wantErr: true,
+			wantErr: "base_dn is required",
 		},
 	}
 
@@ -47,10 +48,11 @@ func TestLDAPConnection_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.conn.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -64,7 +66,7 @@ func TestOIDCConnection_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		conn    model.OIDCConnection
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "happy path",
@@ -73,22 +75,22 @@ func TestOIDCConnection_Validate(t *testing.T) {
 				IssuerURL: "https://idp.example.com",
 				ClientID:  "client-1",
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing tenant_id",
 			conn:    model.OIDCConnection{IssuerURL: "https://idp.example.com", ClientID: "client-1"},
-			wantErr: true,
+			wantErr: "tenant_id is required",
 		},
 		{
 			name:    "missing issuer_url",
 			conn:    model.OIDCConnection{TenantID: "tnt", ClientID: "client-1"},
-			wantErr: true,
+			wantErr: "issuer_url is required",
 		},
 		{
 			name:    "missing client_id",
 			conn:    model.OIDCConnection{TenantID: "tnt", IssuerURL: "https://idp.example.com"},
-			wantErr: true,
+			wantErr: "client_id is required for OIDC connections",
 		},
 	}
 
@@ -96,10 +98,11 @@ func TestOIDCConnection_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.conn.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -113,7 +116,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		conn    model.SAMLConnection
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "happy path",
@@ -123,7 +126,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 				IdpSingleSignOn: "https://idp.example.com/sso",
 				IdpCertificate:  "-----BEGIN CERTIFICATE-----",
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name: "missing tenant_id",
@@ -132,7 +135,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 				IdpSingleSignOn: "https://idp.example.com/sso",
 				IdpCertificate:  "cert",
 			},
-			wantErr: true,
+			wantErr: "tenant_id is required",
 		},
 		{
 			name: "missing idp_entity_id",
@@ -141,7 +144,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 				IdpSingleSignOn: "https://idp.example.com/sso",
 				IdpCertificate:  "cert",
 			},
-			wantErr: true,
+			wantErr: "idp_entity_id is required",
 		},
 		{
 			name: "missing idp_sso_url",
@@ -150,7 +153,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 				IdpEntityID:    "https://idp.example.com",
 				IdpCertificate: "cert",
 			},
-			wantErr: true,
+			wantErr: "idp_sso_url is required",
 		},
 		{
 			name: "missing idp_certificate",
@@ -159,7 +162,7 @@ func TestSAMLConnection_Validate(t *testing.T) {
 				IdpEntityID:     "https://idp.example.com",
 				IdpSingleSignOn: "https://idp.example.com/sso",
 			},
-			wantErr: true,
+			wantErr: "idp_certificate is required",
 		},
 	}
 
@@ -167,10 +170,11 @@ func TestSAMLConnection_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.conn.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -184,7 +188,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		client  model.OAuth2Client
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "happy path public client",
@@ -197,7 +201,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name: "happy path confidential client",
@@ -210,7 +214,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name: "missing tenant_id",
@@ -221,7 +225,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: true,
+			wantErr: "tenant_id is required",
 		},
 		{
 			name: "prohibited grant type implicit",
@@ -233,7 +237,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"implicit"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: true,
+			wantErr: "grant_type 'implicit' is prohibited in OAuth 2.1 standards",
 		},
 		{
 			name: "prohibited response type token",
@@ -245,7 +249,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"token"},
 			},
-			wantErr: true,
+			wantErr: "response_type 'token' is prohibited in OAuth 2.1 standards. Only 'code' is permitted",
 		},
 		{
 			name: "public client with secret",
@@ -258,7 +262,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: true,
+			wantErr: "public clients cannot have a client_secret",
 		},
 		{
 			name: "confidential client without secret",
@@ -271,7 +275,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: true,
+			wantErr: "confidential clients must have a hashed secret",
 		},
 		{
 			name: "missing redirect_uris",
@@ -282,7 +286,7 @@ func TestOAuth2Client_Validate(t *testing.T) {
 				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 			},
-			wantErr: true,
+			wantErr: "at least one redirect_uri is required",
 		},
 	}
 
@@ -290,10 +294,11 @@ func TestOAuth2Client_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.client.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -307,17 +312,17 @@ func TestTenant_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		tenant  model.Tenant
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name:    "happy path",
 			tenant:  model.Tenant{Name: "my-tenant"},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing name",
 			tenant:  model.Tenant{},
-			wantErr: true,
+			wantErr: "tenant name cannot be empty",
 		},
 	}
 
@@ -325,10 +330,11 @@ func TestTenant_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.tenant.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -342,22 +348,22 @@ func TestScope_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		scope   model.Scope
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name:    "happy path",
 			scope:   model.Scope{TenantID: "tnt", Name: "openid"},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing tenant_id",
 			scope:   model.Scope{Name: "openid"},
-			wantErr: true,
+			wantErr: "tenant_id is required",
 		},
 		{
 			name:    "missing name",
 			scope:   model.Scope{TenantID: "tnt"},
-			wantErr: true,
+			wantErr: "scope name is required",
 		},
 	}
 
@@ -365,10 +371,11 @@ func TestScope_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.scope.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -382,7 +389,7 @@ func TestWebhook_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		wh      model.Webhook
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "happy path",
@@ -391,27 +398,27 @@ func TestWebhook_Validate(t *testing.T) {
 				URL:    "https://hooks.example.com/event",
 				Events: []string{"user.login"},
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing name",
 			wh:      model.Webhook{URL: "https://hooks.example.com/event", Events: []string{"user.login"}},
-			wantErr: true,
+			wantErr: "webhook name is required",
 		},
 		{
 			name:    "missing url",
 			wh:      model.Webhook{Name: "hook", Events: []string{"user.login"}},
-			wantErr: true,
+			wantErr: "webhook url is required",
 		},
 		{
 			name:    "invalid url format",
 			wh:      model.Webhook{Name: "hook", URL: "not-a-url", Events: []string{"user.login"}},
-			wantErr: true,
+			wantErr: "invalid webhook url format",
 		},
 		{
 			name:    "missing events",
 			wh:      model.Webhook{Name: "hook", URL: "https://hooks.example.com/event"},
-			wantErr: true,
+			wantErr: "at least one event must be subscribed to",
 		},
 	}
 
@@ -419,10 +426,11 @@ func TestWebhook_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.wh.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
@@ -436,22 +444,22 @@ func TestAuditLog_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		log     model.AuditLog
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name:    "happy path",
 			log:     model.AuditLog{TenantID: "tnt", Action: "user.login"},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
 			name:    "missing tenant_id",
 			log:     model.AuditLog{Action: "user.login"},
-			wantErr: true,
+			wantErr: "tenant_id is required for audit logs",
 		},
 		{
 			name:    "missing action",
 			log:     model.AuditLog{TenantID: "tnt"},
-			wantErr: true,
+			wantErr: "action is required for audit logs",
 		},
 	}
 
@@ -459,10 +467,11 @@ func TestAuditLog_Validate(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.log.Validate()
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
+			if tc.wantErr == "" {
 				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantErr, err.Error())
 			}
 		})
 	}
