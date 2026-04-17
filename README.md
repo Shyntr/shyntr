@@ -55,7 +55,7 @@ flowchart LR
     IdentityProvider --> SAML
     IdentityProvider --> OIDC
     IdentityProvider --> OAuth2
-````
+```
 
 Instead of rewriting authentication logic, Shyntr translates identity flows between protocols.
 
@@ -97,18 +97,18 @@ flowchart LR
 
 This is not a static bridge model.
 
-It is a **policy-driven routing model** where Shyntr evaluates:
+It is a **routing and orchestration model** where Shyntr evaluates:
 
 * Client Protocol
 * Tenant Context
-* Routing Rules
+* Configured Clients And Connections
 * Target Identity Source
 
 ---
 
-## 🔁 Any-to-Any Identity Routing
+## 🔁 Identity Routing Across Supported Flows
 
-Shyntr can route authentication requests between different client and provider combinations.
+Shyntr can route authentication requests across the client and provider combinations implemented in the current codebase.
 
 Examples include:
 
@@ -135,7 +135,7 @@ flowchart TD
     Router <-->|Route| LOCAL[Local User Store]
 ```
 
-This gives you a unified identity layer without forcing every system to speak the same protocol.
+This gives you a unified identity layer across the supported protocol and directory flows without forcing every system to speak the same protocol.
 
 ---
 
@@ -248,7 +248,10 @@ Shyntr Owns The Identity Routing Layer.**
 * SAML Clients
 * OIDC Connections
 * SAML Connections
-* Routing Configuration
+* LDAP Connections
+* Webhooks
+* Outbound Policies
+* Audit Capabilities
 
 ### ⚡ Routing Plane
 
@@ -289,6 +292,16 @@ Outbound behavior is governed by:
 This makes Shyntr a **Zero Trust Identity Router**, not just at the protocol level, but across system boundaries.
 
 A default global outbound policy is provisioned during migration, ensuring that outbound security remains enforced even before tenant-specific policies are configured.
+
+### 🛡️ Admin Security Boundary
+
+Shyntr exposes admin and management routes for login/consent orchestration and control-plane operations.
+
+In the current codebase, these admin routes are **not protected by application-layer authentication**.
+
+They must be exposed only behind a **trusted edge** such as a gateway, reverse proxy, or policy enforcement layer that restricts access before traffic reaches the admin server.
+
+The admin surface must never be exposed directly to a public interface.
 
 ---
 

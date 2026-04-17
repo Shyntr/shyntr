@@ -54,7 +54,7 @@ Creates a new isolated tenant environment.
 
 | Flag | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--id` | No | *Auto-generated 4-byte hex* | The unique slug identifier for the tenant. |
+| `--id` | No | *Auto-generated UUID* | The unique slug identifier for the tenant. |
 | `--name` | No | *Same as `--id`* | The operational name of the tenant. |
 | `--display-name` | No | *Same as `--name`* | The human-readable display name. |
 | `--desc` | No | `CLI Created` | A short description of the tenant's purpose. |
@@ -104,10 +104,11 @@ Registers a new OIDC client.
 | Flag | Required | Default | Description |
 | :--- |:---------| :--- | :--- |
 | `--tenant-id` | No       | `default` | The ID of the tenant this client belongs to. |
-| `--client-id` | No      | *Auto-generated 8-byte hex* | The unique Client ID. |
-| `--name` | Yes      | `New Client <id>` | The descriptive name of the application. |
-| `--secret` | No       | *Auto-generated 16-byte hex* | The Client Secret (ignored if `--public` is true). |
-| `--redirect-uris` | Yes      | `http://localhost:8080/callback` | Comma-separated list of allowed callback URLs. |
+| `--client-id` | No      | *Auto-generated UUID* | The unique Client ID. |
+| `--name` | No      | `New Client <id>` | The descriptive name of the application. |
+| `--secret` | No       | *Auto-generated 32-byte hex* | The Client Secret (ignored if `--public` is true). |
+| `--auth-method` | No       | `client_secret_basic` for confidential clients, `none` for public clients | The token endpoint authentication method. |
+| `--redirect-uris` | No      | `http://localhost:8080/callback` | Comma-separated list of allowed callback URLs. |
 | `--post-logout-uris` | No       | - | Comma-separated exact URIs allowed for redirection after logout. |
 | `--scopes` | No       | `openid, profile, email, offline_access` | Comma-separated scopes allowed for this client. |
 | `--audience` | No       | - | Comma-separated requested audiences. |
@@ -118,6 +119,12 @@ Registers a new OIDC client.
 * **Get Usage:** `./shyntr get-client [client_id]`
 * **Update Usage:** `./shyntr update-client [client_id] [--name] [--redirect-uris] [--post-logout-uris] [--scopes] [--secret]`
 * **Delete Usage:** `./shyntr delete-client [client_id]`
+
+### `inject-jwks`
+Directly injects a JWKS payload into an existing client's database record.
+
+* **Usage:** `./shyntr inject-jwks [client_id] [jwks_file]`
+* **Flags:** None
 
 ---
 
@@ -140,6 +147,8 @@ Registers a new SAML Service Provider.
 | `--tenant-id` | No | `default` | The ID of the tenant this client belongs to. |
 | `--name` | No | `SAML App` | The descriptive name of the application. |
 | `--force-authn` | No | `false` | Force the user to re-authenticate regardless of active sessions. |
+| `--sign-response` | No | `false` | Sign the SAML response. |
+| `--sign-assertion` | No | `false` | Sign SAML assertions. |
 
 ### `get-saml-client`, `update-saml-client`, `delete-saml-client`
 * **Get Usage:** `./shyntr get-saml-client [entity_id]`
@@ -203,7 +212,34 @@ Registers a new external OIDC Provider.
 
 ---
 
-## 8. Cryptographic Key Management
+## 8. LDAP Connection Management
+
+Manage external LDAP or Active Directory directory connections that Shyntr will trust.
+
+### `create-ldap-connection`
+Registers a new LDAP directory connection.
+
+* **Usage:** `./shyntr create-ldap-connection [flags]`
+* **Flags:**
+
+| Flag | Required | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--tenant-id` | No | `default` | The ID of the tenant this connection belongs to. |
+| `--name` | No | `LDAP Directory` | The descriptive name of the connection. |
+| `--server-url` | **Yes** | - | LDAP server URL using `ldap://` or `ldaps://`. |
+| `--bind-dn` | No | - | Service account bind DN. |
+| `--bind-password` | No | - | Service account bind password. |
+| `--base-dn` | **Yes** | - | Base DN for searches. |
+| `--start-tls` | No | `false` | Use StartTLS with `ldap://`. |
+| `--insecure-skip-verify` | No | `false` | Skip TLS certificate verification. |
+
+### `get-ldap-connection`, `delete-ldap-connection`
+* **Get Usage:** `./shyntr get-ldap-connection [id] --tenant-id <tenant_id>`
+* **Delete Usage:** `./shyntr delete-ldap-connection [id] --tenant-id <tenant_id>`
+
+---
+
+## 9. Cryptographic Key Management
 
 The Shyntr Identity Hub features a Zero-Downtime Key Rotation engine. By default, it operates in **Auto-Rollover** mode, automatically generating and rotating self-signed X.509 certificates and RSA keys.
 
@@ -217,7 +253,7 @@ Injects a CA-signed keypair into the Identity Hub. This command safely demotes t
 
 | Flag | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--use` | **Yes** | `sig` | The cryptographic purpose of the key. Use `sig` for Signing (JWTs/SAML) or `enc` for Decryption (JWE). |
+| `--use` | No | `sig` | The cryptographic purpose of the key. Use `sig` for Signing (JWTs/SAML) or `enc` for Decryption (JWE). |
 | `--cert` | **Yes** | - | Local file path to the CA-signed X.509 certificate (in PEM format). |
 | `--key` | **Yes** | - | Local file path to the unencrypted RSA private key (in PEM format). |
 

@@ -223,7 +223,7 @@ Purpose:
 Run pattern:
 ```bash
 go test ./internal/adapters/http/handlers -run 'TestOIDCE2E_(CoreFlow|TenantIsolation|RedirectURIExactMatching|Logout_)' -count=1
-````
+```
 
 Includes:
 
