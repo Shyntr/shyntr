@@ -1237,7 +1237,7 @@ func runServer() {
 	ldapConnectionRepository := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
 	ldapDialer := ldapadapter.NewLDAPDialer()
 	ldapConnectionUseCase := usecase.NewLDAPConnectionUseCase(ldapConnectionRepository, ldapDialer, auditLogger, scopeUseCase, outboundGuard)
-	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
+	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository, ldapConnectionRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)

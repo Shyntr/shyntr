@@ -1223,13 +1223,18 @@ func (h *ManagementHandler) GetLDAPConnection(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
 // @Param id path string true "Connection ID"
 // @Param request body payload.CreateLDAPConnectionRequest true "LDAP Connection Update Configuration"
 // @Success 200 {object} map[string]string "status: updated"
 // @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 403 {object} payload.AppError "Connection does not belong to this tenant"
 // @Failure 500 {object} payload.AppError "Failed to update LDAP connection"
-// @Router /admin/management/ldap-connections/{id} [put]
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [put]
 func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+
 	var req payload.CreateLDAPConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(payload.NewValidationAppError(err))
@@ -1237,13 +1242,21 @@ func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
 	}
 
 	conn := req.ToDomain()
+	// tenant_id and id come from the authenticated path, not the request body.
+	conn.TenantID = tenantID
+	conn.ID = id
+
 	// Use case handles the "*****" / empty password sentinel (keep existing).
 	if err := h.LDAPConnUse.UpdateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		if err.Error() == "ldap connection not found" {
+			c.Error(payload.NewOperationAppError(http.StatusForbidden, "LDAP connection", "update", err))
+			return
+		}
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "update", err))
 		return
 	}
 	logger.FromGin(c).Info("LDAP connection updated successfully",
-		zap.String("server_url", conn.ServerURL),
+		zap.String("connection_id", conn.ID),
 		zap.String("target_tenant_id", conn.TenantID),
 		zap.String("protocol", "ldap"),
 	)

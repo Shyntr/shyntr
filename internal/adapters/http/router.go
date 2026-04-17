@@ -54,6 +54,7 @@ func SetupRouter(
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
 	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, outboundGuard)
+	ldapHandler := handlers.NewLDAPHandler(cfg, authUseCase, ldapConnectionUseCase, webhookUseCase, attrMapper)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
 
@@ -158,6 +159,11 @@ func SetupRouter(
 			oidcGroup.GET("/login/:connection_id", oidcHandler.Login)
 			oidcGroup.GET("/callback", oidcHandler.Callback)
 		}
+
+		ldapGroup := tenantGroup.Group("/ldap")
+		{
+			ldapGroup.POST("/login/:connection_id", ldapHandler.Login)
+		}
 	}
 
 	admin := gin.New()
@@ -236,7 +242,7 @@ func SetupRouter(
 			mgmtGroup.GET("/ldap-connections", mgmtHandler.ListLDAPConnections)
 			mgmtGroup.GET("/ldap-connections/:tenant_id/:id", mgmtHandler.GetLDAPConnection)
 			mgmtGroup.POST("/ldap-connections", mgmtHandler.CreateLDAPConnection)
-			mgmtGroup.PUT("/ldap-connections/:id", mgmtHandler.UpdateLDAPConnection)
+			mgmtGroup.PUT("/ldap-connections/:tenant_id/:id", mgmtHandler.UpdateLDAPConnection)
 			mgmtGroup.DELETE("/ldap-connections/:tenant_id/:id", mgmtHandler.DeleteLDAPConnection)
 			mgmtGroup.POST("/ldap-connections/:tenant_id/:id/test", mgmtHandler.TestLDAPConnection)
 

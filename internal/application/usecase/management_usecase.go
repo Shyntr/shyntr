@@ -23,12 +23,14 @@ type managementUseCase struct {
 	AuthReq  port.AuthRequestRepository
 	OidcConn port.OIDCConnectionRepository
 	SamlConn port.SAMLConnectionRepository
+	LDAPConn port.LDAPConnectionRepository
 }
 
 func NewManagementUseCase(Config *config.Config, AuthReq port.AuthRequestRepository,
 	OidcConn port.OIDCConnectionRepository,
-	SamlConn port.SAMLConnectionRepository) ManagementUseCase {
-	return &managementUseCase{Config: Config, AuthReq: AuthReq, OidcConn: OidcConn, SamlConn: SamlConn}
+	SamlConn port.SAMLConnectionRepository,
+	LDAPConn port.LDAPConnectionRepository) ManagementUseCase {
+	return &managementUseCase{Config: Config, AuthReq: AuthReq, OidcConn: OidcConn, SamlConn: SamlConn, LDAPConn: LDAPConn}
 }
 
 func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge string) ([]model.AuthMethod, *model.LoginRequest, error) {
@@ -51,6 +53,11 @@ func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge strin
 	}
 
 	oidcConns, err := m.OidcConn.ListActiveByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ldapConns, err := m.LDAPConn.ListActiveByTenant(ctx, tenantID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,5 +89,15 @@ func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge strin
 			LoginURL: m.Config.BaseIssuerURL + "/t/" + tenantID + "/oidc/login/" + conn.ID + "?login_challenge=" + challenge,
 		})
 	}
+
+	for _, conn := range ldapConns {
+		methods = append(methods, model.AuthMethod{
+			ID:       conn.ID,
+			Type:     "ldap",
+			Name:     conn.Name,
+			LoginURL: m.Config.BaseIssuerURL + "/t/" + tenantID + "/ldap/login/" + conn.ID,
+		})
+	}
+
 	return methods, loginReq, nil
 }

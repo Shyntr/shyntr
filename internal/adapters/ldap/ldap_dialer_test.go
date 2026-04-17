@@ -30,6 +30,9 @@ const (
 
 func startOpenLDAP(t *testing.T) (host string, port string) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("requires Docker")
+	}
 	ctx := context.Background()
 
 	req := testcontainers.ContainerRequest{

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -185,6 +186,10 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 
 	session, err := u.dialer.Dial(ctx, conn)
 	if err != nil {
+		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
+			"connection_id": id,
+			"reason":        classifyDialError(err),
+		})
 		return nil, fmt.Errorf("ldap: failed to open session: %w", err)
 	}
 	defer session.Close()
@@ -203,6 +208,10 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 
 	entries, err := session.Search(ctx, filter, attrs)
 	if err != nil {
+		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
+			"connection_id": id,
+			"reason":        "unreachable",
+		})
 		return nil, fmt.Errorf("ldap: user search failed: %w", err)
 	}
 	if len(entries) == 0 {
@@ -223,6 +232,23 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 	}
 
 	return &entries[0], nil
+}
+
+// classifyDialError maps a low-level dial error to a stable audit reason category.
+// Raw error strings from the ldap library are never exposed; only the category.
+func classifyDialError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		msg := err.Error()
+		if strings.Contains(msg, "pool") {
+			return "pool_exhausted"
+		}
+		return "timeout"
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "tls") || strings.Contains(msg, "certificate") || strings.Contains(msg, "x509") {
+		return "tls_error"
+	}
+	return "unreachable"
 }
 
 // ldapEscapeFilter escapes special characters in an LDAP search filter value
