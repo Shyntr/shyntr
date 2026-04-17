@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var testDBCounter atomic.Int64
+
 type oidcE2EEnv struct {
 	db      *gorm.DB
 	router  *gin.Engine
@@ -62,7 +65,7 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	gin.SetMode(gin.TestMode)
 	logger.InitLogger("info")
 
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:oidc_e2e_%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:testdb_%d?mode=memory&cache=shared", testDBCounter.Add(1))), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, persistence.MigrateDB(db))
 
