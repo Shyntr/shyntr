@@ -183,7 +183,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	rememberForDuration := 0
 
 	if verifier != "" {
-		loginReq, loginErr := h.AuthReq.GetAuthenticatedLoginRequest(ctx, verifier)
+		loginReq, loginErr := h.AuthReq.GetAuthenticatedLoginRequest(ctx, tenantID, verifier)
 		if loginErr == nil {
 			userID = loginReq.Subject
 			authTime = loginReq.UpdatedAt

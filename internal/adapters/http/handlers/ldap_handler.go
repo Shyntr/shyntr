@@ -70,9 +70,17 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 	// Validate the login challenge is still active.
 	loginReq, err := h.auth.GetLoginRequest(c.Request.Context(), req.LoginChallenge)
 	if err != nil {
-		// TODO: Distinguish inactive/replayed login challenges once the auth use case
-		// exposes a typed error instead of a string-only message.
 		payload.WriteOIDCError(c, http.StatusNotFound, "login_request_not_found", "The login request was not found or has expired.", err)
+		return
+	}
+
+	if loginReq.TenantID != tenantID {
+		payload.WriteOIDCError(c, http.StatusForbidden, "access_denied", "The login challenge does not belong to this tenant.", nil)
+		return
+	}
+
+	if loginReq.Authenticated {
+		payload.WriteOIDCError(c, http.StatusNotFound, "login_request_not_found", "The login request was not found or has expired.", nil)
 		return
 	}
 
@@ -114,19 +122,18 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 		finalAttributes = rawAttrs
 	}
 
-	// Determine the subject — prefer the mapped DN, fall back to username.
-	subject := req.Username
-	if dn, ok := finalAttributes["dn"].(string); ok && dn != "" {
-		subject = dn
-	}
-
 	finalAttributes["source"] = "ldap"
 	finalAttributes["connection_id"] = connectionID
 	finalAttributes["idp"] = fmt.Sprintf("ldap:%s", connectionID)
 	finalAttributes["amr"] = []string{"pwd"}
 	if _, ok := finalAttributes["sub"]; !ok {
-		finalAttributes["sub"] = subject
+		sub := req.Username
+		if dn, ok := finalAttributes["dn"].(string); ok && dn != "" {
+			sub = dn
+		}
+		finalAttributes["sub"] = sub
 	}
+	subject, _ := finalAttributes["sub"].(string)
 
 	h.wh.FireEvent(tenantID, "user.login.ext", finalAttributes)
 

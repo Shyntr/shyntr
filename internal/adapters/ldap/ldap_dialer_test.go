@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -288,6 +289,44 @@ func TestLDAPDialer_StartTLS(t *testing.T) {
 	require.NoError(t, err, "StartTLS dial must succeed against self-signed cert when InsecureSkipVerify is enabled")
 	require.NotNil(t, session)
 	assert.NoError(t, session.Close())
+}
+
+// TestLDAPDialer_ConcurrentDial_SemaphoreCapHolds fires more goroutines than the
+// semaphore cap (20) and verifies all return without deadlock or panic.
+// The target address is intentionally unreachable so dials fail fast without
+// Docker. This test does not require any external infrastructure.
+func TestLDAPDialer_ConcurrentDial_SemaphoreCapHolds(t *testing.T) {
+	dialer := ldapadapter.NewLDAPDialer()
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		ServerURL: "ldap://127.0.0.1:1", // port 1 — always refused, fails fast
+		BaseDN:    "dc=example,dc=com",
+	}
+
+	const n = 25 // intentionally above the semaphore cap of 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			sess, err := dialer.Dial(ctx, conn)
+			if err == nil {
+				_ = sess.Close()
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+		// all goroutines returned — semaphore released correctly
+	case <-time.After(15 * time.Second):
+		t.Fatal("concurrent Dial calls did not all return within 15 s — possible deadlock or semaphore leak")
+	}
 }
 
 func dockerUnavailable(err error) bool {

@@ -148,13 +148,10 @@ func TestGetAuthFailures(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, int64(3), failures.Totals.Failure)
-	assert.Equal(t, int64(2), failures.Protocols["oidc"].Failure) // f1 and f2
-	assert.Equal(t, int64(1), failures.Protocols["ldap"].Failure) // f1
-	assert.Equal(t, int64(1), failures.Protocols["saml"].Failure) // f3
+	assert.Equal(t, int64(2), failures.Protocols["oidc"].Failure)
+	assert.Equal(t, int64(1), failures.Protocols["ldap"].Failure)
+	assert.Equal(t, int64(1), failures.Protocols["saml"].Failure)
 
-	// OIDC has 1 invalid_credentials (f1) and 1 invalid_request (f2).
-	// Both have count 1, so top_reason depends on map iteration order.
-	// Let's accept either for now or refine the test.
 	assert.Contains(t, []string{"invalid_request", "invalid_credentials"}, failures.Protocols["oidc"].TopReason)
 	assert.Equal(t, "invalid_credentials", failures.Protocols["ldap"].TopReason)
 	assert.Equal(t, "unknown", failures.Protocols["saml"].TopReason)

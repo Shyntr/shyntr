@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -117,16 +118,34 @@ func (r *ldapConnectionRepository) Update(ctx context.Context, conn *model.LDAPC
 	if conn == nil || conn.TenantID == "" || conn.ID == "" {
 		return ErrLDAPConnectionNotFound
 	}
-	dbModel := models.FromDomainLDAPConnection(conn)
 	encrypted, err := r.encryptBindPassword(conn.BindPassword)
 	if err != nil {
 		return err
 	}
-	dbModel.BindPasswordEncrypted = encrypted
+	// AttributeMapping uses a GORM JSON serializer; when passed in a raw map
+	// the serializer is bypassed, so we pre-encode it ourselves.
+	attrMappingJSON, err := json.Marshal(conn.AttributeMapping)
+	if err != nil {
+		return fmt.Errorf("ldap: failed to marshal attribute_mapping: %w", err)
+	}
+	updates := map[string]interface{}{
+		"name":                     conn.Name,
+		"server_url":               conn.ServerURL,
+		"bind_dn":                  conn.BindDN,
+		"bind_password_encrypted":  encrypted,
+		"base_dn":                  conn.BaseDN,
+		"user_search_filter":       conn.UserSearchFilter,
+		"user_search_attributes":   conn.UserSearchAttributes,
+		"group_search_filter":      conn.GroupSearchFilter,
+		"group_search_base_dn":     conn.GroupSearchBaseDN,
+		"attribute_mapping":        string(attrMappingJSON),
+		"start_tls":                conn.StartTLS,
+		"tls_insecure_skip_verify": conn.TLSInsecureSkipVerify,
+		"active":                   conn.Active,
+	}
 	result := r.db.WithContext(ctx).Model(&models.LDAPConnectionGORM{}).
 		Where("id = ? AND tenant_id = ?", conn.ID, conn.TenantID).
-		Omit("tenant_id").
-		Updates(dbModel)
+		Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}

@@ -209,7 +209,7 @@ func TestAuthenticateUser_WrongPassword(t *testing.T) {
 
 func TestAuthenticateUser_UserNotFound(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", BaseDN: "dc=example,dc=com"}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{entries: []model.LDAPEntry{}} // empty — user not found
 
@@ -222,7 +222,7 @@ func TestAuthenticateUser_UserNotFound(t *testing.T) {
 	call, _ := audit.lastWithAction("auth.ldap.bind.fail")
 	assert.Equal(t, "user not found", call.details["reason"])
 	require.Len(t, session.authCalls, 1)
-	assert.Equal(t, "cn=__shyntr_not_found__,", session.authCalls[0])
+	assert.Equal(t, "cn=__shyntr_not_found__,dc=example,dc=com", session.authCalls[0])
 }
 
 func TestAuthenticateUser_LDAPUnreachable(t *testing.T) {
@@ -520,6 +520,45 @@ func TestCreateConnection_OutboundPolicyViolation(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server_url violates outbound policy")
+	assert.False(t, al.hasAction("management.connection.ldap.create"))
+}
+
+func TestCreateConnection_InvalidURLScheme(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		Name:      "Corp AD",
+		ServerURL: "http://ldap.corp.com",
+		BaseDN:    "dc=corp,dc=com",
+	}
+	_, err := uc.CreateConnection(context.Background(), conn, "", "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must use ldap:// or ldaps://",
+		"non-LDAP scheme must be rejected at validation time")
+	assert.False(t, al.hasAction("management.connection.ldap.create"))
+}
+
+func TestCreateConnection_StartTLSWithLDAPSScheme(t *testing.T) {
+	al := &captureAuditLogger{}
+	repo := &extendedStubLDAPRepo{}
+	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, al)
+
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		Name:      "Corp AD",
+		ServerURL: "ldaps://ldap.corp.com:636",
+		StartTLS:  true,
+		BaseDN:    "dc=corp,dc=com",
+	}
+	_, err := uc.CreateConnection(context.Background(), conn, "", "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be used with ldaps://",
+		"StartTLS + ldaps:// must be rejected at validation time")
 	assert.False(t, al.hasAction("management.connection.ldap.create"))
 }
 

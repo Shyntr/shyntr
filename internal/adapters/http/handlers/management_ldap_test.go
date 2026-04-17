@@ -171,6 +171,10 @@ func TestManagementLDAPContract_CRUDAndIsolation(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), `"id":"ldap-a"`)
 		assert.Contains(t, w.Body.String(), `"tenant_id":"tenant-a"`)
+		assert.NotContains(t, w.Body.String(), "bind_password",
+			"bind_password must never appear in GET response")
+		assert.NotContains(t, w.Body.String(), "secret",
+			"plaintext bind credential must never appear in GET response")
 	})
 
 	t.Run("password preservation with empty string", func(t *testing.T) {

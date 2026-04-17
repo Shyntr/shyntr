@@ -16,13 +16,14 @@ type AuthUseCase interface {
 	UpdateLoginRequest(ctx context.Context, req *model.LoginRequest) (*model.LoginRequest, error)
 	GetLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
 	GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error)
-	GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error)
+	GetAuthenticatedLoginRequest(ctx context.Context, tenantID, challenge string) (*model.LoginRequest, error)
 	GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, subject string) (*model.LoginRequest, error)
 	GetLoginRequestBySessionToken(ctx context.Context, tenantID, sessionToken string) (*model.LoginRequest, error)
 	AcceptLoginRequest(ctx context.Context, challenge string, remember bool, rememberFor int, subject string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
 	RejectLoginRequest(ctx context.Context, challenge string, errName, errDesc, actorIP, userAgent string) (*model.LoginRequest, error)
 	MarkLoginAsProviderStarted(ctx context.Context, challenge, provider, connectionID string, providerContext map[string]interface{}, actorIP, userAgent string) error
 	CompleteProviderLogin(ctx context.Context, challenge, subject, connectionName, providerType string, contextData map[string]interface{}, actorIP, userAgent string) (*model.LoginRequest, error)
+	MarkLoginRequestConsumed(ctx context.Context, id string) error
 
 	CreateConsentRequest(ctx context.Context, req *model.ConsentRequest) (*model.ConsentRequest, error)
 	GetConsentRequest(ctx context.Context, challenge string) (*model.ConsentRequest, error)
@@ -80,8 +81,11 @@ func (u *authUseCase) GetLoginRequest(ctx context.Context, challenge string) (*m
 func (u *authUseCase) GetRecentLogins(ctx context.Context, tenantID string, limit int) ([]model.LoginRequest, error) {
 	return u.repo.GetRecentLogins(ctx, tenantID, limit)
 }
-func (u *authUseCase) GetAuthenticatedLoginRequest(ctx context.Context, challenge string) (*model.LoginRequest, error) {
-	return u.repo.GetAuthenticatedLoginRequest(ctx, challenge)
+func (u *authUseCase) GetAuthenticatedLoginRequest(ctx context.Context, tenantID, challenge string) (*model.LoginRequest, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
+	}
+	return u.repo.GetAuthenticatedLoginRequest(ctx, tenantID, challenge)
 }
 
 func (u *authUseCase) GetAuthenticatedLoginRequestBySubject(ctx context.Context, tenantID, subject string) (*model.LoginRequest, error) {
@@ -203,6 +207,7 @@ func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subj
 
 	req.Subject = subject
 	req.Authenticated = true
+	req.Active = false // prevent replay: a second login attempt on this challenge must be rejected
 	req.Context = contextBytes
 
 	if err := u.repo.UpdateLoginRequest(ctx, req); err != nil {
@@ -219,6 +224,18 @@ func (u *authUseCase) CompleteProviderLogin(ctx context.Context, challenge, subj
 	})
 
 	return req, nil
+}
+
+// MarkLoginRequestConsumed marks a login request as fully consumed so that the
+// associated login_verifier cannot be reused to produce a second token or assertion.
+func (u *authUseCase) MarkLoginRequestConsumed(ctx context.Context, id string) error {
+	req, err := u.repo.GetLoginRequest(ctx, id)
+	if err != nil {
+		return err
+	}
+	req.Active = false
+	req.Authenticated = false
+	return u.repo.UpdateLoginRequest(ctx, req)
 }
 
 // --- Consent Request Methods ---

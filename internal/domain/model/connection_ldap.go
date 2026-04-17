@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,12 @@ func (c *LDAPConnection) Validate() error {
 	}
 	if c.ServerURL == "" {
 		return errors.New("server_url is required")
+	}
+	if !strings.HasPrefix(c.ServerURL, "ldap://") && !strings.HasPrefix(c.ServerURL, "ldaps://") {
+		return errors.New("server_url must use ldap:// or ldaps:// scheme")
+	}
+	if c.StartTLS && strings.HasPrefix(c.ServerURL, "ldaps://") {
+		return errors.New("start_tls cannot be used with ldaps:// (use ldap:// + StartTLS or ldaps:// without StartTLS)")
 	}
 	if c.BaseDN == "" {
 		return errors.New("base_dn is required")

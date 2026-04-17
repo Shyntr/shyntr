@@ -36,7 +36,7 @@ func (r *ldapHandlerAuthRepoStub) GetLoginRequest(context.Context, string) (*mod
 func (r *ldapHandlerAuthRepoStub) GetRecentLogins(context.Context, string, int) ([]model.LoginRequest, error) {
 	return nil, nil
 }
-func (r *ldapHandlerAuthRepoStub) GetAuthenticatedLoginRequest(context.Context, string) (*model.LoginRequest, error) {
+func (r *ldapHandlerAuthRepoStub) GetAuthenticatedLoginRequest(context.Context, string, string) (*model.LoginRequest, error) {
 	return nil, nil
 }
 func (r *ldapHandlerAuthRepoStub) GetAuthenticatedLoginRequestBySubject(context.Context, string, string) (*model.LoginRequest, error) {
@@ -238,7 +238,46 @@ func TestLDAPHandler_Login_BranchCases(t *testing.T) {
 		loginClaims, ok := ctxData["login_claims"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "alice", loginClaims["sub"])
+		// Subject passed to CompleteProviderLogin must equal finalAttributes["sub"].
+		assert.Equal(t, "alice", authRepo.updatedReq.Subject,
+			"Subject stored in LoginRequest must equal finalAttributes[sub], not the raw DN")
 		assert.Equal(t, "user.login.ext", webhook.eventType)
+	})
+
+	t.Run("cross-tenant challenge returns 403", func(t *testing.T) {
+		authRepo := &ldapHandlerAuthRepoStub{
+			req: &model.LoginRequest{
+				ID:         "challenge-x-tenant",
+				TenantID:   "tenant-a", // challenge owner
+				ClientID:   "client-a",
+				RequestURL: "/oauth2/auth",
+				Active:     true,
+			},
+		}
+		router, _ := buildBranchLDAPHandlerRouter(t, authRepo, &ldapHandlerLDAPRepoStub{conn: baseConn}, &ldapHandlerSessionStub{entry: baseEntry})
+
+		// POST to tenant-b's LDAP endpoint
+		w := serveRequest(t, router, http.MethodPost, "/t/tenant-b/ldap/login/ldap-1", makeBody("challenge-x-tenant", "alice", "secret"), map[string]string{"Content-Type": "application/json"})
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), `"error":"access_denied"`)
+	})
+
+	t.Run("already-authenticated challenge returns 404", func(t *testing.T) {
+		authRepo := &ldapHandlerAuthRepoStub{
+			req: &model.LoginRequest{
+				ID:            "challenge-replay",
+				TenantID:      "tenant-a",
+				ClientID:      "client-a",
+				RequestURL:    "/oauth2/auth",
+				Active:        false,
+				Authenticated: true, // already completed by a prior login
+			},
+		}
+		router, _ := buildBranchLDAPHandlerRouter(t, authRepo, &ldapHandlerLDAPRepoStub{conn: baseConn}, &ldapHandlerSessionStub{entry: baseEntry})
+
+		w := serveRequest(t, router, http.MethodPost, "/t/tenant-a/ldap/login/ldap-1", makeBody("challenge-replay", "alice", "secret"), map[string]string{"Content-Type": "application/json"})
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), `"error":"login_request_not_found"`)
 	})
 
 	t.Run("request url parse failure returns 500", func(t *testing.T) {

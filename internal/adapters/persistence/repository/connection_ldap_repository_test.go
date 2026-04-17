@@ -283,6 +283,73 @@ func TestLDAPConnectionRepository_ListActiveByTenant(t *testing.T) {
 	assert.Empty(t, listX, "must return empty slice for unknown tenant")
 }
 
+func TestLDAPConnectionRepository_Update_BooleanFieldsPersistedWhenFalse(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	// Create with StartTLS=true and TLSInsecureSkipVerify=true.
+	conn := &model.LDAPConnection{
+		TenantID:              "tnt_bool",
+		Name:                  "Bool Test",
+		ServerURL:             "ldaps://ldap.example.com:636",
+		BaseDN:                "dc=example,dc=com",
+		StartTLS:              true,
+		TLSInsecureSkipVerify: true,
+		Active:                true,
+	}
+	require.NoError(t, repo.Create(ctx, conn))
+
+	// Update: toggle both booleans to false.
+	conn.StartTLS = false
+	conn.TLSInsecureSkipVerify = false
+	require.NoError(t, repo.Update(ctx, conn))
+
+	fetched, err := repo.GetByTenantAndID(ctx, "tnt_bool", conn.ID)
+	require.NoError(t, err)
+	assert.False(t, fetched.StartTLS, "StartTLS must be persisted as false after update")
+	assert.False(t, fetched.TLSInsecureSkipVerify, "TLSInsecureSkipVerify must be persisted as false after update")
+}
+
+func TestLDAPConnectionRepository_Update_AttributeMappingRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	// Create with an initial AttributeMapping that maps "sub" from "uid".
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt_attrmap",
+		Name:      "AttrMap Test",
+		ServerURL: "ldap://ldap.example.com",
+		BaseDN:    "dc=example,dc=com",
+		Active:    true,
+		AttributeMapping: map[string]model.AttributeMappingRule{
+			"sub": {Source: "uid", Type: "string"},
+		},
+	}
+	require.NoError(t, repo.Create(ctx, conn))
+
+	// Update: change the "sub" mapping source from "uid" → "mail" and add a second rule.
+	conn.AttributeMapping = map[string]model.AttributeMappingRule{
+		"sub":   {Source: "mail", Type: "string"},
+		"email": {Source: "mail", Type: "string"},
+	}
+	require.NoError(t, repo.Update(ctx, conn))
+
+	fetched, err := repo.GetByTenantAndID(ctx, "tnt_attrmap", conn.ID)
+	require.NoError(t, err)
+
+	require.Len(t, fetched.AttributeMapping, 2, "AttributeMapping must contain exactly the two updated rules")
+	assert.Equal(t, "mail", fetched.AttributeMapping["sub"].Source,
+		"sub Source must be updated from uid to mail")
+	assert.Equal(t, "string", fetched.AttributeMapping["sub"].Type,
+		"sub Type must survive the update round-trip")
+	assert.Equal(t, "mail", fetched.AttributeMapping["email"].Source,
+		"email rule added during update must be present after read")
+}
+
 func TestLDAPConnectionRepository_ListActiveByTenant_BrokenDB(t *testing.T) {
 	t.Parallel()
 	db := setupLDAPRepoTestDB(t)

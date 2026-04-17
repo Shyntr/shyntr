@@ -30,7 +30,7 @@ func (r *stubAuthReqRepo) GetLoginRequest(_ context.Context, _ string) (*model.L
 func (r *stubAuthReqRepo) GetRecentLogins(_ context.Context, _ string, _ int) ([]model.LoginRequest, error) {
 	return nil, nil
 }
-func (r *stubAuthReqRepo) GetAuthenticatedLoginRequest(_ context.Context, _ string) (*model.LoginRequest, error) {
+func (r *stubAuthReqRepo) GetAuthenticatedLoginRequest(_ context.Context, _, _ string) (*model.LoginRequest, error) {
 	return r.req, r.err
 }
 func (r *stubAuthReqRepo) GetAuthenticatedLoginRequestBySubject(_ context.Context, _, _ string) (*model.LoginRequest, error) {
