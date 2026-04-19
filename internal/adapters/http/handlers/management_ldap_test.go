@@ -102,7 +102,7 @@ func setupManagementLDAPAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
 	ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepository, &mgmtLDAPDialerStub{}, auditLogger, scopeUseCase, outboundGuard)
 
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, ldapUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, ldapUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

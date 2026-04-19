@@ -1242,6 +1242,8 @@ func runServer() {
 	ldapDialer := ldapadapter.NewLDAPDialer()
 	ldapConnectionUseCase := usecase.NewLDAPConnectionUseCase(ldapConnectionRepository, ldapDialer, auditLogger, scopeUseCase, outboundGuard)
 	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository, ldapConnectionRepository)
+	brandingRepository := repository.NewBrandingRepository(db)
+	brandingUseCase := usecase.NewBrandingUseCase(brandingRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)
@@ -1250,7 +1252,7 @@ func runServer() {
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
 		connectionUseCase, samlConnectionUseCase, ldapConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, outboundPolicyUseCase, outboundGuard, auditLogger, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, auditLogger, fositeConfig, cfg, provider, keyMgr, federationStateProvider, brandingUseCase)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()

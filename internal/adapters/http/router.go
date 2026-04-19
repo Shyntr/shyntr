@@ -44,6 +44,7 @@ func SetupRouter(
 	Provider *utils2.Provider,
 	km utils2.KeyManager,
 	federationState security.FederationStateProvider,
+	brandingUseCase usecase.BrandingUseCase,
 ) (*gin.Engine, *gin.Engine) {
 	attrMapper := mapper.New()
 
@@ -53,7 +54,7 @@ func SetupRouter(
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
 	healthHandler := handlers.NewHealthHandler(healthUseCase)
 	loginHandler := handlers.NewLoginHandler(cfg, managementUseCase, auditLogger)
-	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
+	mgmtHandler := handlers.NewManagementHandler(fositeCfg, clientUseCase, samlClientUseCase, samlConnectionUseCase, authUseCase, auth2SessionUseCase, connectionUseCase, ldapConnectionUseCase, tenantUseCase, auditUseCase, healthUseCase, outboundGuard, brandingUseCase)
 	ldapHandler := handlers.NewLDAPHandler(cfg, authUseCase, ldapConnectionUseCase, webhookUseCase, attrMapper)
 	oauthHandler := handlers.NewOAuth2Handler(Provider, km, cfg, clientUseCase, authUseCase, auth2SessionUseCase,
 		connectionUseCase, tenantUseCase, scopeUseCase, jwksCache)
@@ -211,6 +212,13 @@ func SetupRouter(
 			mgmtGroup.POST("/tenants/:id/scopes", scopeHandler.Create)
 			mgmtGroup.PUT("/tenants/:id/scopes/:scope_id", scopeHandler.Update)
 			mgmtGroup.DELETE("/tenants/:id/scopes/:scope_id", scopeHandler.Delete)
+
+			// Branding
+			mgmtGroup.GET("/tenants/:id/branding", mgmtHandler.GetBranding)
+			mgmtGroup.PUT("/tenants/:id/branding/draft", mgmtHandler.UpdateBrandingDraft)
+			mgmtGroup.POST("/tenants/:id/branding/publish", mgmtHandler.PublishBranding)
+			mgmtGroup.POST("/tenants/:id/branding/discard", mgmtHandler.DiscardBranding)
+			mgmtGroup.POST("/tenants/:id/branding/reset", mgmtHandler.ResetBranding)
 
 			// OAuth2 Clients
 			mgmtGroup.GET("/clients", mgmtHandler.ListClients)

@@ -30,17 +30,19 @@ type ManagementHandler struct {
 	AuditUse         usecase.AuditUseCase
 	HealthUse        usecase.HealthUseCase
 	OutboundGuard    port.OutboundGuard
+	BrandingUse      usecase.BrandingUseCase
 }
 
 func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase, SAMLClientUse usecase.SAMLClientUseCase,
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
 	LDAPConnUse usecase.LDAPConnectionUseCase,
-	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, HealthUse usecase.HealthUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
+	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, HealthUse usecase.HealthUseCase,
+	OutboundGuard port.OutboundGuard, BrandingUse usecase.BrandingUseCase) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
 		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse,
-		AuditUse: AuditUse, HealthUse: HealthUse, OutboundGuard: OutboundGuard}
+		AuditUse: AuditUse, HealthUse: HealthUse, OutboundGuard: OutboundGuard, BrandingUse: BrandingUse}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -1400,4 +1402,137 @@ func (h *ManagementHandler) TestLDAPConnection(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ─── Branding ────────────────────────────────────────────────────────────────
+
+// GetBranding godoc
+// @Summary Get Tenant Branding
+// @Description Returns the current draft and published branding config for a tenant. Returns defaults when no branding has been configured.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding [get]
+func (h *ManagementHandler) GetBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.GetBranding(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "get", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// UpdateBrandingDraft godoc
+// @Summary Update Branding Draft
+// @Description Validates and saves a new branding draft for the tenant. Does not affect the published state.
+// @Tags Branding
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Param request body payload.UpdateBrandingDraftRequest true "Branding config"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 400 {object} payload.AppError "Validation failed"
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/draft [put]
+func (h *ManagementHandler) UpdateBrandingDraft(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var req payload.UpdateBrandingDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+	b, err := h.BrandingUse.UpdateDraft(c.Request.Context(), tenantID, req.Theme)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Branding", "update draft", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// PublishBranding godoc
+// @Summary Publish Branding Draft
+// @Description Atomically copies the draft config into the published config.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/publish [post]
+func (h *ManagementHandler) PublishBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.Publish(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "publish", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// DiscardBranding godoc
+// @Summary Discard Branding Draft
+// @Description Resets the draft to the published state. If never published, resets to defaults.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/discard [post]
+func (h *ManagementHandler) DiscardBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.Discard(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "discard", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// ResetBranding godoc
+// @Summary Reset Branding
+// @Description Resets draft (and optionally published) to system defaults.
+// @Tags Branding
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Param request body payload.ResetBrandingRequest true "Reset target"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 400 {object} payload.AppError "Invalid target"
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/reset [post]
+func (h *ManagementHandler) ResetBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var req payload.ResetBrandingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+	b, err := h.BrandingUse.Reset(c.Request.Context(), tenantID, req.Target)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Branding", "reset", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
 }

@@ -88,8 +88,8 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil, outboundGuard)
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	// These tests only cover tenant/client routes, so LDAPConnUse is intentionally nil.
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, nil, tenantUseCase, auditUseCase, healthUseCase, outboundGuard)
+	// These tests only cover tenant/client routes, so LDAPConnUse and BrandingUse are intentionally nil.
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, nil, tenantUseCase, auditUseCase, healthUseCase, outboundGuard, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
