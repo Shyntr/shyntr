@@ -321,6 +321,16 @@ func TestLDAPEscapeFilter(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// mockNetError — a net.Error implementation for timeout classification tests
+// ---------------------------------------------------------------------------
+
+type mockNetError struct{ timeout bool }
+
+func (e *mockNetError) Error() string   { return "mock network error" }
+func (e *mockNetError) Timeout() bool   { return e.timeout }
+func (e *mockNetError) Temporary() bool { return false }
+
+// ---------------------------------------------------------------------------
 // TestClassifyDialError — validates audit reason categorisation
 // ---------------------------------------------------------------------------
 
@@ -337,6 +347,11 @@ func TestClassifyDialError(t *testing.T) {
 		{"certificate error", errors.New("x509: certificate signed by unknown authority"), "tls_error"},
 		{"connection refused", errors.New("dial tcp: connect: connection refused"), "unreachable"},
 		{"generic network error", errors.New("some unknown error"), "unreachable"},
+		// net.Dialer.Timeout fires a *net.OpError where Timeout()==true but the
+		// error is NOT context.DeadlineExceeded — must still classify as "timeout".
+		{"net.Error timeout true", &mockNetError{timeout: true}, "timeout"},
+		{"net.Error timeout false", &mockNetError{timeout: false}, "unreachable"},
+		{"wrapped net.Error timeout", fmt.Errorf("dial: %w", &mockNetError{timeout: true}), "timeout"},
 	}
 
 	for _, tc := range cases {
@@ -346,6 +361,96 @@ func TestClassifyDialError(t *testing.T) {
 			assert.Equal(t, tc.expected, got)
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: filter placeholder substitution (Findings B)
+// ---------------------------------------------------------------------------
+
+func TestAuthenticateUser_FilterSubstitution_UsernameToken(t *testing.T) {
+	// Stored filter uses {username} — must substitute the actual username.
+	// Before the fix the token was never replaced, causing every search to
+	// look for uid={username} literally and return zero results.
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={username})"}
+	repo := &stubLDAPRepo{conn: conn}
+	session := &stubLDAPSession{
+		entries: []model.LDAPEntry{
+			{DN: "uid=einstein,dc=example,dc=com"},
+		},
+	}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt_test", "conn_1", "einstein", "password")
+
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.Equal(t, "(uid=einstein)", session.lastFilter,
+		"{username} token must be substituted with the actual username")
+	assert.False(t, audit.hasAction("auth.ldap.connection.fail"))
+	assert.False(t, audit.hasAction("auth.ldap.bind.fail"))
+}
+
+func TestAuthenticateUser_FilterSubstitution_LegacyZeroToken(t *testing.T) {
+	// Stored filter uses legacy {0} — must continue to work after the fix.
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	repo := &stubLDAPRepo{conn: conn}
+	session := &stubLDAPSession{
+		entries: []model.LDAPEntry{
+			{DN: "uid=einstein,dc=example,dc=com"},
+		},
+	}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt_test", "conn_1", "einstein", "password")
+
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.Equal(t, "(uid=einstein)", session.lastFilter,
+		"{0} token must still be substituted with the actual username")
+}
+
+// ---------------------------------------------------------------------------
+// Regression: search error classification (Finding C)
+// ---------------------------------------------------------------------------
+
+func TestAuthenticateUser_SearchError_ContextTimeout_ClassifiedAsTimeout(t *testing.T) {
+	// When search fails because the context deadline fired, the audit reason
+	// must be "timeout" — not the previously hardcoded "unreachable".
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	repo := &stubLDAPRepo{conn: conn}
+	session := &stubLDAPSession{searchErr: context.DeadlineExceeded}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt_test", "conn_1", "alice", "pass")
+
+	require.Error(t, err)
+	assert.Nil(t, entry)
+	require.True(t, audit.hasAction("auth.ldap.connection.fail"))
+	call, _ := audit.lastWithAction("auth.ldap.connection.fail")
+	assert.Equal(t, "timeout", call.details["reason"],
+		"context.DeadlineExceeded from search must classify as timeout, not unreachable")
+}
+
+func TestAuthenticateUser_SearchError_Generic_ClassifiedAsUnreachable(t *testing.T) {
+	// A generic network error during search must still produce "unreachable".
+	// This verifies that classifyDialError is used (not a constant), and that
+	// the fallback behaviour is preserved.
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	repo := &stubLDAPRepo{conn: conn}
+	session := &stubLDAPSession{searchErr: errors.New("connection reset by peer")}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt_test", "conn_1", "alice", "pass")
+
+	require.Error(t, err)
+	assert.Nil(t, entry)
+	require.True(t, audit.hasAction("auth.ldap.connection.fail"))
+	call, _ := audit.lastWithAction("auth.ldap.connection.fail")
+	assert.Equal(t, "unreachable", call.details["reason"])
 }
 
 // ---------------------------------------------------------------------------
@@ -735,6 +840,150 @@ func TestTestConnection_DialFailure(t *testing.T) {
 	err := uc.TestConnection(context.Background(), "tnt", "c1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ldap test failed")
+}
+
+// ---------------------------------------------------------------------------
+// Regression: Gap A — LDAP search must request mapped source/fallback attrs
+// ---------------------------------------------------------------------------
+
+// recordingLDAPSession records the attribute list that was passed to Search.
+type recordingLDAPSession struct {
+	stubLDAPSession
+	requestedAttrs []string
+}
+
+func (s *recordingLDAPSession) Search(_ context.Context, filter string, attrs []string) ([]model.LDAPEntry, error) {
+	s.lastFilter = filter
+	s.requestedAttrs = attrs
+	return s.entries, s.searchErr
+}
+
+type recordingLDAPDialer struct {
+	session *recordingLDAPSession
+}
+
+func (d *recordingLDAPDialer) Dial(_ context.Context, _ *model.LDAPConnection) (port.LDAPSession, error) {
+	return d.session, nil
+}
+
+func TestAuthenticateUser_SearchAttrs_IncludesMappingSourceAttrs(t *testing.T) {
+	// mail is the Source for the email mapping rule. It is NOT in
+	// user_search_attributes, so it must be added automatically so the LDAP
+	// server can return it and the mapper can produce the email claim.
+	session := &recordingLDAPSession{
+		stubLDAPSession: stubLDAPSession{
+			entries: []model.LDAPEntry{
+				{DN: "uid=alice,dc=example,dc=com", Attributes: map[string][]string{
+					"uid":  {"alice"},
+					"mail": {"alice@example.com"},
+				}},
+			},
+		},
+	}
+	conn := &model.LDAPConnection{
+		TenantID:             "tnt",
+		UserSearchFilter:     "(uid={0})",
+		UserSearchAttributes: []string{"uid"},
+		AttributeMapping: map[string]model.AttributeMappingRule{
+			"email": {Source: "mail"},
+		},
+	}
+	repo := &stubLDAPRepo{conn: conn}
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, &captureAuditLogger{})
+
+	_, err := uc.AuthenticateUser(context.Background(), "tnt", "conn-1", "alice", "pass")
+	require.NoError(t, err)
+	assert.Contains(t, session.requestedAttrs, "uid",
+		"explicitly configured user_search_attributes must be preserved")
+	assert.Contains(t, session.requestedAttrs, "mail",
+		"source attribute from attribute_mapping must be appended to the search request")
+}
+
+func TestAuthenticateUser_SearchAttrs_IncludesFallbackAttr(t *testing.T) {
+	// Both Source and Fallback attrs must be requested so either can be used
+	// by the mapper if the primary source is absent.
+	session := &recordingLDAPSession{
+		stubLDAPSession: stubLDAPSession{
+			entries: []model.LDAPEntry{
+				{DN: "uid=alice,dc=example,dc=com", Attributes: map[string][]string{"uid": {"alice"}}},
+			},
+		},
+	}
+	conn := &model.LDAPConnection{
+		TenantID:             "tnt",
+		UserSearchFilter:     "(uid={0})",
+		UserSearchAttributes: []string{"uid"},
+		AttributeMapping: map[string]model.AttributeMappingRule{
+			"email": {Source: "mail", Fallback: "userPrincipalName"},
+		},
+	}
+	repo := &stubLDAPRepo{conn: conn}
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, &captureAuditLogger{})
+
+	_, _ = uc.AuthenticateUser(context.Background(), "tnt", "conn-1", "alice", "pass")
+	assert.Contains(t, session.requestedAttrs, "mail")
+	assert.Contains(t, session.requestedAttrs, "userPrincipalName",
+		"fallback attribute from attribute_mapping must be appended to the search request")
+}
+
+func TestAuthenticateUser_SearchAttrs_NoDuplicates(t *testing.T) {
+	// If a source attr is already listed in user_search_attributes, it must
+	// not appear twice in the search request.
+	session := &recordingLDAPSession{
+		stubLDAPSession: stubLDAPSession{
+			entries: []model.LDAPEntry{
+				{DN: "uid=alice,dc=example,dc=com", Attributes: map[string][]string{"uid": {"alice"}}},
+			},
+		},
+	}
+	conn := &model.LDAPConnection{
+		TenantID:             "tnt",
+		UserSearchFilter:     "(uid={0})",
+		UserSearchAttributes: []string{"uid", "mail"},
+		AttributeMapping: map[string]model.AttributeMappingRule{
+			"email": {Source: "mail"}, // mail already in UserSearchAttributes
+		},
+	}
+	repo := &stubLDAPRepo{conn: conn}
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, &captureAuditLogger{})
+
+	_, _ = uc.AuthenticateUser(context.Background(), "tnt", "conn-1", "alice", "pass")
+
+	count := 0
+	for _, a := range session.requestedAttrs {
+		if a == "mail" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "mail must appear exactly once in the search attribute list")
+}
+
+func TestAuthenticateUser_SearchAttrs_EmptyUserSearchAttributes_FallbackPreserved(t *testing.T) {
+	// When user_search_attributes is empty, the default ["dn"] fallback must
+	// still be present and mapping source attrs must be appended after it.
+	session := &recordingLDAPSession{
+		stubLDAPSession: stubLDAPSession{
+			entries: []model.LDAPEntry{
+				{DN: "uid=alice,dc=example,dc=com"},
+			},
+		},
+	}
+	conn := &model.LDAPConnection{
+		TenantID:             "tnt",
+		UserSearchFilter:     "(uid={0})",
+		UserSearchAttributes: nil, // empty — triggers default ["dn"]
+		AttributeMapping: map[string]model.AttributeMappingRule{
+			"email": {Source: "mail"},
+		},
+	}
+	repo := &stubLDAPRepo{conn: conn}
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, &captureAuditLogger{})
+
+	_, _ = uc.AuthenticateUser(context.Background(), "tnt", "conn-1", "alice", "pass")
+	assert.Contains(t, session.requestedAttrs, "dn",
+		"default dn attr must survive when user_search_attributes is empty")
+	assert.Contains(t, session.requestedAttrs, "mail",
+		"mapping source attr must be appended even after the dn default")
 }
 
 func TestTestConnection_RespectsContextDeadline(t *testing.T) {

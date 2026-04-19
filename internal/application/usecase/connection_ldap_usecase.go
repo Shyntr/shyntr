@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -210,23 +211,46 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 	}
 	defer func() { _ = session.Close() }()
 
-	// Build the user search filter by substituting {0} with the sanitised username.
+	// Build the user search filter. Support both {username} and the legacy {0}
+	// placeholder so stored filters from either convention work correctly.
 	filter := conn.UserSearchFilter
 	if filter == "" {
 		filter = "(uid={0})"
 	}
-	filter = strings.ReplaceAll(filter, "{0}", ldapEscapeFilter(username))
+	escaped := ldapEscapeFilter(username)
+	filter = strings.ReplaceAll(filter, "{username}", escaped)
+	filter = strings.ReplaceAll(filter, "{0}", escaped)
 
 	attrs := conn.UserSearchAttributes
 	if len(attrs) == 0 {
 		attrs = []string{"dn"}
 	}
 
+	// Extend the requested attribute list with every source/fallback attribute
+	// referenced by attribute_mapping. LDAP only returns explicitly requested
+	// attributes, so omitting them silently breaks mapped claims (e.g. mail→email).
+	seen := make(map[string]bool, len(attrs))
+	for _, a := range attrs {
+		if a != "" {
+			seen[a] = true
+		}
+	}
+	for _, rule := range conn.AttributeMapping {
+		if rule.Source != "" && !seen[rule.Source] {
+			attrs = append(attrs, rule.Source)
+			seen[rule.Source] = true
+		}
+		if rule.Fallback != "" && !seen[rule.Fallback] {
+			attrs = append(attrs, rule.Fallback)
+			seen[rule.Fallback] = true
+		}
+	}
+
 	entries, err := session.Search(ctx, filter, attrs)
 	if err != nil {
 		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
 			"connection_id": id,
-			"reason":        "unreachable",
+			"reason":        classifyDialError(err),
 		})
 		return nil, fmt.Errorf("ldap: user search failed: %w", err)
 	}
@@ -251,18 +275,25 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 	return &entries[0], nil
 }
 
-// classifyDialError maps a low-level dial error to a stable audit reason category.
+// classifyDialError maps a low-level error to a stable audit reason category.
 // Raw error strings from the ldap library are never exposed; only the category.
+// This function is used for both dial and search errors so classification is
+// consistent across the entire LDAP auth flow.
 func classifyDialError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
-		msg := err.Error()
-		if strings.Contains(msg, "pool") {
+		if strings.Contains(err.Error(), "pool") {
 			return "pool_exhausted"
 		}
 		return "timeout"
 	}
 	if errors.Is(err, context.Canceled) {
 		return "canceled"
+	}
+	// net.Dialer.Timeout fires a *net.OpError where Timeout() == true.
+	// This is NOT context.DeadlineExceeded, so it must be checked separately.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "tls") || strings.Contains(msg, "certificate") || strings.Contains(msg, "x509") {

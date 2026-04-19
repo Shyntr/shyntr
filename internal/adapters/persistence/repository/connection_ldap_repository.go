@@ -10,6 +10,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
 	shcrypto "github.com/Shyntr/shyntr/pkg/crypto"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -135,7 +136,7 @@ func (r *ldapConnectionRepository) Update(ctx context.Context, conn *model.LDAPC
 		"bind_password_encrypted":  encrypted,
 		"base_dn":                  conn.BaseDN,
 		"user_search_filter":       conn.UserSearchFilter,
-		"user_search_attributes":   conn.UserSearchAttributes,
+		"user_search_attributes":   pq.StringArray(conn.UserSearchAttributes),
 		"group_search_filter":      conn.GroupSearchFilter,
 		"group_search_base_dn":     conn.GroupSearchBaseDN,
 		"attribute_mapping":        string(attrMappingJSON),

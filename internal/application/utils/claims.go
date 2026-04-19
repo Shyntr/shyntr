@@ -25,6 +25,13 @@ func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes 
 		for _, claim := range scope.Claims {
 			allowedKeys[claim] = true
 		}
+		// Standard OIDC scopes also allow their well-known claims regardless of
+		// whether the database scope record explicitly lists them. This makes
+		// granting the "email" scope sufficient to release the "email" claim even
+		// when scope.Claims is empty or was not seeded via bindMappingScopes.
+		for _, claim := range scopeToClaims[scope.Name] {
+			allowedKeys[claim] = true
+		}
 	}
 
 	for key, value := range contextMap {
