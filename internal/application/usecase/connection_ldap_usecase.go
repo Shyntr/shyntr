@@ -195,6 +195,11 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 		return nil, err
 	}
 
+	// Bound the outbound LDAP operation so a hung server cannot hold the
+	// Gin handler goroutine for the full HTTP server write timeout.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	session, err := u.dialer.Dial(ctx, conn)
 	if err != nil {
 		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{

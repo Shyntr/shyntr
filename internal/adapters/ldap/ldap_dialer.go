@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
+	"time"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -77,8 +79,18 @@ func (d *ldapDialer) Dial(ctx context.Context, conn *model.LDAPConnection) (port
 // dialInternal performs the blocking TCP connect, optional StartTLS negotiation,
 // and service-account bind. Called exclusively from a worker goroutine.
 // BindPassword is never logged.
+// dialTimeout is the maximum time allowed for the TCP connect in dialInternal.
+// This bounds the lifetime of leaked background goroutines when the caller's
+// context fires before the dial completes.
+const dialTimeout = 10 * time.Second
+
 func (d *ldapDialer) dialInternal(conn *model.LDAPConnection) (*ldapSession, error) {
 	var opts []ldaplib.DialOpt
+
+	// Bound the TCP connect so leaked goroutines do not linger indefinitely
+	// waiting on an unreachable server.
+	opts = append(opts, ldaplib.DialWithDialer(&net.Dialer{Timeout: dialTimeout}))
+
 	if conn.TLSInsecureSkipVerify {
 		opts = append(opts, ldaplib.DialWithTLSConfig(&tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec // user-controlled flag
