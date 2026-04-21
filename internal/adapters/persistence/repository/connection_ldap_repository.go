@@ -67,6 +67,12 @@ func (r *ldapConnectionRepository) toDomain(m *models.LDAPConnectionGORM) (*mode
 }
 
 func (r *ldapConnectionRepository) Create(ctx context.Context, conn *model.LDAPConnection) error {
+	if conn == nil {
+		return errors.New("ldap: connection cannot be nil")
+	}
+	if conn.TenantID == "" {
+		return ErrLDAPConnectionTenantRequired
+	}
 	dbModel := models.FromDomainLDAPConnection(conn)
 	encrypted, err := r.encryptBindPassword(conn.BindPassword)
 	if err != nil {
@@ -78,17 +84,6 @@ func (r *ldapConnectionRepository) Create(ctx context.Context, conn *model.LDAPC
 	}
 	conn.ID = dbModel.ID // write back BeforeCreate-generated ID
 	return nil
-}
-
-func (r *ldapConnectionRepository) GetByID(ctx context.Context, id string) (*model.LDAPConnection, error) {
-	var dbModel models.LDAPConnectionGORM
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrLDAPConnectionNotFound
-		}
-		return nil, err
-	}
-	return r.toDomain(&dbModel)
 }
 
 func (r *ldapConnectionRepository) GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.LDAPConnection, error) {

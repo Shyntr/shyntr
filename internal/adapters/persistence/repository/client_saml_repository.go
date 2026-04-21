@@ -81,10 +81,16 @@ func (r *samlClientRepository) GetByTenantAndEntityID(ctx context.Context, tenan
 
 func (r *samlClientRepository) Update(ctx context.Context, client *model.SAMLClient) error {
 	dbModel := models.FromDomainSAMLClient(client)
-	return r.db.WithContext(ctx).Model(&models.SAMLClientGORM{}).
-		//Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
-		Where("id = ?", client.ID).
-		Updates(dbModel).Error
+	result := r.db.WithContext(ctx).Model(&models.SAMLClientGORM{}).
+		Where("tenant_id = ? AND id = ?", client.TenantID, client.ID).
+		Updates(dbModel)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("saml client not found")
+	}
+	return nil
 }
 
 func (r *samlClientRepository) Delete(ctx context.Context, tenantID, id string) error {
@@ -99,15 +105,14 @@ func (r *samlClientRepository) Delete(ctx context.Context, tenantID, id string) 
 }
 
 func (r *samlClientRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.SAMLClient, error) {
-	var dbModels []models.SAMLClientGORM
-	query := r.db.WithContext(ctx).Model(&models.SAMLClientGORM{})
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
 	}
-	if err := query.Find(&dbModels).Error; err != nil {
+	var dbModels []models.SAMLClientGORM
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*model.SAMLClient, 0)
+	entities := make([]*model.SAMLClient, 0, len(dbModels))
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}

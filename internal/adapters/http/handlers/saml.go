@@ -719,7 +719,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
 
-			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
+			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), tenantID, activeSession.ClientID)
 			if clientErr == nil {
 				if oidcClient.BackchannelLogoutURI != "" {
 					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), tenantID, oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)

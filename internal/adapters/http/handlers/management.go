@@ -408,7 +408,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve clients"
 // @Router /admin/management/clients [get]
 func (h *ManagementHandler) ListClients(c *gin.Context) {
-	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), "")
+	clients, err := h.OAuth2ClientUse.ListAllClients(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
@@ -425,19 +425,19 @@ func (h *ManagementHandler) ListClients(c *gin.Context) {
 // @Tags OAuth2 Clients
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Success 200 {array} model.OAuth2Client
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve clients for tenant"
-// @Router /admin/management/tenants/{tenant_id}/clients [get]
+// @Router /admin/management/tenants/{id}/clients [get]
 func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), tenantID)
+	clients, err := h.OAuth2ClientUse.ListClientsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
@@ -456,13 +456,15 @@ func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
 // @Tags OAuth2 Clients
 // @Produce json
 // @Security BearerAuth
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Client ID"
 // @Success 200 {object} model.OAuth2Client
 // @Failure 404 {object} payload.AppError "OIDC Client not found"
-// @Router /admin/management/clients/{id} [get]
+// @Router /admin/management/clients/{tenant_id}/{id} [get]
 func (h *ManagementHandler) GetClient(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
-	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), tenantID, id)
 	if err != nil {
 		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
@@ -492,8 +494,13 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		c.Error(payload.NewValidationAppError(err))
 		return
 	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body client_id does not match the target resource in the path.", "Remove client_id from the body or make it match the path parameter.", []payload.FieldError{{Field: "client_id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
 
-	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.TenantID, id)
 	if err != nil {
 		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
@@ -569,7 +576,7 @@ func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients"
 // @Router /admin/management/saml-clients [get]
 func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
-	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), "")
+	clients, err := h.SAMLClientUse.ListAllClients(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
@@ -587,15 +594,15 @@ func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
 // @Success 200 {array} model.SAMLClient
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients for tenant"
-// @Router /admin/management/saml-clients/tenant/{tenant_id} [get]
+// @Router /admin/management/tenants/{id}/saml-clients [get]
 func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), tenantID)
+	clients, err := h.SAMLClientUse.ListClientsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
@@ -609,7 +616,7 @@ func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
 // @Tags SAML Clients
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Client ID"
 // @Success 200 {object} model.SAMLClient
 // @Failure 404 {object} payload.AppError "SAML Client not found"
@@ -866,7 +873,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		return
 	}
 	logger.FromGin(c).Info("SAML connection created successfully", zap.String("entity_id", connection.IdpEntityID), zap.String("target_tenant_id", connection.TenantID), zap.String("protocol", "saml"))
-	c.JSON(http.StatusCreated, conn)
+	c.JSON(http.StatusCreated, payload.FromDomainSAMLConnection(connection))
 }
 
 // ListSAMLConnections godoc
@@ -879,12 +886,12 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections"
 // @Router /admin/management/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
-	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), "")
+	connections, err := h.SAMLConnUse.ListAllConnections(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnections(connections))
 }
 
 // ListSAMLConnectionsByTenant godoc
@@ -897,20 +904,20 @@ func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
 // @Success 200 {array} model.SAMLConnection
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections for tenant"
-// @Router /admin/management/tenants/{tenant_id}/saml-connections [get]
+// @Router /admin/management/tenants/{id}/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), tenantID)
+	connections, err := h.SAMLConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnections(connections))
 }
 
 // GetSAMLConnection godoc
@@ -919,7 +926,7 @@ func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
 // @Tags SAML Connections
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Connection ID"
 // @Success 200 {object} model.SAMLConnection
 // @Failure 404 {object} payload.AppError "SAML Connection not found"
@@ -932,7 +939,7 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 		c.Error(payload.NewNotFoundAppError("SAML connection", err))
 		return
 	}
-	c.JSON(http.StatusOK, conn)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnection(conn))
 }
 
 // UpdateSAMLConnection godoc
@@ -949,10 +956,26 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to update SAML connection"
 // @Router /admin/management/saml-connections/{id} [put]
 func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
+	id := c.Param("id")
 	var req payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(payload.NewValidationAppError(err))
 		return
+	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body id does not match the target resource in the path.", "Remove id from the body or make it match the path parameter.", []payload.FieldError{{Field: "id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
+
+	existingConn, err := h.SAMLConnUse.GetConnection(c.Request.Context(), req.TenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("SAML connection", err))
+		return
+	}
+
+	if req.SPPrivateKey == "" || req.SPPrivateKey == "*****" {
+		req.SPPrivateKey = existingConn.SPPrivateKey
 	}
 
 	updateData := model.SAMLConnection{
@@ -973,7 +996,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		Active:                   true,
 	}
 
-	err := h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
+	err = h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connection", "update", err))
@@ -1055,7 +1078,7 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", savedConn.ClientID), zap.String("target_tenant_id", savedConn.TenantID), zap.String("protocol", "oidc"))
-	c.JSON(http.StatusCreated, conn)
+	c.JSON(http.StatusCreated, payload.FromDomainOIDCConnection(savedConn))
 }
 
 // ListOIDCConnections godoc
@@ -1068,12 +1091,12 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections"
 // @Router /admin/management/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
-	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), "")
+	connections, err := h.OIDCConnUse.ListAllConnections(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnections(connections))
 }
 
 // ListOIDCConnectionsByTenant godoc
@@ -1086,20 +1109,20 @@ func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
 // @Success 200 {array} model.OIDCConnection
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections for tenant"
-// @Router /admin/management/tenants/{tenant_id}/oidc-connections [get]
+// @Router /admin/management/tenants/{id}/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), tenantID)
+	connections, err := h.OIDCConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnections(connections))
 }
 
 // GetOIDCConnection godoc
@@ -1108,7 +1131,7 @@ func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
 // @Tags OIDC Connections
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Connection ID"
 // @Success 200 {object} model.OIDCConnection
 // @Failure 404 {object} payload.AppError "OIDC Connection not found"
@@ -1121,7 +1144,7 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 		c.Error(payload.NewNotFoundAppError("OIDC connection", err))
 		return
 	}
-	c.JSON(http.StatusOK, connection)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnection(connection))
 }
 
 // UpdateOIDCConnection godoc
@@ -1138,10 +1161,26 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to update OIDC connection"
 // @Router /admin/management/oidc-connections/{id} [put]
 func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
+	id := c.Param("id")
 	var req payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(payload.NewValidationAppError(err))
 		return
+	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body id does not match the target resource in the path.", "Remove id from the body or make it match the path parameter.", []payload.FieldError{{Field: "id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
+
+	existingConn, err := h.OIDCConnUse.GetConnection(c.Request.Context(), req.TenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("OIDC connection", err))
+		return
+	}
+
+	if req.ClientSecret == "" || req.ClientSecret == "*****" {
+		req.ClientSecret = existingConn.ClientSecret
 	}
 
 	updateData := model.OIDCConnection{
@@ -1160,7 +1199,7 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		AttributeMapping:      req.AttributeMapping,
 	}
 
-	err := h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
+	err = h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connection", "update", err))
@@ -1244,7 +1283,7 @@ func (h *ManagementHandler) CreateLDAPConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections"
 // @Router /admin/management/ldap-connections [get]
 func (h *ManagementHandler) ListLDAPConnections(c *gin.Context) {
-	connections, err := h.LDAPConnUse.ListConnections(c.Request.Context(), "")
+	connections, err := h.LDAPConnUse.ListAllConnections(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
 		return
@@ -1266,14 +1305,14 @@ func (h *ManagementHandler) ListLDAPConnections(c *gin.Context) {
 // @Success 200 {array} payload.LDAPConnectionResponse
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections for tenant"
-// @Router /admin/management/tenants/{tenant_id}/ldap-connections [get]
+// @Router /admin/management/tenants/{id}/ldap-connections [get]
 func (h *ManagementHandler) ListLDAPConnectionsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
-	connections, err := h.LDAPConnUse.ListConnections(c.Request.Context(), tenantID)
+	connections, err := h.LDAPConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
 		return

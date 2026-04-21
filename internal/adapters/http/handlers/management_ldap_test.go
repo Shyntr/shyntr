@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +50,7 @@ func (d *mgmtLDAPDialerStub) Dial(context.Context, *model.LDAPConnection) (port.
 func setupManagementLDAPAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	logger.InitLogger("info")
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, persistence.MigrateDB(db))
 
@@ -108,6 +110,7 @@ func setupManagementLDAPAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	r := gin.New()
 	r.Use(middleware.ErrorHandlerMiddleware())
 	r.GET("/admin/management/ldap-connections", handler.ListLDAPConnections)
+	r.GET("/admin/management/tenants/:id/ldap-connections", handler.ListLDAPConnectionsByTenant)
 	r.GET("/admin/management/ldap-connections/:tenant_id/:id", handler.GetLDAPConnection)
 	r.POST("/admin/management/ldap-connections", handler.CreateLDAPConnection)
 	r.PUT("/admin/management/ldap-connections/:tenant_id/:id", handler.UpdateLDAPConnection)
@@ -134,7 +137,7 @@ func TestManagementLDAPContract_CRUDAndIsolation(t *testing.T) {
 		return body
 	}
 
-	t.Run("create and global list remains cross tenant", func(t *testing.T) {
+	t.Run("create and list follows tenant isolation", func(t *testing.T) {
 		for _, tc := range []struct {
 			id, tenantID, name string
 		}{
@@ -148,20 +151,27 @@ func TestManagementLDAPContract_CRUDAndIsolation(t *testing.T) {
 			require.Equal(t, http.StatusCreated, w.Code)
 		}
 
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/admin/management/ldap-connections", nil)
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
+		// Global list is now allowed for admins and returns 200
+		wGlobal := httptest.NewRecorder()
+		reqGlobal, _ := http.NewRequest("GET", "/admin/management/ldap-connections", nil)
+		r.ServeHTTP(wGlobal, reqGlobal)
+		assert.Equal(t, http.StatusOK, wGlobal.Code)
 
-		var conns []map[string]interface{}
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &conns))
-		require.Len(t, conns, 2)
-		tenantSet := map[string]bool{}
-		for _, c := range conns {
-			tenantSet[c["tenant_id"].(string)] = true
-		}
-		assert.True(t, tenantSet["tenant-a"])
-		assert.True(t, tenantSet["tenant-b"])
+		var connsAll []map[string]interface{}
+		require.NoError(t, json.Unmarshal(wGlobal.Body.Bytes(), &connsAll))
+		assert.Len(t, connsAll, 2, "Global list should return connections from all tenants")
+
+		// Tenant-scoped list works and provides isolation
+		wA := httptest.NewRecorder()
+		reqA, _ := http.NewRequest("GET", "/admin/management/tenants/tenant-a/ldap-connections", nil)
+		r.ServeHTTP(wA, reqA)
+		require.Equal(t, http.StatusOK, wA.Code)
+
+		var connsA []map[string]interface{}
+		require.NoError(t, json.Unmarshal(wA.Body.Bytes(), &connsA))
+		require.Len(t, connsA, 1)
+		assert.Equal(t, "tenant-a", connsA[0]["tenant_id"])
+		assert.Equal(t, "ldap-a", connsA[0]["id"])
 	})
 
 	t.Run("get by tenant and id", func(t *testing.T) {

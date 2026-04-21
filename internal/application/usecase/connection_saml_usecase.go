@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/google/uuid"
@@ -22,7 +23,8 @@ type SAMLConnectionUseCase interface {
 	GetConnectionByIdpEntity(ctx context.Context, tenantID, idpEntity string) (*model.SAMLConnection, error)
 	UpdateConnection(ctx context.Context, conn *model.SAMLConnection, actorIP, userAgent string) error
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListConnections(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
+	ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error)
+	ListAllConnections(ctx context.Context) ([]*model.SAMLConnection, error)
 	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule)
 }
 
@@ -256,6 +258,13 @@ func (u *samlConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 	return nil
 }
 
-func (u *samlConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
+func (u *samlConnectionUseCase) ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id is required")
+	}
 	return u.repo.ListByTenant(ctx, tenantID)
+}
+
+func (u *samlConnectionUseCase) ListAllConnections(ctx context.Context) ([]*model.SAMLConnection, error) {
+	return u.repo.List(ctx)
 }

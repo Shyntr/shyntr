@@ -668,6 +668,74 @@ func TestOIDCE2E_CoreFlow(t *testing.T) {
 	assert.Equal(t, "http://client.localhost/logout?state=logout-state", logoutLoc)
 }
 
+func TestOIDCE2E_CoreFlow_ConsentRequestRetainsLoginChallenge(t *testing.T) {
+	env := setupOIDCE2EEnv(t)
+
+	codeVerifier := "e2e-code-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
+	codeChallenge := pkceS256Challenge(codeVerifier)
+	authURL := "/t/tenant-a/oauth2/auth?client_id=oidc-client-a&response_type=code&redirect_uri=" +
+		url.QueryEscape("http://client.localhost/callback") +
+		"&scope=openid%20profile&state=e2e-state&code_challenge=" + url.QueryEscape(codeChallenge) +
+		"&code_challenge_method=S256"
+
+	authResp := serveRequest(t, env.router, http.MethodGet, authURL, nil, nil)
+	require.Equal(t, http.StatusFound, authResp.Code)
+
+	loginLoc := authResp.Header().Get("Location")
+	loginQuery := parseLocationQuery(t, loginLoc)
+	loginChallenge := loginQuery.Get("login_challenge")
+	require.NotEmpty(t, loginChallenge)
+
+	loginPayload := []byte(`{"subject":"alice","remember":true,"remember_for":3600,"context":{"email":"alice@example.com","tenant_id":"tenant-a"}}`)
+	loginAcceptResp := serveRequest(t, env.router, http.MethodPut, "/admin/login/accept?login_challenge="+url.QueryEscape(loginChallenge), bytes.NewReader(loginPayload), nil)
+	require.Equal(t, http.StatusOK, loginAcceptResp.Code)
+
+	var loginAcceptBody map[string]string
+	require.NoError(t, json.NewDecoder(loginAcceptResp.Body).Decode(&loginAcceptBody))
+	loginResumeURL := loginAcceptBody["redirect_to"]
+	require.NotEmpty(t, loginResumeURL)
+	loginResumeURLParsed, err := url.Parse(loginResumeURL)
+	require.NoError(t, err)
+	loginVerifier := loginResumeURLParsed.Query().Get("login_verifier")
+	require.NotEmpty(t, loginVerifier)
+
+	loginResumeResp := serveRequest(t, env.router, http.MethodGet, authURL+"&login_verifier="+url.QueryEscape(loginVerifier), nil, nil)
+	require.Equal(t, http.StatusFound, loginResumeResp.Code)
+
+	consentLoc := loginResumeResp.Header().Get("Location")
+	consentQuery := parseLocationQuery(t, consentLoc)
+	consentChallenge := consentQuery.Get("consent_challenge")
+	require.NotEmpty(t, consentChallenge)
+
+	consentGetResp := serveRequest(t, env.router, http.MethodGet, "/admin/consent?consent_challenge="+url.QueryEscape(consentChallenge), nil, nil)
+	require.Equal(t, http.StatusOK, consentGetResp.Code)
+
+	var consentBody map[string]interface{}
+	require.NoError(t, json.NewDecoder(consentGetResp.Body).Decode(&consentBody))
+	assert.Equal(t, consentChallenge, consentBody["challenge"])
+	assert.Equal(t, "oidc-client-a", consentBody["client_id"])
+	assert.Equal(t, "alice", consentBody["subject"])
+	assert.Equal(t, "tenant-a", consentBody["tenant"])
+
+	consentPayload := []byte(`{"grant_scope":["openid","profile"],"grant_audience":[],"remember":true,"remember_for":3600,"session":{"tenant_id":"tenant-a"}}`)
+	consentAcceptResp := serveRequest(t, env.router, http.MethodPut, "/admin/consent/accept?consent_challenge="+url.QueryEscape(consentChallenge), bytes.NewReader(consentPayload), nil)
+	require.Equal(t, http.StatusOK, consentAcceptResp.Code)
+
+	var consentAcceptBody map[string]string
+	require.NoError(t, json.NewDecoder(consentAcceptResp.Body).Decode(&consentAcceptBody))
+	authResumeURL := consentAcceptBody["redirect_to"]
+	require.NotEmpty(t, authResumeURL)
+	authResumeURLParsed, err := url.Parse(authResumeURL)
+	require.NoError(t, err)
+	consentVerifier := authResumeURLParsed.Query().Get("consent_verifier")
+	require.NotEmpty(t, consentVerifier)
+
+	finalAuthResp := serveRequest(t, env.router, http.MethodGet, authURL+
+		"&login_verifier="+url.QueryEscape(loginVerifier)+
+		"&consent_verifier="+url.QueryEscape(consentVerifier), nil, nil)
+	require.Equal(t, http.StatusSeeOther, finalAuthResp.Code)
+}
+
 func TestOIDCE2E_FederationCallback_ResumesOriginalFlow(t *testing.T) {
 	env := setupOIDCE2EEnv(t)
 	provider := newFakeOIDCProvider(t, env.db)

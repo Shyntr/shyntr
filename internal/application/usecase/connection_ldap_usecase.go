@@ -24,7 +24,8 @@ type LDAPConnectionUseCase interface {
 	TestConnection(ctx context.Context, tenantID, id string) error
 	UpdateConnection(ctx context.Context, conn *model.LDAPConnection, actorIP, userAgent string) error
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListConnections(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error)
+	ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error)
+	ListAllConnections(ctx context.Context) ([]*model.LDAPConnection, error)
 	AuthenticateUser(ctx context.Context, tenantID, id, username, password string) (*model.LDAPEntry, error)
 	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule)
 }
@@ -175,11 +176,15 @@ func (u *ldapConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 	return nil
 }
 
-func (u *ldapConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error) {
+func (u *ldapConnectionUseCase) ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.LDAPConnection, error) {
 	if tenantID == "" {
-		return u.repo.List(ctx)
+		return nil, fmt.Errorf("tenant_id is required")
 	}
 	return u.repo.ListByTenant(ctx, tenantID)
+}
+
+func (u *ldapConnectionUseCase) ListAllConnections(ctx context.Context) ([]*model.LDAPConnection, error) {
+	return u.repo.List(ctx)
 }
 
 // AuthenticateUser searches for the user identified by username within the
@@ -187,6 +192,10 @@ func (u *ldapConnectionUseCase) ListConnections(ctx context.Context, tenantID st
 // password. On bind failure an audit event is emitted.
 // Neither the user password nor the bind password ever appears in audit details.
 func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, id, username, password string) (*model.LDAPEntry, error) {
+	if password == "" {
+		return nil, fmt.Errorf("ldap: password cannot be empty")
+	}
+
 	conn, err := u.repo.GetByTenantAndID(ctx, tenantID, id)
 	if err != nil {
 		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
@@ -194,6 +203,14 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 			"reason":        "connection_not_found",
 		})
 		return nil, err
+	}
+
+	if !conn.Active {
+		u.audit.Log(tenantID, username, "auth.ldap.connection.fail", "", "", map[string]interface{}{
+			"connection_id": id,
+			"reason":        "connection_inactive",
+		})
+		return nil, fmt.Errorf("ldap: connection is inactive")
 	}
 
 	// Bound the outbound LDAP operation so a hung server cannot hold the
@@ -207,7 +224,7 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 			"connection_id": id,
 			"reason":        classifyDialError(err),
 		})
-		return nil, fmt.Errorf("ldap: failed to open session: %w", err)
+		return nil, fmt.Errorf("ldap: connection failed")
 	}
 	defer func() { _ = session.Close() }()
 
@@ -252,7 +269,7 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 			"connection_id": id,
 			"reason":        classifyDialError(err),
 		})
-		return nil, fmt.Errorf("ldap: user search failed: %w", err)
+		return nil, fmt.Errorf("ldap: search failed")
 	}
 	if len(entries) == 0 {
 		u.audit.Log(tenantID, username, "auth.ldap.bind.fail", "", "", map[string]interface{}{
@@ -261,6 +278,13 @@ func (u *ldapConnectionUseCase) AuthenticateUser(ctx context.Context, tenantID, 
 		})
 		_ = session.Authenticate(ctx, fmt.Sprintf("cn=__shyntr_not_found__,%s", conn.BaseDN), password)
 		return nil, fmt.Errorf("ldap: authentication failed")
+	}
+	if len(entries) > 1 {
+		u.audit.Log(tenantID, username, "auth.ldap.bind.fail", "", "", map[string]interface{}{
+			"connection_id": id,
+			"reason":        "ambiguous_user",
+		})
+		return nil, fmt.Errorf("ldap: ambiguous user match")
 	}
 
 	userDN := entries[0].DN

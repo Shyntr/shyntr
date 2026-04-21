@@ -70,10 +70,16 @@ func (r *samlConnectionRepository) GetConnectionByIdpEntity(ctx context.Context,
 
 func (r *samlConnectionRepository) Update(ctx context.Context, conn *model.SAMLConnection) error {
 	dbModel := models.FromDomainSAMLConnection(conn)
-	return r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{}).
-		//Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
-		Where("id = ?", conn.ID).
-		Updates(dbModel).Error
+	result := r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{}).
+		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		Updates(dbModel)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("saml connection not found")
+	}
+	return nil
 }
 
 func (r *samlConnectionRepository) Delete(ctx context.Context, tenantID, id string) error {
@@ -88,17 +94,14 @@ func (r *samlConnectionRepository) Delete(ctx context.Context, tenantID, id stri
 }
 
 func (r *samlConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
-	var dbModels []models.SAMLConnectionGORM
-	query := r.db.WithContext(ctx).Model(&models.SAMLConnectionGORM{})
-
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
 	}
-
-	if err := query.Find(&dbModels).Error; err != nil {
+	var dbModels []models.SAMLConnectionGORM
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*model.SAMLConnection, 0)
+	entities := make([]*model.SAMLConnection, 0, len(dbModels))
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
@@ -106,6 +109,9 @@ func (r *samlConnectionRepository) ListByTenant(ctx context.Context, tenantID st
 }
 
 func (r *samlConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.SAMLConnection, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
+	}
 	var dbModels []models.SAMLConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND active = ?", tenantID, true).Find(&dbModels).Error; err != nil {
 		return nil, err

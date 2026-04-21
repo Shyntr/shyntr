@@ -27,6 +27,35 @@ func setupLDAPRepoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestLDAPConnectionRepository_Create_FailsOnEmptyTenant(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	conn := &model.LDAPConnection{
+		TenantID:  "", // empty tenant
+		Name:      "Corp AD",
+		ServerURL: "ldaps://ldap.corp.example.com:636",
+		BaseDN:    "dc=corp,dc=example,dc=com",
+	}
+
+	err := repo.Create(ctx, conn)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrLDAPConnectionTenantRequired)
+}
+
+func TestLDAPConnectionRepository_Create_FailsOnNil(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	err := repo.Create(ctx, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be nil")
+}
+
 func TestLDAPConnectionRepository_CreateAndGetByTenantAndID(t *testing.T) {
 	t.Parallel()
 	db := setupLDAPRepoTestDB(t)

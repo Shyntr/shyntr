@@ -77,7 +77,7 @@ func (r *ldapHandlerLDAPRepoStub) Create(context.Context, *model.LDAPConnection)
 func (r *ldapHandlerLDAPRepoStub) GetByID(context.Context, string) (*model.LDAPConnection, error) {
 	return r.conn, nil
 }
-func (r *ldapHandlerLDAPRepoStub) GetByTenantAndID(context.Context, string, string) (*model.LDAPConnection, error) {
+func (r *ldapHandlerLDAPRepoStub) GetByTenantAndID(ctx context.Context, tenantID string, id string) (*model.LDAPConnection, error) {
 	r.getTenantIDCall++
 	if r.getTenantIDCall == 1 && (r.firstConn != nil || r.firstErr != nil) {
 		return r.firstConn, r.firstErr
@@ -110,7 +110,7 @@ type ldapHandlerSessionStub struct {
 func (s *ldapHandlerSessionStub) Authenticate(context.Context, string, string) error {
 	return s.authErr
 }
-func (s *ldapHandlerSessionStub) Search(context.Context, string, []string) ([]model.LDAPEntry, error) {
+func (s *ldapHandlerSessionStub) Search(ctx context.Context, filter string, attrs []string) ([]model.LDAPEntry, error) {
 	if s.entry == nil {
 		return nil, nil
 	}
@@ -185,6 +185,7 @@ func TestLDAPHandler_Login_BranchCases(t *testing.T) {
 		ID:       "ldap-1",
 		TenantID: "tenant-a",
 		Name:     "Corp LDAP",
+		Active:   true,
 		AttributeMapping: map[string]model.AttributeMappingRule{
 			"sub": {Source: "uid", Type: "string"},
 		},

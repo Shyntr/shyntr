@@ -222,7 +222,7 @@ func SetupRouter(
 
 			// OAuth2 Clients
 			mgmtGroup.GET("/clients", mgmtHandler.ListClients)
-			mgmtGroup.GET("/clients/tenant/:tenant_id", mgmtHandler.ListClientsByTenant)
+			mgmtGroup.GET("/tenants/:id/clients", mgmtHandler.ListClientsByTenant)
 			mgmtGroup.GET("/clients/:tenant_id/:id", mgmtHandler.GetClient)
 			mgmtGroup.POST("/clients", mgmtHandler.CreateClient)
 			mgmtGroup.PUT("/clients/:id", mgmtHandler.UpdateClient)
@@ -230,7 +230,7 @@ func SetupRouter(
 
 			// SAML Clients (Service Providers)
 			mgmtGroup.GET("/saml-clients", mgmtHandler.ListSAMLClients)
-			mgmtGroup.GET("/saml-clients/tenant/:tenant_id", mgmtHandler.ListSAMLClientsByTenant)
+			mgmtGroup.GET("/tenants/:id/saml-clients", mgmtHandler.ListSAMLClientsByTenant)
 			mgmtGroup.GET("/saml-clients/:tenant_id/:id", mgmtHandler.GetSAMLClient)
 			mgmtGroup.POST("/saml-clients", mgmtHandler.CreateSAMLClient)
 			mgmtGroup.PUT("/saml-clients/:id", mgmtHandler.UpdateSAMLClient)
@@ -238,6 +238,7 @@ func SetupRouter(
 
 			// SAML Connections (Identity Providers)
 			mgmtGroup.GET("/saml-connections", mgmtHandler.ListSAMLConnections)
+			mgmtGroup.GET("/tenants/:id/saml-connections", mgmtHandler.ListSAMLConnectionsByTenant)
 			mgmtGroup.GET("/saml-connections/:tenant_id/:id", mgmtHandler.GetSAMLConnection)
 			mgmtGroup.POST("/saml-connections", mgmtHandler.CreateSAMLConnection)
 			mgmtGroup.PUT("/saml-connections/:id", mgmtHandler.UpdateSAMLConnection)
@@ -245,6 +246,7 @@ func SetupRouter(
 
 			// OIDC Connections
 			mgmtGroup.GET("/oidc-connections", mgmtHandler.ListOIDCConnections)
+			mgmtGroup.GET("/tenants/:id/oidc-connections", mgmtHandler.ListOIDCConnectionsByTenant)
 			mgmtGroup.GET("/oidc-connections/:tenant_id/:id", mgmtHandler.GetOIDCConnection)
 			mgmtGroup.POST("/oidc-connections", mgmtHandler.CreateOIDCConnection)
 			mgmtGroup.PUT("/oidc-connections/:id", mgmtHandler.UpdateOIDCConnection)
@@ -252,6 +254,7 @@ func SetupRouter(
 
 			// LDAP Connections
 			mgmtGroup.GET("/ldap-connections", mgmtHandler.ListLDAPConnections)
+			mgmtGroup.GET("/tenants/:id/ldap-connections", mgmtHandler.ListLDAPConnectionsByTenant)
 			mgmtGroup.GET("/ldap-connections/:tenant_id/:id", mgmtHandler.GetLDAPConnection)
 			mgmtGroup.POST("/ldap-connections", mgmtHandler.CreateLDAPConnection)
 			mgmtGroup.PUT("/ldap-connections/:tenant_id/:id", mgmtHandler.UpdateLDAPConnection)

@@ -79,14 +79,22 @@ func (r *auditLogRepository) GetAuthActivityCounts(ctx context.Context, since ti
 		case "auth.login.accept", "provider.login.success":
 			totalSuccess++
 			if protocol != "" {
+				if _, ok := counts[protocol]; !ok {
+					counts[protocol] = map[string]int64{"success": 0, "failure": 0}
+				}
 				counts[protocol]["success"]++
 			}
-			if providerType == "ldap" {
+			// Only increment the 'ldap' protocol bucket if it hasn't been incremented
+			// already via the 'protocol' field, avoiding double-counting in the same bucket.
+			if providerType == "ldap" && protocol != "ldap" {
 				counts["ldap"]["success"]++
 			}
 		case "auth.login.reject":
 			totalFailure++
 			if protocol != "" {
+				if _, ok := counts[protocol]; !ok {
+					counts[protocol] = map[string]int64{"success": 0, "failure": 0}
+				}
 				counts[protocol]["failure"]++
 			}
 		case "auth.ldap.bind.fail", "auth.ldap.connection.fail":
@@ -170,12 +178,16 @@ func (r *auditLogRepository) GetAuthFailureMetrics(ctx context.Context, since ti
 		reasonCounts[reason]++
 
 		if protocol != "" {
+			if _, ok := metrics.Protocols[protocol]; !ok {
+				metrics.Protocols[protocol] = model.AuthProtocolFailures{Failure: 0, TopReason: ""}
+				protoReasonCounts[protocol] = make(map[string]int64)
+			}
 			p := metrics.Protocols[protocol]
 			p.Failure++
 			metrics.Protocols[protocol] = p
 			protoReasonCounts[protocol][reason]++
 		}
-		if providerType == "ldap" {
+		if providerType == "ldap" && protocol != "ldap" {
 			p := metrics.Protocols["ldap"]
 			p.Failure++
 			metrics.Protocols["ldap"] = p

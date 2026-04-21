@@ -33,7 +33,6 @@ type SAMLConnectionRepository interface {
 
 type LDAPConnectionRepository interface {
 	Create(ctx context.Context, conn *model.LDAPConnection) error
-	GetByID(ctx context.Context, id string) (*model.LDAPConnection, error)
 	GetByTenantAndID(ctx context.Context, tenantID, id string) (*model.LDAPConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
 	Update(ctx context.Context, conn *model.LDAPConnection) error

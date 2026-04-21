@@ -40,13 +40,13 @@ type OAuth2ClientUseCase interface {
 	SendBackchannelLogout(ctx context.Context, tenantID, clientID, logoutURI, subject, issuer string)
 	CreateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
 	UpdateClient(ctx context.Context, client *model.OAuth2Client, unhashedSecret string, actorIP, userAgent string) (*model.OAuth2Client, string, error)
-	GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error)
+	GetClient(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error)
 	GetClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetPublicClientCount(ctx context.Context, tenantID string) (int64, error)
 	GetConfidentialClientCount(ctx context.Context, tenantID string) (int64, error)
-	GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error)
 	DeleteClient(ctx context.Context, tenantID, clientID string, actorIP, userAgent string) error
-	ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error)
+	ListClientsByTenant(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error)
+	ListAllClients(ctx context.Context) ([]*payload.OAuth2ClientResponse, error)
 }
 
 type oauth2ClientUseCase struct {
@@ -484,7 +484,7 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OA
 		return nil, "", errors.New("the specified tenant does not exist")
 	}
 
-	_, err := u.GetClient(ctx, client.ID)
+	_, err := u.GetClient(ctx, client.TenantID, client.ID)
 	if err != nil {
 		return nil, "", errors.New("the specified client does not exist")
 	}
@@ -523,7 +523,7 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OA
 		return nil, "", err
 	}
 
-	u.audit.Log(client.TenantID, "system", "management.client.oidc.create", actorIP, userAgent, map[string]interface{}{
+	u.audit.Log(client.TenantID, "system", "management.client.oidc.update", actorIP, userAgent, map[string]interface{}{
 		"client_id":                 client.ID,
 		"public":                    client.Public,
 		"scopes":                    client.Scopes,
@@ -534,8 +534,11 @@ func (u *oauth2ClientUseCase) UpdateClient(ctx context.Context, client *model.OA
 	return client, returnedSecret, nil
 }
 
-func (u *oauth2ClientUseCase) GetClient(ctx context.Context, clientID string) (*model.OAuth2Client, error) {
-	return u.repo.GetByID(ctx, clientID)
+func (u *oauth2ClientUseCase) GetClient(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id is required")
+	}
+	return u.repo.GetByTenantAndID(ctx, tenantID, clientID)
 }
 
 func (u *oauth2ClientUseCase) GetClientCount(ctx context.Context, tenantID string) (int64, error) {
@@ -550,10 +553,6 @@ func (u *oauth2ClientUseCase) GetConfidentialClientCount(ctx context.Context, te
 	return u.repo.GetConfidentialClientCount(ctx, tenantID)
 }
 
-func (u *oauth2ClientUseCase) GetClientByTenant(ctx context.Context, tenantID, clientID string) (*model.OAuth2Client, error) {
-	return u.repo.GetByTenantAndID(ctx, tenantID, clientID)
-}
-
 func (u *oauth2ClientUseCase) DeleteClient(ctx context.Context, tenantID, clientID string, actorIP, userAgent string) error {
 	if err := u.repo.Delete(ctx, tenantID, clientID); err != nil {
 		return err
@@ -564,8 +563,19 @@ func (u *oauth2ClientUseCase) DeleteClient(ctx context.Context, tenantID, client
 	return nil
 }
 
-func (u *oauth2ClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error) {
+func (u *oauth2ClientUseCase) ListClientsByTenant(ctx context.Context, tenantID string) ([]*payload.OAuth2ClientResponse, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id is required")
+	}
 	clients, err := u.repo.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return payload.FromDomainOAuth2Clients(clients), nil
+}
+
+func (u *oauth2ClientUseCase) ListAllClients(ctx context.Context) ([]*payload.OAuth2ClientResponse, error) {
+	clients, err := u.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}

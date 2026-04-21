@@ -172,7 +172,13 @@ func (h *AdminHandler) GetConsentRequest(c *gin.Context) {
 		return
 	}
 
-	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.ClientID)
+	loginReq, err := h.AuthReqUseCase.GetLoginRequest(c.Request.Context(), req.LoginChallenge)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("Login request", err))
+		return
+	}
+
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), loginReq.TenantID, req.ClientID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusConflict, "Client details", "load", err))
 		return

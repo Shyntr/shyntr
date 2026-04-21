@@ -18,7 +18,8 @@ type OIDCConnectionUseCase interface {
 	GetConnection(ctx context.Context, tenantID, id string) (*model.OIDCConnection, error)
 	GetConnectionCount(ctx context.Context, tenantID string) (int64, error)
 	DeleteConnection(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListConnections(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error)
+	ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error)
+	ListAllConnections(ctx context.Context) ([]*model.OIDCConnection, error)
 	bindMappingScopes(ctx context.Context, tenantID string, mappings map[string]model.AttributeMappingRule)
 }
 
@@ -158,6 +159,13 @@ func (u *oidcConnectionUseCase) DeleteConnection(ctx context.Context, tenantID, 
 	return nil
 }
 
-func (u *oidcConnectionUseCase) ListConnections(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
+func (u *oidcConnectionUseCase) ListConnectionsByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id is required")
+	}
 	return u.repo.ListByTenant(ctx, tenantID)
+}
+
+func (u *oidcConnectionUseCase) ListAllConnections(ctx context.Context) ([]*model.OIDCConnection, error) {
+	return u.repo.List(ctx)
 }

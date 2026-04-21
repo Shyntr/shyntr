@@ -105,7 +105,7 @@ func FromDomainOIDCConnection(c *model.OIDCConnection) *OIDCConnectionResponse {
 		Name:                  c.Name,
 		IssuerURL:             c.IssuerURL,
 		ClientID:              c.ClientID,
-		ClientSecret:          c.ClientSecret,
+		ClientSecret:          "*****",
 		Scopes:                c.Scopes,
 		AttributeMapping:      c.AttributeMapping,
 		AuthorizationEndpoint: c.AuthorizationEndpoint,
@@ -117,6 +117,14 @@ func FromDomainOIDCConnection(c *model.OIDCConnection) *OIDCConnectionResponse {
 		CreatedAt:             c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+func FromDomainOIDCConnections(connections []*model.OIDCConnection) []*OIDCConnectionResponse {
+	responses := make([]*OIDCConnectionResponse, 0, len(connections))
+	for i := range connections {
+		responses = append(responses, FromDomainOIDCConnection(connections[i]))
+	}
+	return responses
 }
 
 func (req *CreateSAMLConnectionRequest) ToDomain() *model.SAMLConnection {
@@ -232,7 +240,7 @@ func FromDomainSAMLConnection(c *model.SAMLConnection) *SAMLConnectionResponse {
 		MetadataURL:              c.MetadataURL,
 		IdpCertificate:           c.IdpCertificate,
 		IdpEncryptionCertificate: c.IdpEncryptionCertificate,
-		SPPrivateKey:             c.SPPrivateKey,
+		SPPrivateKey:             "*****",
 		AttributeMapping:         c.AttributeMapping,
 		ForceAuthn:               c.ForceAuthn,
 		SignRequest:              c.SignRequest,
@@ -240,4 +248,12 @@ func FromDomainSAMLConnection(c *model.SAMLConnection) *SAMLConnectionResponse {
 		CreatedAt:                c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:                c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+func FromDomainSAMLConnections(connections []*model.SAMLConnection) []*SAMLConnectionResponse {
+	responses := make([]*SAMLConnectionResponse, 0, len(connections))
+	for i := range connections {
+		responses = append(responses, FromDomainSAMLConnection(connections[i]))
+	}
+	return responses
 }

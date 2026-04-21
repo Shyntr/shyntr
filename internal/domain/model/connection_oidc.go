@@ -11,7 +11,7 @@ type OIDCConnection struct {
 	Name                  string                          `json:"name"`
 	IssuerURL             string                          `json:"issuer_url"`
 	ClientID              string                          `json:"client_id"`
-	ClientSecret          string                          `json:"client_secret"`
+	ClientSecret          string                          `json:"-"`
 	AuthorizationEndpoint string                          `json:"authorization_endpoint"`
 	TokenEndpoint         string                          `json:"token_endpoint"`
 	UserInfoEndpoint      string                          `json:"userinfo_endpoint"`

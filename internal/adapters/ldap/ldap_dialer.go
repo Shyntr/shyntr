@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/url"
+	"sync"
 	"time"
 
 	"github.com/Shyntr/shyntr/internal/application/port"
@@ -103,10 +105,18 @@ func (d *ldapDialer) dialInternal(conn *model.LDAPConnection) (*ldapSession, err
 		return nil, fmt.Errorf("ldap: dial %s: %w", conn.ServerURL, err)
 	}
 
+	// Bound subsequent operations (StartTLS, Bind) to prevent hangs.
+	l.SetTimeout(dialTimeout)
+
 	if conn.StartTLS {
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: conn.TLSInsecureSkipVerify, //nolint:gosec
 			MinVersion:         tls.VersionTLS12,
+		}
+		if !conn.TLSInsecureSkipVerify {
+			if u, err := url.Parse(conn.ServerURL); err == nil {
+				tlsCfg.ServerName = u.Hostname()
+			}
 		}
 		if err := l.StartTLS(tlsCfg); err != nil {
 			_ = l.Close()
@@ -127,9 +137,10 @@ func (d *ldapDialer) dialInternal(conn *model.LDAPConnection) (*ldapSession, err
 
 // ldapSession wraps an active *ldaplib.Conn and exposes the port.LDAPSession contract.
 type ldapSession struct {
-	l       *ldaplib.Conn
-	baseDN  string
-	release func() // called once in Close() to return the pool slot
+	l         *ldaplib.Conn
+	baseDN    string
+	release   func() // called once in Close() to return the pool slot
+	closeOnce sync.Once
 }
 
 // Authenticate binds as userDN with the supplied password to verify credentials.
@@ -193,12 +204,13 @@ func (s *ldapSession) Search(ctx context.Context, filter string, attrs []string)
 // Close closes the underlying TCP connection and releases the pool slot.
 // Safe to call multiple times.
 func (s *ldapSession) Close() error {
-	if s.l != nil {
-		_ = s.l.Close()
-	}
-	if s.release != nil {
-		s.release()
-		s.release = nil
-	}
+	s.closeOnce.Do(func() {
+		if s.l != nil {
+			_ = s.l.Close()
+		}
+		if s.release != nil {
+			s.release()
+		}
+	})
 	return nil
 }

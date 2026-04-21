@@ -176,7 +176,7 @@ func TestAuthenticateUser_ConnectionNotFound(t *testing.T) {
 
 func TestAuthenticateUser_Success(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{
 		entries: []model.LDAPEntry{
@@ -196,7 +196,7 @@ func TestAuthenticateUser_Success(t *testing.T) {
 
 func TestAuthenticateUser_WrongPassword(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{
 		entries: []model.LDAPEntry{{DN: "uid=alice,dc=example,dc=com"}},
@@ -218,7 +218,7 @@ func TestAuthenticateUser_WrongPassword(t *testing.T) {
 
 func TestAuthenticateUser_UserNotFound(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", BaseDN: "dc=example,dc=com"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", BaseDN: "dc=example,dc=com", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{entries: []model.LDAPEntry{}} // empty — user not found
 
@@ -236,7 +236,7 @@ func TestAuthenticateUser_UserNotFound(t *testing.T) {
 
 func TestAuthenticateUser_LDAPUnreachable(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	dialErr := errors.New("dial tcp 10.0.0.1:389: connect: connection refused")
 
@@ -252,7 +252,7 @@ func TestAuthenticateUser_LDAPUnreachable(t *testing.T) {
 
 func TestAuthenticateUser_PoolExhausted(t *testing.T) {
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	// Pool exhaustion is modelled as context.DeadlineExceeded with "pool" in message.
 	dialErr := fmt.Errorf("ldap: connection pool full: %w", context.DeadlineExceeded)
@@ -272,7 +272,7 @@ func TestAuthenticateUser_FilterInjection_CannotBind(t *testing.T) {
 	// bypass authentication. The escaped filter must return no results or
 	// a non-matching entry — the stub returns empty to simulate this.
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{entries: []model.LDAPEntry{}} // no match after escaping
 
@@ -372,7 +372,7 @@ func TestAuthenticateUser_FilterSubstitution_UsernameToken(t *testing.T) {
 	// Before the fix the token was never replaced, causing every search to
 	// look for uid={username} literally and return zero results.
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={username})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={username})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{
 		entries: []model.LDAPEntry{
@@ -394,7 +394,7 @@ func TestAuthenticateUser_FilterSubstitution_UsernameToken(t *testing.T) {
 func TestAuthenticateUser_FilterSubstitution_LegacyZeroToken(t *testing.T) {
 	// Stored filter uses legacy {0} — must continue to work after the fix.
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{
 		entries: []model.LDAPEntry{
@@ -419,7 +419,7 @@ func TestAuthenticateUser_SearchError_ContextTimeout_ClassifiedAsTimeout(t *test
 	// When search fails because the context deadline fired, the audit reason
 	// must be "timeout" — not the previously hardcoded "unreachable".
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{searchErr: context.DeadlineExceeded}
 
@@ -439,7 +439,7 @@ func TestAuthenticateUser_SearchError_Generic_ClassifiedAsUnreachable(t *testing
 	// This verifies that classifyDialError is used (not a constant), and that
 	// the fallback behaviour is preserved.
 	audit := &captureAuditLogger{}
-	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})"}
+	conn := &model.LDAPConnection{TenantID: "tnt_test", UserSearchFilter: "(uid={0})", Active: true}
 	repo := &stubLDAPRepo{conn: conn}
 	session := &stubLDAPSession{searchErr: errors.New("connection reset by peer")}
 
@@ -794,6 +794,53 @@ func TestDeleteConnection_NotFound(t *testing.T) {
 	assert.Equal(t, "ldap connection not found", err.Error())
 }
 
+func TestAuthenticateUser_EmptyPassword(t *testing.T) {
+	audit := &captureAuditLogger{}
+	uc := buildLDAPUseCase(&stubLDAPRepo{}, &stubLDAPDialer{}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt", "conn", "alice", "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "password cannot be empty")
+	assert.Nil(t, entry)
+}
+
+func TestAuthenticateUser_InactiveConnection(t *testing.T) {
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt", Active: false}
+	repo := &stubLDAPRepo{conn: conn}
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt", "conn", "alice", "pass")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection is inactive")
+	assert.Nil(t, entry)
+	require.True(t, audit.hasAction("auth.ldap.connection.fail"))
+	call, _ := audit.lastWithAction("auth.ldap.connection.fail")
+	assert.Equal(t, "connection_inactive", call.details["reason"])
+}
+
+func TestAuthenticateUser_AmbiguousUser(t *testing.T) {
+	audit := &captureAuditLogger{}
+	conn := &model.LDAPConnection{TenantID: "tnt", Active: true, UserSearchFilter: "(uid={0})"}
+	repo := &stubLDAPRepo{conn: conn}
+	session := &stubLDAPSession{
+		entries: []model.LDAPEntry{
+			{DN: "uid=alice,dc=example,dc=com"},
+			{DN: "uid=alice,dc=other,dc=com"},
+		},
+	}
+
+	uc := buildLDAPUseCase(repo, &stubLDAPDialer{session: session}, audit)
+	entry, err := uc.AuthenticateUser(context.Background(), "tnt", "conn", "alice", "pass")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous user match")
+	assert.Nil(t, entry)
+	require.True(t, audit.hasAction("auth.ldap.bind.fail"))
+	call, _ := audit.lastWithAction("auth.ldap.bind.fail")
+	assert.Equal(t, "ambiguous_user", call.details["reason"])
+}
+
 func TestListConnections_Success(t *testing.T) {
 	conns := []*model.LDAPConnection{
 		{ID: "c1", TenantID: "tnt", Name: "C1"},
@@ -802,24 +849,18 @@ func TestListConnections_Success(t *testing.T) {
 	repo := &extendedStubLDAPRepo{listed: conns}
 	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
 
-	list, err := uc.ListConnections(context.Background(), "tnt")
+	list, err := uc.ListConnectionsByTenant(context.Background(), "tnt")
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
 }
 
-func TestListConnections_GlobalSuccess(t *testing.T) {
-	conns := []*model.LDAPConnection{
-		{ID: "c1", TenantID: "tnt-a", Name: "C1"},
-		{ID: "c2", TenantID: "tnt-b", Name: "C2"},
-	}
-	repo := &extendedStubLDAPRepo{allListed: conns}
+func TestListConnections_RequiresTenant(t *testing.T) {
+	repo := &extendedStubLDAPRepo{}
 	uc := buildFullLDAPUseCase(repo, &stubLDAPDialer{}, &captureAuditLogger{})
 
-	list, err := uc.ListConnections(context.Background(), "")
-	require.NoError(t, err)
-	assert.Len(t, list, 2)
-	assert.Equal(t, "tnt-a", list[0].TenantID)
-	assert.Equal(t, "tnt-b", list[1].TenantID)
+	_, err := uc.ListConnectionsByTenant(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tenant_id is required")
 }
 
 func TestTestConnection_Success(t *testing.T) {
@@ -882,6 +923,7 @@ func TestAuthenticateUser_SearchAttrs_IncludesMappingSourceAttrs(t *testing.T) {
 	}
 	conn := &model.LDAPConnection{
 		TenantID:             "tnt",
+		Active:               true,
 		UserSearchFilter:     "(uid={0})",
 		UserSearchAttributes: []string{"uid"},
 		AttributeMapping: map[string]model.AttributeMappingRule{
@@ -911,6 +953,7 @@ func TestAuthenticateUser_SearchAttrs_IncludesFallbackAttr(t *testing.T) {
 	}
 	conn := &model.LDAPConnection{
 		TenantID:             "tnt",
+		Active:               true,
 		UserSearchFilter:     "(uid={0})",
 		UserSearchAttributes: []string{"uid"},
 		AttributeMapping: map[string]model.AttributeMappingRule{
@@ -938,6 +981,7 @@ func TestAuthenticateUser_SearchAttrs_NoDuplicates(t *testing.T) {
 	}
 	conn := &model.LDAPConnection{
 		TenantID:             "tnt",
+		Active:               true,
 		UserSearchFilter:     "(uid={0})",
 		UserSearchAttributes: []string{"uid", "mail"},
 		AttributeMapping: map[string]model.AttributeMappingRule{
@@ -970,6 +1014,7 @@ func TestAuthenticateUser_SearchAttrs_EmptyUserSearchAttributes_FallbackPreserve
 	}
 	conn := &model.LDAPConnection{
 		TenantID:             "tnt",
+		Active:               true,
 		UserSearchFilter:     "(uid={0})",
 		UserSearchAttributes: nil, // empty — triggers default ["dn"]
 		AttributeMapping: map[string]model.AttributeMappingRule{
