@@ -1,0 +1,347 @@
+package ldap_test
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	ldapadapter "github.com/Shyntr/shyntr/internal/adapters/ldap"
+	"github.com/Shyntr/shyntr/internal/domain/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+)
+
+// osixia/openldap:1.5.0 defaults:
+//   admin DN   : cn=admin,dc=example,dc=org
+//   admin pw   : admin
+//   base DN    : dc=example,dc=org
+//   LDAP port  : 389 (mapped to a random host port)
+
+const (
+	ldapImage   = "osixia/openldap:1.5.0"
+	ldapPort    = "389/tcp"
+	ldapAdminDN = "cn=admin,dc=example,dc=org"
+	ldapAdminPW = "admin"
+	ldapBaseDN  = "dc=example,dc=org"
+)
+
+func startOpenLDAP(t *testing.T) (host string, port string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("requires Docker")
+	}
+	ctx := context.Background()
+
+	req := testcontainers.ContainerRequest{
+		Image:        ldapImage,
+		ExposedPorts: []string{ldapPort},
+		Env: map[string]string{
+			"LDAP_ORGANISATION":   "Example Inc.",
+			"LDAP_DOMAIN":         "example.org",
+			"LDAP_ADMIN_PASSWORD": ldapAdminPW,
+		},
+		// osixia logs "slapd starting" once slapd is ready.
+		WaitingFor: wait.ForLog("slapd starting").
+			WithStartupTimeout(90 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil && dockerUnavailable(err) {
+		t.Skipf("requires Docker: %v", err)
+	}
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
+
+	h, err := container.Host(ctx)
+	require.NoError(t, err)
+
+	p, err := container.MappedPort(ctx, ldapPort)
+	require.NoError(t, err)
+
+	return h, p.Port()
+}
+
+func TestLDAPDialer_AnonymousBind(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL: fmt.Sprintf("ldap://%s:%s", host, port),
+		BaseDN:    ldapBaseDN,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "anonymous dial must succeed")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}
+
+func TestLDAPDialer_ServiceAccountBind(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:    fmt.Sprintf("ldap://%s:%s", host, port),
+		BindDN:       ldapAdminDN,
+		BindPassword: ldapAdminPW,
+		BaseDN:       ldapBaseDN,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "service account bind must succeed with correct credentials")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}
+
+func TestLDAPDialer_WrongPassword_ReturnsError(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:    fmt.Sprintf("ldap://%s:%s", host, port),
+		BindDN:       ldapAdminDN,
+		BindPassword: "wrong-password",
+		BaseDN:       ldapBaseDN,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	assert.Error(t, err, "Dial must return error for invalid credentials")
+	assert.Nil(t, session)
+	// Password must not appear in the error message.
+	assert.NotContains(t, err.Error(), "wrong-password",
+		"error message must not leak the bind password")
+}
+
+func TestLDAPDialer_Search_FindsAdminEntry(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:    fmt.Sprintf("ldap://%s:%s", host, port),
+		BindDN:       ldapAdminDN,
+		BindPassword: ldapAdminPW,
+		BaseDN:       ldapBaseDN,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err)
+	defer func() { _ = session.Close() }()
+
+	// The base object itself always exists.
+	entries, err := session.Search(ctx, "(objectClass=*)", []string{"dn"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries, "search must return at least the base DN entry")
+}
+
+func TestLDAPDialer_Authenticate_AdminUser(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:    fmt.Sprintf("ldap://%s:%s", host, port),
+		BindDN:       ldapAdminDN,
+		BindPassword: ldapAdminPW,
+		BaseDN:       ldapBaseDN,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err)
+	defer func() { _ = session.Close() }()
+
+	// Correct password.
+	err = session.Authenticate(ctx, ldapAdminDN, ldapAdminPW)
+	assert.NoError(t, err, "authentication with correct password must succeed")
+
+	// Wrong password.
+	err = session.Authenticate(ctx, ldapAdminDN, "wrongpass")
+	assert.Error(t, err, "authentication with wrong password must fail")
+}
+
+func TestLDAPDialer_ContextCancellation(t *testing.T) {
+	host, port := startOpenLDAP(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL: fmt.Sprintf("ldap://%s:%s", host, port),
+		BaseDN:    ldapBaseDN,
+	}
+
+	// Cancel immediately — must not panic, may succeed or return ctx error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	if err != nil {
+		assert.Nil(t, session)
+	} else if session != nil {
+		_ = session.Close()
+	}
+}
+
+// startOpenLDAPWithTLS starts an openldap container that also exposes the LDAPS port (636).
+func startOpenLDAPWithTLS(t *testing.T) (host, plainPort, tlsPort string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("requires Docker")
+	}
+	ctx := context.Background()
+
+	req := testcontainers.ContainerRequest{
+		Image:        ldapImage,
+		ExposedPorts: []string{ldapPort, "636/tcp"},
+		Env: map[string]string{
+			"LDAP_ORGANISATION":   "Example Inc.",
+			"LDAP_DOMAIN":         "example.org",
+			"LDAP_ADMIN_PASSWORD": ldapAdminPW,
+			"LDAP_TLS":            "true",
+		},
+		WaitingFor: wait.ForLog("slapd starting").
+			WithStartupTimeout(90 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil && dockerUnavailable(err) {
+		t.Skipf("requires Docker: %v", err)
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
+
+	h, err := container.Host(ctx)
+	require.NoError(t, err)
+
+	pp, err := container.MappedPort(ctx, ldapPort)
+	require.NoError(t, err)
+
+	tp, err := container.MappedPort(ctx, "636/tcp")
+	require.NoError(t, err)
+
+	return h, pp.Port(), tp.Port()
+}
+
+func TestLDAPDialer_TLSInsecureSkipVerify(t *testing.T) {
+	requireManualLDAPTransportTest(t)
+	host, _, tlsPort := startOpenLDAPWithTLS(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:             fmt.Sprintf("ldaps://%s:%s", host, tlsPort),
+		BindDN:                ldapAdminDN,
+		BindPassword:          ldapAdminPW,
+		BaseDN:                ldapBaseDN,
+		TLSInsecureSkipVerify: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "ldaps:// dial with InsecureSkipVerify must succeed against self-signed cert")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}
+
+func TestLDAPDialer_StartTLS(t *testing.T) {
+	requireManualLDAPTransportTest(t)
+	host, plainPort, _ := startOpenLDAPWithTLS(t)
+	dialer := ldapadapter.NewLDAPDialer()
+
+	conn := &model.LDAPConnection{
+		ServerURL:             fmt.Sprintf("ldap://%s:%s", host, plainPort),
+		BindDN:                ldapAdminDN,
+		BindPassword:          ldapAdminPW,
+		BaseDN:                ldapBaseDN,
+		StartTLS:              true,
+		TLSInsecureSkipVerify: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session, err := dialer.Dial(ctx, conn)
+	require.NoError(t, err, "StartTLS dial must succeed against self-signed cert when InsecureSkipVerify is enabled")
+	require.NotNil(t, session)
+	assert.NoError(t, session.Close())
+}
+
+// TestLDAPDialer_ConcurrentDial_SemaphoreCapHolds fires more goroutines than the
+// semaphore cap (20) and verifies all return without deadlock or panic.
+// The target address is intentionally unreachable so dials fail fast without
+// Docker. This test does not require any external infrastructure.
+func TestLDAPDialer_ConcurrentDial_SemaphoreCapHolds(t *testing.T) {
+	dialer := ldapadapter.NewLDAPDialer()
+	conn := &model.LDAPConnection{
+		TenantID:  "tnt",
+		ServerURL: "ldap://127.0.0.1:1", // port 1 — always refused, fails fast
+		BaseDN:    "dc=example,dc=com",
+	}
+
+	const n = 25 // intentionally above the semaphore cap of 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			sess, err := dialer.Dial(ctx, conn)
+			if err == nil {
+				_ = sess.Close()
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+		// all goroutines returned — semaphore released correctly
+	case <-time.After(15 * time.Second):
+		t.Fatal("concurrent Dial calls did not all return within 15 s — possible deadlock or semaphore leak")
+	}
+}
+
+func dockerUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "failed to create Docker provider") ||
+		strings.Contains(msg, "permission denied while trying to connect to the docker API")
+}
+
+func requireManualLDAPTransportTest(t *testing.T) {
+	t.Helper()
+	// Transport-level TLS/StartTLS verification is treated as manual, environment-specific validation.
+	if testing.Short() || os.Getenv("SHYNTR_RUN_LDAP_TRANSPORT_TESTS") != "1" {
+		t.Skip("manual LDAP transport test; set SHYNTR_RUN_LDAP_TRANSPORT_TESTS=1 to run")
+	}
+}

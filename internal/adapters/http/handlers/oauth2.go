@@ -130,7 +130,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	clientID := ar.GetClient().GetID()
 
-	client, err := h.OAuth2ClientUse.GetClientByTenant(ctx, tenantID, clientID)
+	client, err := h.OAuth2ClientUse.GetClient(ctx, tenantID, clientID)
 	if err != nil {
 		logger.FromGin(c).Warn("Client/Tenant mismatch or not found", zap.String("client_id", clientID), zap.String(consts.ContextKeyTenantID, tenantID))
 		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrUnauthorizedClient.WithHint("The authenticated client is not registered for this tenant."))
@@ -179,11 +179,13 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 	var authTime time.Time = time.Now()
 	var userContext map[string]interface{}
 	var consentContext map[string]interface{}
+	var loginReq *model.LoginRequest
 	isRemembered := false
 	rememberForDuration := 0
 
 	if verifier != "" {
-		loginReq, loginErr := h.AuthReq.GetAuthenticatedLoginRequest(ctx, verifier)
+		var loginErr error
+		loginReq, loginErr = h.AuthReq.GetAuthenticatedLoginRequest(ctx, tenantID, verifier)
 		if loginErr == nil {
 			userID = loginReq.Subject
 			authTime = loginReq.UpdatedAt
@@ -203,6 +205,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 	} else if !forceLogin {
 		if sessionLoginReq := h.resolveSessionSubject(c, ctx); sessionLoginReq != nil {
+			loginReq = sessionLoginReq
 			userID = sessionLoginReq.Subject
 			authTime = sessionLoginReq.UpdatedAt
 			isRemembered = sessionLoginReq.Remember
@@ -278,6 +281,7 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			challengeID, _ := utils.GenerateRandomHex(16)
 			request := model.ConsentRequest{
 				ID:                challengeID,
+				LoginChallenge:    loginReq.ID,
 				ClientID:          clientID,
 				Subject:           userID,
 				RequestedScope:    pq.StringArray(ar.GetRequestedScopes()),
@@ -427,7 +431,7 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 		return
 	}
 
-	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, ar.GetClient().GetID())
+	dbClient, dbClientErr := h.OAuth2ClientUse.GetClient(ctx, tenantID, ar.GetClient().GetID())
 	if dbClientErr != nil {
 		logger.FromGin(c).Warn("Client not found", zap.String("client_id", ar.GetClient().GetID()), zap.String(consts.ContextKeyTenantID, tenantID))
 		fositeEngine.WriteAccessError(ctx, c.Writer, ar, fosite.ErrInvalidClient)
@@ -514,7 +518,7 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	isValidRedirect := false
 	if postLogoutRedirectURI != "" {
 		if idTokenAudience != "" {
-			client, err := h.OAuth2ClientUse.GetClient(ctx, idTokenAudience)
+			client, err := h.OAuth2ClientUse.GetClient(ctx, tenantID, idTokenAudience)
 			if err == nil {
 				for _, uri := range client.PostLogoutRedirectURIs {
 					if strings.TrimRight(uri, "/") == strings.TrimRight(postLogoutRedirectURI, "/") {

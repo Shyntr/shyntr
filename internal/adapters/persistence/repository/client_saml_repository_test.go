@@ -93,3 +93,34 @@ func TestSAMLClientRepository_ListByTenant(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, clients, 2, "Must return only the clients belonging to the specified tenant")
 }
+
+func TestSAMLClientRepository_UpdateRespectsTenantBoundary(t *testing.T) {
+	t.Parallel()
+	db := setupSAMLRepoTestDB(t)
+	repo := repository.NewSAMLClientRepository(db)
+	ctx := context.Background()
+
+	client := &model.SAMLClient{
+		ID:       "client_saml_123",
+		TenantID: "tenant-a",
+		Name:     "Tenant A SAML Client",
+		EntityID: "https://sp.example.com/saml",
+		ACSURL:   "https://sp.example.com/acs",
+	}
+	require.NoError(t, repo.Create(ctx, client))
+
+	crossTenant := &model.SAMLClient{
+		ID:       client.ID,
+		TenantID: "tenant-b",
+		Name:     "Hacked",
+		EntityID: client.EntityID,
+		ACSURL:   client.ACSURL,
+	}
+	err := repo.Update(ctx, crossTenant)
+	require.Error(t, err)
+	assert.Equal(t, "saml client not found", err.Error())
+
+	fetched, err := repo.GetByID(ctx, "tenant-a", client.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A SAML Client", fetched.Name)
+}

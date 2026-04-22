@@ -16,7 +16,7 @@ type SAMLConnection struct {
 	IdpCertificate           string                          `json:"idp_certificate"`
 	IdpEncryptionCertificate string                          `json:"idp_encryption_certificate"`
 	MetadataURL              string                          `json:"metadata_url"`
-	SPPrivateKey             string                          `json:"sp_private_key"`
+	SPPrivateKey             string                          `json:"-"`
 	AttributeMapping         map[string]AttributeMappingRule `json:"attribute_mapping"`
 	ForceAuthn               bool                            `json:"force_authn"`
 	SignRequest              bool                            `json:"sign_request"`

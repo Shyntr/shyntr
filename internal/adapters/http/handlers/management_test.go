@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,14 +25,16 @@ import (
 	"github.com/Shyntr/shyntr/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/ory/fosite"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 )
 
 func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
+	t.Helper()
 	logger.InitLogger("info")
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
@@ -74,6 +77,10 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	samlConnectionRepository := repository.NewSAMLConnectionRepository(db)
 	scopeRepository := repository.NewScopeRepository(db)
 	auditLogger := audit.NewAuditLogger(db)
+	auditLogRepository := repository.NewAuditLogRepository(db)
+	auditUseCase := usecase.NewAuditUseCase(auditLogRepository)
+	healthRepository := repository.NewHealthRepository(db)
+	healthUseCase := usecase.NewHealthUseCase(healthRepository, keyMgr)
 
 	fositeSecretHasher := iam.NewFositeSecretHasher(fositeConfig)
 
@@ -84,16 +91,24 @@ func setupManagementAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, nil, outboundGuard)
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, nil, outboundGuard)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
-	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, tenantUseCase, outboundGuard)
+	// These tests only cover tenant/client routes, so LDAPConnUse and BrandingUse are intentionally nil.
+	handler := handlers.NewManagementHandler(fositeConfig, auth2ClientUseCase, clientUseCase, samlConnectionUseCase, authUseCase, sessionUseCase, connectionUseCase, nil, tenantUseCase, auditUseCase, healthUseCase, outboundGuard, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
 	r.Use(middleware.ErrorHandlerMiddleware())
 
-	r.DELETE("/tenants/:id", handler.DeleteTenant)
-	r.GET("/clients/tenant/:tenant_id", handler.ListClientsByTenant)
-	r.POST("/clients", handler.CreateClient)
+	mgmtGroup := r.Group("/admin/management")
+	mgmtGroup.DELETE("/tenants/:id", handler.DeleteTenant)
+	mgmtGroup.GET("/clients", handler.ListClients)
+	mgmtGroup.GET("/tenants/:id/clients", handler.ListClientsByTenant)
+	mgmtGroup.GET("/clients/:tenant_id/:id", handler.GetClient)
+	mgmtGroup.POST("/clients", handler.CreateClient)
+	mgmtGroup.GET("/dashboard/auth-activity", handler.GetAuthActivity)
+	mgmtGroup.GET("/dashboard/auth-failures", handler.GetAuthFailures)
+	mgmtGroup.GET("/dashboard/routing-insights", handler.GetRoutingInsights)
+	mgmtGroup.GET("/dashboard/health-summary", handler.GetHealthSummary)
 
 	return r, db
 }
@@ -106,16 +121,30 @@ func TestManagementAPI_Security(t *testing.T) {
 
 	t.Run("Prevent Deletion of Default Tenant", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/tenants/default", nil)
+		req, _ := http.NewRequest("DELETE", "/admin/management/tenants/default", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), `"code":"default_tenant_protected"`)
 	})
 
+	t.Run("Allow Global Admin Client Listing", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/admin/management/clients", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var clients []model.OAuth2Client
+		err := json.Unmarshal(w.Body.Bytes(), &clients)
+		assert.NoError(t, err)
+
+		assert.Len(t, clients, 2)
+	})
+
 	t.Run("Prevent Cross-Tenant Data Leakage (Client Listing)", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/clients/tenant/tenant-a", nil)
+		req, _ := http.NewRequest("GET", "/admin/management/tenants/tenant-a/clients", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -129,11 +158,20 @@ func TestManagementAPI_Security(t *testing.T) {
 		assert.Equal(t, "tenant-a", clients[0].TenantID)
 	})
 
+	t.Run("Cross-Tenant Detail Access Returns Not Found", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/admin/management/clients/tenant-b/client-a1", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), `"code":"resource_not_found"`)
+	})
+
 	t.Run("Enforce Tenant Binding on Resource Creation", func(t *testing.T) {
 		payload := []byte(`{"id": "hacker-client", "tenant_id": "non-existent-tenant", "name": "Evil Client", "redirect_uris": ["http://localhost"], "grant_types": ["authorization_code"]}`)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/clients", bytes.NewBuffer(payload))
+		req, _ := http.NewRequest("POST", "/admin/management/clients", bytes.NewBuffer(payload))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 

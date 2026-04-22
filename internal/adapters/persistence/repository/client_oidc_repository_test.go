@@ -106,3 +106,48 @@ func TestOAuth2ClientRepository_DeleteBoundary(t *testing.T) {
 	_, err = repo.GetByTenantAndID(ctx, tenantID, clientID)
 	assert.Error(t, err)
 }
+
+func TestOAuth2ClientRepository_UpdateRespectsTenantBoundary(t *testing.T) {
+	t.Parallel()
+	db := setupOIDCRepoTestDB(t)
+	repo := repository.NewOAuth2ClientRepository(db)
+	ctx := context.Background()
+
+	client := &model.OAuth2Client{
+		ID:                      "client_oidc_123",
+		TenantID:                "tenant-a",
+		Name:                    "Tenant A Client",
+		Public:                  true,
+		RedirectURIs:            []string{"https://app.example.com/callback"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		ResponseModes:           []string{"query"},
+		Scopes:                  []string{"openid"},
+		TokenEndpointAuthMethod: "none",
+		EnforcePKCE:             true,
+		SubjectType:             "public",
+	}
+	require.NoError(t, repo.Create(ctx, client))
+
+	crossTenant := &model.OAuth2Client{
+		ID:                      client.ID,
+		TenantID:                "tenant-b",
+		Name:                    "Hacked",
+		Public:                  true,
+		RedirectURIs:            client.RedirectURIs,
+		GrantTypes:              client.GrantTypes,
+		ResponseTypes:           client.ResponseTypes,
+		ResponseModes:           client.ResponseModes,
+		Scopes:                  client.Scopes,
+		TokenEndpointAuthMethod: "none",
+		EnforcePKCE:             true,
+		SubjectType:             "public",
+	}
+	err := repo.Update(ctx, crossTenant)
+	require.Error(t, err)
+	assert.Equal(t, "oauth2 client not found", err.Error())
+
+	fetched, err := repo.GetByTenantAndID(ctx, "tenant-a", client.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A Client", fetched.Name)
+}

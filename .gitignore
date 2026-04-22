@@ -41,6 +41,9 @@ k6/*
 # macOS metadata
 .DS_Store
 
+# Local Firecrawl Files
+.firecrawl
+
 # Repository-local Codex files are versioned on purpose.
 # Ignore only local throwaway variants.
 .codex/*.local.toml

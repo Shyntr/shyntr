@@ -9,6 +9,7 @@ const (
 	OutboundTargetSAMLMetadataFetch OutboundTargetType = "saml_metadata_fetch"
 	OutboundTargetOIDCDiscovery     OutboundTargetType = "oidc_discovery"
 	OutboundTargetOIDCBackchannel   OutboundTargetType = "oidc_backchannel_logout"
+	OutboundTargetLDAPAuth          OutboundTargetType = "ldap_auth"
 )
 
 type OutboundPolicy struct {

@@ -19,7 +19,8 @@ type SAMLClientUseCase interface {
 	GetClientByEntityID(ctx context.Context, tenantID, entityID string) (*model.SAMLClient, error)
 	UpdateClient(ctx context.Context, client *model.SAMLClient, actorIP, userAgent string) error
 	DeleteClient(ctx context.Context, tenantID, id string, actorIP, userAgent string) error
-	ListClients(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error)
+	ListClientsByTenant(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error)
+	ListAllClients(ctx context.Context) ([]*payload.SAMLClientResponse, error)
 }
 
 type samlClientUseCase struct {
@@ -157,8 +158,19 @@ func (u *samlClientUseCase) DeleteClient(ctx context.Context, tenantID, id strin
 	return nil
 }
 
-func (u *samlClientUseCase) ListClients(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error) {
+func (u *samlClientUseCase) ListClientsByTenant(ctx context.Context, tenantID string) ([]*payload.SAMLClientResponse, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id is required")
+	}
 	clients, err := u.repo.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return payload.FromDomainSAMLClients(clients), nil
+}
+
+func (u *samlClientUseCase) ListAllClients(ctx context.Context) ([]*payload.SAMLClientResponse, error) {
+	clients, err := u.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}

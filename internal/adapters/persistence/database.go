@@ -47,6 +47,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.SAMLClientGORM{},
 		&models.SAMLReplayCache{},
 		&models.OIDCConnectionGORM{},
+		&models.LDAPConnectionGORM{},
 		&models.OAuth2SessionGORM{},
 		&models.CryptoKeyGORM{},
 		&models.LoginRequestGORM{},
@@ -57,6 +58,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.ScopeGORM{},
 		&models.AuditLogGORM{},
 		&models.OutboundPolicyGORM{},
+		&models.TenantBrandingGORM{},
 	); err != nil {
 		return err
 	}
@@ -191,9 +193,19 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			Name:   "Global Outbound Policy - OIDC Backchannel",
 			Target: model.OutboundTargetOIDCBackchannel,
 		},
+		{
+			ID:     "global-outbound-policy-ldap-auth",
+			Name:   "Global Outbound Policy - LDAP Auth",
+			Target: model.OutboundTargetLDAPAuth,
+		},
 	}
 
-	allowedSchemesJSON, err := json.Marshal([]string{"https"})
+	allowedSchemesHTTPS, err := json.Marshal([]string{"https"})
+	if err != nil {
+		return err
+	}
+
+	allowedSchemesLDAP, err := json.Marshal([]string{"ldap", "ldaps"})
 	if err != nil {
 		return err
 	}
@@ -208,12 +220,19 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 		return err
 	}
 
-	allowedPortsJSON, err := json.Marshal([]int{443})
+	allowedPortsHTTPS, err := json.Marshal([]int{443})
+	if err != nil {
+		return err
+	}
+
+	// LDAP uses no path concept; an empty ports list means no port restriction.
+	allowedPortsLDAP, err := json.Marshal([]int{})
 	if err != nil {
 		return err
 	}
 
 	for _, item := range items {
+		isLDAPAuthTarget := item.Target == model.OutboundTargetLDAPAuth
 		var count int64
 		if err := db.Model(&models.OutboundPolicyGORM{}).
 			Where("id = ?", item.ID).
@@ -222,7 +241,31 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 		}
 
 		if count > 0 {
+			if isLDAPAuthTarget {
+				if err := db.Model(&models.OutboundPolicyGORM{}).
+					Where("id = ?", item.ID).
+					Updates(map[string]interface{}{
+						"allowed_path_patterns_json": `[]`,
+						"block_private_ips":          false,
+						"block_loopback_ips":         true,
+						"block_link_local_ips":       true,
+						"block_localhost_names":      true,
+						"require_dns_resolve":        true,
+					}).Error; err != nil {
+					return err
+				}
+			}
 			continue
+		}
+
+		// LDAP connections use ldap/ldaps schemes and have no HTTP redirects.
+		schemesJSON := string(allowedSchemesHTTPS)
+		portsJSON := string(allowedPortsHTTPS)
+		pathsJSON := string(allowedPathPatternsJSON)
+		if item.Target == model.OutboundTargetLDAPAuth {
+			schemesJSON = string(allowedSchemesLDAP)
+			portsJSON = string(allowedPortsLDAP)
+			pathsJSON = `[]`
 		}
 
 		row := &models.OutboundPolicyGORM{
@@ -231,23 +274,36 @@ func seedGlobalOutboundPolicies(db *gorm.DB) error {
 			Name:                    item.Name,
 			Target:                  string(item.Target),
 			Enabled:                 true,
-			AllowedSchemesJSON:      string(allowedSchemesJSON),
+			AllowedSchemesJSON:      schemesJSON,
 			AllowedHostPatternsJSON: string(allowedHostPatternsJSON),
-			AllowedPathPatternsJSON: string(allowedPathPatternsJSON),
-			AllowedPortsJSON:        string(allowedPortsJSON),
-			BlockPrivateIPs:         true,
+			AllowedPathPatternsJSON: pathsJSON,
+			AllowedPortsJSON:        portsJSON,
+			BlockPrivateIPs:         !isLDAPAuthTarget,
 			BlockLoopbackIPs:        true,
 			BlockLinkLocalIPs:       true,
 			BlockMulticastIPs:       true,
 			BlockLocalhostNames:     true,
 			DisableRedirects:        true,
 			RequireDNSResolve:       true,
-			RequestTimeoutSeconds:   5,
+			RequestTimeoutSeconds:   10,
 			MaxResponseBytes:        2 << 20,
 		}
 
 		if err := db.Create(row).Error; err != nil {
 			return err
+		}
+		if isLDAPAuthTarget {
+			if err := db.Model(&models.OutboundPolicyGORM{}).
+				Where("id = ?", row.ID).
+				Updates(map[string]interface{}{
+					"block_private_ips":     false,
+					"block_loopback_ips":    true,
+					"block_link_local_ips":  true,
+					"block_localhost_names": true,
+					"require_dns_resolve":   true,
+				}).Error; err != nil {
+				return err
+			}
 		}
 
 		logger.Log.Info("Seeded global outbound policy",

@@ -2,7 +2,7 @@
 # Codex does not automatically read this file from the repo.
 # Mirror the relevant parts into ~/.codex/config.toml when needed.
 
-profile = "shyntr_fast"
+profile = "shyntr_deep"
 project_doc_max_bytes = 12000
 project_doc_fallback_filenames = ["AGENTS.md"]
 

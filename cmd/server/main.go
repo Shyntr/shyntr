@@ -27,6 +27,7 @@ import (
 	"github.com/Shyntr/shyntr/internal/adapters/audit"
 	router "github.com/Shyntr/shyntr/internal/adapters/http"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	ldapadapter "github.com/Shyntr/shyntr/internal/adapters/ldap"
 	persistence "github.com/Shyntr/shyntr/internal/adapters/persistence"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
@@ -955,6 +956,111 @@ func main() {
 		},
 	}
 
+	// ==========================================
+	// LDAP CONNECTION COMMANDS
+	// ==========================================
+
+	var (
+		ldapServerURL, ldapBindDN, ldapBindPassword, ldapBaseDN string
+		ldapStartTLS, ldapInsecureSkipVerify                    bool
+	)
+
+	var createLDAPConnectionCmd = &cobra.Command{
+		Use:   "create-ldap-connection",
+		Short: "Register LDAP Directory Connection",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Error: %v", err)
+			}
+			if tenantID == "" {
+				tenantID = "default"
+			}
+			if ldapServerURL == "" || ldapBaseDN == "" {
+				log.Fatal("--server-url and --base-dn are required")
+			}
+			if clientName == "" {
+				clientName = "LDAP Directory"
+			}
+			ldapRepo := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
+			auditLogger := audit.NewAuditLogger(db)
+			scopeRepository := repository.NewScopeRepository(db)
+			scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
+			outboundPolicyRepo := repository.NewOutboundPolicyRepository(db)
+			outboundGuard := security.NewOutboundGuard(outboundPolicyRepo, cfg.SkipTLSVerify)
+			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), auditLogger, scopeUseCase, outboundGuard)
+			conn, connErr := ldapUseCase.CreateConnection(context.Background(), &model.LDAPConnection{
+				TenantID:              tenantID,
+				Name:                  clientName,
+				ServerURL:             ldapServerURL,
+				BindDN:                ldapBindDN,
+				BindPassword:          ldapBindPassword,
+				BaseDN:                ldapBaseDN,
+				StartTLS:              ldapStartTLS,
+				TLSInsecureSkipVerify: ldapInsecureSkipVerify,
+			}, "127.0.0.1", "shyntr-cli")
+			if connErr != nil {
+				log.Fatalf("Failed: %v", connErr)
+			}
+			log.Printf("LDAP Connection created: %s (%s)", conn.Name, conn.ID)
+		},
+	}
+	createLDAPConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "default", "Tenant ID")
+	createLDAPConnectionCmd.Flags().StringVar(&clientName, "name", "", "Connection Name")
+	createLDAPConnectionCmd.Flags().StringVar(&ldapServerURL, "server-url", "", "LDAP Server URL (Required)")
+	createLDAPConnectionCmd.Flags().StringVar(&ldapBindDN, "bind-dn", "", "Bind DN")
+	createLDAPConnectionCmd.Flags().StringVar(&ldapBindPassword, "bind-password", "", "Bind Password")
+	createLDAPConnectionCmd.Flags().StringVar(&ldapBaseDN, "base-dn", "", "Base DN (Required)")
+	createLDAPConnectionCmd.Flags().BoolVar(&ldapStartTLS, "start-tls", false, "Use StartTLS")
+	createLDAPConnectionCmd.Flags().BoolVar(&ldapInsecureSkipVerify, "insecure-skip-verify", false, "Skip TLS verification")
+	_ = createLDAPConnectionCmd.MarkFlagRequired("server-url")
+	_ = createLDAPConnectionCmd.MarkFlagRequired("base-dn")
+
+	var getLDAPConnectionCmd = &cobra.Command{
+		Use:   "get-ldap-connection [id]",
+		Short: "Get LDAP Connection",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Error: %v", err)
+			}
+			ldapRepo := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
+			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), audit.NewAuditLogger(db), nil, nil)
+			conn, connErr := ldapUseCase.GetConnection(context.Background(), tenantID, args[0])
+			if connErr != nil {
+				log.Fatalf("Not found: %v", connErr)
+			}
+			printJSON(conn)
+		},
+	}
+	getLDAPConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "", "Tenant ID (Required)")
+	_ = getLDAPConnectionCmd.MarkFlagRequired("tenant-id")
+
+	var deleteLDAPConnectionCmd = &cobra.Command{
+		Use:   "delete-ldap-connection [id]",
+		Short: "Delete LDAP Connection",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := config.LoadConfig()
+			db, err := persistence.ConnectDB(cfg)
+			if err != nil {
+				log.Fatalf("DB Error: %v", err)
+			}
+			auditLogger := audit.NewAuditLogger(db)
+			ldapRepo := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
+			ldapUseCase := usecase.NewLDAPConnectionUseCase(ldapRepo, ldapadapter.NewLDAPDialer(), auditLogger, nil, nil)
+			if delErr := ldapUseCase.DeleteConnection(context.Background(), tenantID, args[0], "127.0.0.1", "shyntr-cli"); delErr != nil {
+				log.Fatalf("Delete failed: %v", delErr)
+			}
+			log.Println("LDAP Connection deleted.")
+		},
+	}
+	deleteLDAPConnectionCmd.Flags().StringVar(&tenantID, "tenant-id", "", "Tenant ID (Required)")
+	_ = deleteLDAPConnectionCmd.MarkFlagRequired("tenant-id")
+
 	var importKeyCmd = &cobra.Command{
 		Use:   "import-key",
 		Short: "Inject a CA-signed keypair into the Identity Hub",
@@ -1045,6 +1151,7 @@ func main() {
 		createSAMLClientCmd, getSAMLClientCmd, updateSAMLClientCmd, deleteSAMLClientCmd,
 		createSAMLConnectionCmd, getSAMLConnectionCmd, deleteSAMLConnectionCmd,
 		createOIDCConnectionCmd, getOIDCConnectionCmd, deleteOIDCConnectionCmd,
+		createLDAPConnectionCmd, getLDAPConnectionCmd, deleteLDAPConnectionCmd,
 		serveCmd, importKeyCmd,
 	)
 
@@ -1131,16 +1238,21 @@ func runServer() {
 	scopeUseCase := usecase.NewScopeUseCase(scopeRepository, auditLogger)
 	connectionUseCase := usecase.NewOIDCConnectionUseCase(connectionRepository, auditLogger, scopeUseCase, outboundGuard)
 	samlConnectionUseCase := usecase.NewSAMLConnectionUseCase(samlConnectionRepository, auditLogger, scopeUseCase, outboundGuard)
-	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository)
+	ldapConnectionRepository := repository.NewLDAPConnectionRepository(db, []byte(cfg.AppSecret))
+	ldapDialer := ldapadapter.NewLDAPDialer()
+	ldapConnectionUseCase := usecase.NewLDAPConnectionUseCase(ldapConnectionRepository, ldapDialer, auditLogger, scopeUseCase, outboundGuard)
+	managementUseCase := usecase.NewManagementUseCase(cfg, requestRepository, connectionRepository, samlConnectionRepository, ldapConnectionRepository)
+	brandingRepository := repository.NewBrandingRepository(db)
+	brandingUseCase := usecase.NewBrandingUseCase(brandingRepository)
 	sessionUseCase := usecase.NewOAuth2SessionUseCase(sessionRepository, auditLogger)
 	webhookUseCase := usecase.NewWebhookUseCase(webhookRepository, eventRepository, auditLogger, outboundGuard)
 	builderUseCase := usecase.NewSamlBuilderUseCase(samlClientRepository, samlConnectionRepository, replayRepository, keyMgr, cfg, federationStateProvider)
-	healthUseCase := usecase.NewHealthUseCase(healthRepository)
+	healthUseCase := usecase.NewHealthUseCase(healthRepository, keyMgr)
 	outboundPolicyUseCase := usecase.NewOutboundPolicyUseCase(policyRepository, auditLogger)
 
 	publicRouter, adminRouter := router.SetupRouter(auth2ClientUseCase, authUseCase, tenantUseCase, auditUseCase, clientUseCase,
-		connectionUseCase, samlConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
-		scopeUseCase, outboundPolicyUseCase, outboundGuard, auditLogger, fositeConfig, cfg, provider, keyMgr, federationStateProvider)
+		connectionUseCase, samlConnectionUseCase, ldapConnectionUseCase, managementUseCase, sessionUseCase, webhookUseCase, builderUseCase, healthUseCase,
+		scopeUseCase, outboundPolicyUseCase, outboundGuard, auditLogger, fositeConfig, cfg, provider, keyMgr, federationStateProvider, brandingUseCase)
 
 	worker.StartCleanupJob(db, keyMgr)
 	swaggerRouter := router.SetupSwaggerRouter()

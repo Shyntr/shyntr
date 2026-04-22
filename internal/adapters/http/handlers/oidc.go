@@ -229,7 +229,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	}
 
 	existingCtx["login_claims"] = finalAttributes
-	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, conn.Name, existingCtx, c.ClientIP(), c.Request.UserAgent())
+	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, conn.Name, "oidc", existingCtx, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"))
 		payload.AbortWithOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to complete the external OIDC login and resume the original authentication flow.", err)

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
+	"github.com/Shyntr/shyntr/internal/adapters/persistence/repository"
 	"github.com/Shyntr/shyntr/internal/application/port"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	shyntrsaml "github.com/Shyntr/shyntr/internal/application/utils"
@@ -21,19 +23,26 @@ type ManagementHandler struct {
 	SAMLClientUse    usecase.SAMLClientUseCase
 	SAMLConnUse      usecase.SAMLConnectionUseCase
 	OIDCConnUse      usecase.OIDCConnectionUseCase
+	LDAPConnUse      usecase.LDAPConnectionUseCase
 	OAuth2SessionUse usecase.OAuth2SessionUseCase
 	AuthReq          usecase.AuthUseCase
 	TenantUse        usecase.TenantUseCase
+	AuditUse         usecase.AuditUseCase
+	HealthUse        usecase.HealthUseCase
 	OutboundGuard    port.OutboundGuard
+	BrandingUse      usecase.BrandingUseCase
 }
 
 func NewManagementHandler(fositeCfg *fosite.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase, SAMLClientUse usecase.SAMLClientUseCase,
 	SAMLConnUse usecase.SAMLConnectionUseCase, AuthReq usecase.AuthUseCase,
 	OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
-	TenantUse usecase.TenantUseCase, OutboundGuard port.OutboundGuard) *ManagementHandler {
+	LDAPConnUse usecase.LDAPConnectionUseCase,
+	TenantUse usecase.TenantUseCase, AuditUse usecase.AuditUseCase, HealthUse usecase.HealthUseCase,
+	OutboundGuard port.OutboundGuard, BrandingUse usecase.BrandingUseCase) *ManagementHandler {
 	return &ManagementHandler{FositeConfig: fositeCfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
 		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse,
-		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, OutboundGuard: OutboundGuard}
+		SAMLConnUse: SAMLConnUse, SAMLClientUse: SAMLClientUse, LDAPConnUse: LDAPConnUse,
+		AuditUse: AuditUse, HealthUse: HealthUse, OutboundGuard: OutboundGuard, BrandingUse: BrandingUse}
 }
 
 func (h *ManagementHandler) resolveTenantID(c *gin.Context, inputID string) (string, bool) {
@@ -73,6 +82,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 		TotalSAMLClients     int64                    `json:"total_saml_clients"`
 		TotalSAMLConnections int64                    `json:"total_saml_connections"`
 		TotalOIDCConnections int64                    `json:"total_oidc_connections"`
+		TotalLDAPConnections int64                    `json:"total_ldap_connections"`
 		TotalTenants         int64                    `json:"total_tenants"`
 		PublicClients        int64                    `json:"public_clients"`
 		ConfidentialClients  int64                    `json:"confidential_clients"`
@@ -85,6 +95,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	stats.TotalSAMLClients, _ = h.SAMLClientUse.GetClientCount(ctx, tenantID)
 	stats.TotalSAMLConnections, _ = h.SAMLConnUse.GetConnectionCount(ctx, tenantID)
 	stats.TotalOIDCConnections, _ = h.OIDCConnUse.GetConnectionCount(ctx, tenantID)
+	stats.TotalLDAPConnections, _ = h.LDAPConnUse.GetConnectionCount(ctx, tenantID)
 	stats.TotalTenants, _ = h.TenantUse.GetCount(ctx)
 
 	recentLogins, _ := h.AuthReq.GetRecentLogins(ctx, tenantID, 10)
@@ -102,6 +113,7 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 			"id":              l.ID,
 			"subject":         l.Subject,
 			"client_id":       l.ClientID,
+			"protocol":        l.Protocol,
 			"saml_request_id": l.SAMLRequestID,
 			"status":          status,
 			"timestamp":       l.CreatedAt,
@@ -110,6 +122,87 @@ func (h *ManagementHandler) GetDashboardStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// GetAuthActivity godoc
+// @Summary Get Authentication Activity
+// @Description Retrieves real-time authentication success and failure counts by protocol for a given time range across all tenants.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.AuthActivity
+// @Router /admin/management/dashboard/auth-activity [get]
+func (h *ManagementHandler) GetAuthActivity(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	activity, err := h.AuditUse.GetAuthActivity(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Auth activity", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, activity)
+}
+
+// GetAuthFailures godoc
+// @Summary Get Authentication Failures
+// @Description Retrieves failure intelligence and breakdown by reason and protocol across all tenants.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.AuthFailures
+// @Router /admin/management/dashboard/auth-failures [get]
+func (h *ManagementHandler) GetAuthFailures(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	failures, err := h.AuditUse.GetAuthFailures(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Auth failures", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, failures)
+}
+
+// GetRoutingInsights godoc
+// @Summary Get Protocol Routing Insights
+// @Description Retrieves patterns of protocol transitions (e.g., OIDC -> SAML) across all authentication flows.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Param range query string false "Time range (1h, 24h, 7d)"
+// @Success 200 {object} model.RoutingInsights
+// @Router /admin/management/dashboard/routing-insights [get]
+func (h *ManagementHandler) GetRoutingInsights(c *gin.Context) {
+	timeRange := c.DefaultQuery("range", "24h")
+
+	insights, err := h.AuditUse.GetRoutingInsights(c.Request.Context(), timeRange)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Routing insights", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, insights)
+}
+
+// GetHealthSummary godoc
+// @Summary Get Dashboard Health Summary
+// @Description Retrieves a high-level health summary of critical system components (database, keys, migrations).
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} model.HealthSummary
+// @Router /admin/management/dashboard/health-summary [get]
+func (h *ManagementHandler) GetHealthSummary(c *gin.Context) {
+	summary, err := h.HealthUse.GetHealthSummary(c.Request.Context())
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Health summary", "fetch", err))
+		return
+	}
+
+	c.JSON(http.StatusOK, summary)
 }
 
 // ListTenants godoc
@@ -315,7 +408,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve clients"
 // @Router /admin/management/clients [get]
 func (h *ManagementHandler) ListClients(c *gin.Context) {
-	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), "")
+	clients, err := h.OAuth2ClientUse.ListAllClients(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
@@ -332,19 +425,19 @@ func (h *ManagementHandler) ListClients(c *gin.Context) {
 // @Tags OAuth2 Clients
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Success 200 {array} model.OAuth2Client
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve clients for tenant"
-// @Router /admin/management/tenants/{tenant_id}/clients [get]
+// @Router /admin/management/tenants/{id}/clients [get]
 func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	clients, err := h.OAuth2ClientUse.ListClients(c.Request.Context(), tenantID)
+	clients, err := h.OAuth2ClientUse.ListClientsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC clients", "list", err))
 		return
@@ -363,13 +456,15 @@ func (h *ManagementHandler) ListClientsByTenant(c *gin.Context) {
 // @Tags OAuth2 Clients
 // @Produce json
 // @Security BearerAuth
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Client ID"
 // @Success 200 {object} model.OAuth2Client
 // @Failure 404 {object} payload.AppError "OIDC Client not found"
-// @Router /admin/management/clients/{id} [get]
+// @Router /admin/management/clients/{tenant_id}/{id} [get]
 func (h *ManagementHandler) GetClient(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
 	id := c.Param("id")
-	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), tenantID, id)
 	if err != nil {
 		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
@@ -399,8 +494,13 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		c.Error(payload.NewValidationAppError(err))
 		return
 	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body client_id does not match the target resource in the path.", "Remove client_id from the body or make it match the path parameter.", []payload.FieldError{{Field: "client_id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
 
-	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), id)
+	client, err := h.OAuth2ClientUse.GetClient(c.Request.Context(), req.TenantID, id)
 	if err != nil {
 		c.Error(payload.NewNotFoundAppError("OIDC client", err))
 		return
@@ -476,7 +576,7 @@ func (h *ManagementHandler) DeleteClient(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients"
 // @Router /admin/management/saml-clients [get]
 func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
-	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), "")
+	clients, err := h.SAMLClientUse.ListAllClients(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
@@ -494,15 +594,15 @@ func (h *ManagementHandler) ListSAMLClients(c *gin.Context) {
 // @Success 200 {array} model.SAMLClient
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML clients for tenant"
-// @Router /admin/management/saml-clients/tenant/{tenant_id} [get]
+// @Router /admin/management/tenants/{id}/saml-clients [get]
 func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	clients, err := h.SAMLClientUse.ListClients(c.Request.Context(), tenantID)
+	clients, err := h.SAMLClientUse.ListClientsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML clients", "list", err))
 		return
@@ -516,7 +616,7 @@ func (h *ManagementHandler) ListSAMLClientsByTenant(c *gin.Context) {
 // @Tags SAML Clients
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Client ID"
 // @Success 200 {object} model.SAMLClient
 // @Failure 404 {object} payload.AppError "SAML Client not found"
@@ -773,7 +873,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		return
 	}
 	logger.FromGin(c).Info("SAML connection created successfully", zap.String("entity_id", connection.IdpEntityID), zap.String("target_tenant_id", connection.TenantID), zap.String("protocol", "saml"))
-	c.JSON(http.StatusCreated, conn)
+	c.JSON(http.StatusCreated, payload.FromDomainSAMLConnection(connection))
 }
 
 // ListSAMLConnections godoc
@@ -786,12 +886,12 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections"
 // @Router /admin/management/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
-	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), "")
+	connections, err := h.SAMLConnUse.ListAllConnections(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnections(connections))
 }
 
 // ListSAMLConnectionsByTenant godoc
@@ -804,20 +904,20 @@ func (h *ManagementHandler) ListSAMLConnections(c *gin.Context) {
 // @Success 200 {array} model.SAMLConnection
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve SAML connections for tenant"
-// @Router /admin/management/tenants/{tenant_id}/saml-connections [get]
+// @Router /admin/management/tenants/{id}/saml-connections [get]
 func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	connections, err := h.SAMLConnUse.ListConnections(c.Request.Context(), tenantID)
+	connections, err := h.SAMLConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnections(connections))
 }
 
 // GetSAMLConnection godoc
@@ -826,7 +926,7 @@ func (h *ManagementHandler) ListSAMLConnectionsByTenant(c *gin.Context) {
 // @Tags SAML Connections
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Connection ID"
 // @Success 200 {object} model.SAMLConnection
 // @Failure 404 {object} payload.AppError "SAML Connection not found"
@@ -839,7 +939,7 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 		c.Error(payload.NewNotFoundAppError("SAML connection", err))
 		return
 	}
-	c.JSON(http.StatusOK, conn)
+	c.JSON(http.StatusOK, payload.FromDomainSAMLConnection(conn))
 }
 
 // UpdateSAMLConnection godoc
@@ -856,10 +956,26 @@ func (h *ManagementHandler) GetSAMLConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to update SAML connection"
 // @Router /admin/management/saml-connections/{id} [put]
 func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
+	id := c.Param("id")
 	var req payload.CreateSAMLConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(payload.NewValidationAppError(err))
 		return
+	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body id does not match the target resource in the path.", "Remove id from the body or make it match the path parameter.", []payload.FieldError{{Field: "id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
+
+	existingConn, err := h.SAMLConnUse.GetConnection(c.Request.Context(), req.TenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("SAML connection", err))
+		return
+	}
+
+	if req.SPPrivateKey == "" || req.SPPrivateKey == "*****" {
+		req.SPPrivateKey = existingConn.SPPrivateKey
 	}
 
 	updateData := model.SAMLConnection{
@@ -880,7 +996,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		Active:                   true,
 	}
 
-	err := h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
+	err = h.SAMLConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "SAML connection", "update", err))
@@ -962,7 +1078,7 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 		return
 	}
 	logger.FromGin(c).Info("OIDC connection created successfully", zap.String("client_id", savedConn.ClientID), zap.String("target_tenant_id", savedConn.TenantID), zap.String("protocol", "oidc"))
-	c.JSON(http.StatusCreated, conn)
+	c.JSON(http.StatusCreated, payload.FromDomainOIDCConnection(savedConn))
 }
 
 // ListOIDCConnections godoc
@@ -975,12 +1091,12 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections"
 // @Router /admin/management/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
-	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), "")
+	connections, err := h.OIDCConnUse.ListAllConnections(c.Request.Context())
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnections(connections))
 }
 
 // ListOIDCConnectionsByTenant godoc
@@ -993,20 +1109,20 @@ func (h *ManagementHandler) ListOIDCConnections(c *gin.Context) {
 // @Success 200 {array} model.OIDCConnection
 // @Failure 400 {object} payload.AppError "tenant_id is required"
 // @Failure 500 {object} payload.AppError "Failed to retrieve OIDC connections for tenant"
-// @Router /admin/management/tenants/{tenant_id}/oidc-connections [get]
+// @Router /admin/management/tenants/{id}/oidc-connections [get]
 func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
-	tenantID := c.Param("tenant_id")
+	tenantID := c.Param("id")
 	if tenantID == "" {
 		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
 		return
 	}
 
-	connections, err := h.OIDCConnUse.ListConnections(c.Request.Context(), tenantID)
+	connections, err := h.OIDCConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connections", "list", err))
 		return
 	}
-	c.JSON(http.StatusOK, connections)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnections(connections))
 }
 
 // GetOIDCConnection godoc
@@ -1015,7 +1131,7 @@ func (h *ManagementHandler) ListOIDCConnectionsByTenant(c *gin.Context) {
 // @Tags OIDC Connections
 // @Produce json
 // @Security BearerAuth
-// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Tenant ID"
 // @Param id path string true "Connection ID"
 // @Success 200 {object} model.OIDCConnection
 // @Failure 404 {object} payload.AppError "OIDC Connection not found"
@@ -1028,7 +1144,7 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 		c.Error(payload.NewNotFoundAppError("OIDC connection", err))
 		return
 	}
-	c.JSON(http.StatusOK, connection)
+	c.JSON(http.StatusOK, payload.FromDomainOIDCConnection(connection))
 }
 
 // UpdateOIDCConnection godoc
@@ -1045,10 +1161,26 @@ func (h *ManagementHandler) GetOIDCConnection(c *gin.Context) {
 // @Failure 500 {object} payload.AppError "Failed to update OIDC connection"
 // @Router /admin/management/oidc-connections/{id} [put]
 func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
+	id := c.Param("id")
 	var req payload.CreateOIDCConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(payload.NewValidationAppError(err))
 		return
+	}
+	if req.ID != "" && req.ID != id {
+		c.Error(payload.NewDetailedAppError(http.StatusBadRequest, "path_body_mismatch", "The request body id does not match the target resource in the path.", "Remove id from the body or make it match the path parameter.", []payload.FieldError{{Field: "id", Message: "This value must match the path parameter."}}, nil))
+		return
+	}
+	req.ID = id
+
+	existingConn, err := h.OIDCConnUse.GetConnection(c.Request.Context(), req.TenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("OIDC connection", err))
+		return
+	}
+
+	if req.ClientSecret == "" || req.ClientSecret == "*****" {
+		req.ClientSecret = existingConn.ClientSecret
 	}
 
 	updateData := model.OIDCConnection{
@@ -1067,7 +1199,7 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		AttributeMapping:      req.AttributeMapping,
 	}
 
-	err := h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
+	err = h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
 
 	if err != nil {
 		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "OIDC connection", "update", err))
@@ -1098,4 +1230,348 @@ func (h *ManagementHandler) DeleteOIDCConnection(c *gin.Context) {
 	}
 	logger.FromGin(c).Info("OIDC connection deleted successfully", zap.String("client_id", id), zap.String("protocol", "oidc"))
 	c.JSON(http.StatusNoContent, nil)
+}
+
+// --- LDAP Connection Management ---
+
+// CreateLDAPConnection godoc
+// @Summary Create LDAP Connection (IdP)
+// @Description Registers an external LDAP/Active-Directory Identity Provider for federated authentication.
+// @Tags LDAP Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body payload.CreateLDAPConnectionRequest true "LDAP Connection Configuration"
+// @Success 201 {object} payload.LDAPConnectionResponse
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 500 {object} payload.AppError "Failed to create LDAP connection"
+// @Router /admin/management/ldap-connections [post]
+func (h *ManagementHandler) CreateLDAPConnection(c *gin.Context) {
+	var req payload.CreateLDAPConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+
+	realTenantID, ok := h.resolveTenantID(c, req.TenantID)
+	if !ok {
+		return
+	}
+	req.TenantID = realTenantID
+
+	conn := req.ToDomain()
+	saved, err := h.LDAPConnUse.CreateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "create", err))
+		return
+	}
+	logger.FromGin(c).Info("LDAP connection created successfully",
+		zap.String("connection_id", saved.ID),
+		zap.String("target_tenant_id", saved.TenantID),
+		zap.String("protocol", "ldap"),
+	)
+	c.JSON(http.StatusCreated, payload.FromDomainLDAPConnection(saved))
+}
+
+// ListLDAPConnections godoc
+// @Summary List All LDAP Connections
+// @Description Lists all federated LDAP Identity Providers.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} payload.LDAPConnectionResponse
+// @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections"
+// @Router /admin/management/ldap-connections [get]
+func (h *ManagementHandler) ListLDAPConnections(c *gin.Context) {
+	connections, err := h.LDAPConnUse.ListAllConnections(c.Request.Context())
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
+		return
+	}
+	resp := make([]*payload.LDAPConnectionResponse, 0, len(connections))
+	for _, conn := range connections {
+		resp = append(resp, payload.FromDomainLDAPConnection(conn))
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// ListLDAPConnectionsByTenant godoc
+// @Summary List LDAP Connections By Tenant
+// @Description Lists all federated LDAP Identity Providers for a specific tenant.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Success 200 {array} payload.LDAPConnectionResponse
+// @Failure 400 {object} payload.AppError "tenant_id is required"
+// @Failure 500 {object} payload.AppError "Failed to retrieve LDAP connections for tenant"
+// @Router /admin/management/tenants/{id}/ldap-connections [get]
+func (h *ManagementHandler) ListLDAPConnectionsByTenant(c *gin.Context) {
+	tenantID := c.Param("id")
+	if tenantID == "" {
+		c.Error(payload.NewRequiredQueryParamError("tenant_id"))
+		return
+	}
+	connections, err := h.LDAPConnUse.ListConnectionsByTenant(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connections", "list", err))
+		return
+	}
+	resp := make([]*payload.LDAPConnectionResponse, 0, len(connections))
+	for _, conn := range connections {
+		resp = append(resp, payload.FromDomainLDAPConnection(conn))
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// GetLDAPConnection godoc
+// @Summary Get LDAP Connection
+// @Description Retrieves details of a specific LDAP Identity Provider. BindPassword is never returned.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} payload.LDAPConnectionResponse
+// @Failure 404 {object} payload.AppError "LDAP Connection not found"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [get]
+func (h *ManagementHandler) GetLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	conn, err := h.LDAPConnUse.GetConnection(c.Request.Context(), tenantID, id)
+	if err != nil {
+		c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.FromDomainLDAPConnection(conn))
+}
+
+// UpdateLDAPConnection godoc
+// @Summary Update LDAP Connection
+// @Description Updates an existing LDAP Identity Provider. Pass empty string or "*****" for bind_password to keep the existing value.
+// @Tags LDAP Connections
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Param request body payload.CreateLDAPConnectionRequest true "LDAP Connection Update Configuration"
+// @Success 200 {object} map[string]string "status: updated"
+// @Failure 400 {object} payload.AppError "Invalid request payload"
+// @Failure 403 {object} payload.AppError "Connection does not belong to this tenant"
+// @Failure 500 {object} payload.AppError "Failed to update LDAP connection"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [put]
+func (h *ManagementHandler) UpdateLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+
+	var req payload.CreateLDAPConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+
+	conn := req.ToDomain()
+	// tenant_id and id come from the authenticated path, not the request body.
+	conn.TenantID = tenantID
+	conn.ID = id
+
+	// Use case handles the "*****" / empty password sentinel (keep existing).
+	if err := h.LDAPConnUse.UpdateConnection(c.Request.Context(), conn, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+			return
+		}
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "update", err))
+		return
+	}
+	logger.FromGin(c).Info("LDAP connection updated successfully",
+		zap.String("connection_id", conn.ID),
+		zap.String("target_tenant_id", conn.TenantID),
+		zap.String("protocol", "ldap"),
+	)
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+// DeleteLDAPConnection godoc
+// @Summary Delete LDAP Connection
+// @Description Deletes a federated LDAP Identity Provider from a tenant.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 204 "No Content"
+// @Failure 500 {object} payload.AppError "Failed to delete LDAP connection"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id} [delete]
+func (h *ManagementHandler) DeleteLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	if err := h.LDAPConnUse.DeleteConnection(c.Request.Context(), tenantID, id, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+			return
+		}
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "delete", err))
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// TestLDAPConnection godoc
+// @Summary Test LDAP Connection
+// @Description Verifies connectivity and service-account bind credentials for an LDAP connection.
+// @Tags LDAP Connections
+// @Produce json
+// @Security BearerAuth
+// @Param tenant_id path string true "Tenant ID"
+// @Param id path string true "Connection ID"
+// @Success 200 {object} map[string]string "status: ok"
+// @Failure 400 {object} payload.AppError "Connection test failed"
+// @Router /admin/management/ldap-connections/{tenant_id}/{id}/test [post]
+func (h *ManagementHandler) TestLDAPConnection(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	id := c.Param("id")
+	if err := h.LDAPConnUse.TestConnection(c.Request.Context(), tenantID, id); err != nil {
+		if errors.Is(err, repository.ErrLDAPConnectionNotFound) {
+			c.Error(payload.NewNotFoundAppError("LDAP connection", err))
+			return
+		}
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "LDAP connection", "test", err))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ─── Branding ────────────────────────────────────────────────────────────────
+
+// GetBranding godoc
+// @Summary Get Tenant Branding
+// @Description Returns the current draft and published branding config for a tenant. Returns defaults when no branding has been configured.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding [get]
+func (h *ManagementHandler) GetBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.GetBranding(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "get", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// UpdateBrandingDraft godoc
+// @Summary Update Branding Draft
+// @Description Validates and saves a new branding draft for the tenant. Does not affect the published state.
+// @Tags Branding
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Param request body payload.UpdateBrandingDraftRequest true "Branding config"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 400 {object} payload.AppError "Validation failed"
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/draft [put]
+func (h *ManagementHandler) UpdateBrandingDraft(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var req payload.UpdateBrandingDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+	b, err := h.BrandingUse.UpdateDraft(c.Request.Context(), tenantID, req.Theme)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Branding", "update draft", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// PublishBranding godoc
+// @Summary Publish Branding Draft
+// @Description Atomically copies the draft config into the published config.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/publish [post]
+func (h *ManagementHandler) PublishBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.Publish(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "publish", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// DiscardBranding godoc
+// @Summary Discard Branding Draft
+// @Description Resets the draft to the published state. If never published, resets to defaults.
+// @Tags Branding
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/discard [post]
+func (h *ManagementHandler) DiscardBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	b, err := h.BrandingUse.Discard(c.Request.Context(), tenantID)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusInternalServerError, "Branding", "discard", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
+}
+
+// ResetBranding godoc
+// @Summary Reset Branding
+// @Description Resets draft (and optionally published) to system defaults.
+// @Tags Branding
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Tenant ID"
+// @Param request body payload.ResetBrandingRequest true "Reset target"
+// @Success 200 {object} payload.BrandingResponse
+// @Failure 400 {object} payload.AppError "Invalid target"
+// @Failure 404 {object} payload.AppError "Tenant not found"
+// @Router /admin/management/tenants/{id}/branding/reset [post]
+func (h *ManagementHandler) ResetBranding(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var req payload.ResetBrandingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(payload.NewValidationAppError(err))
+		return
+	}
+	b, err := h.BrandingUse.Reset(c.Request.Context(), tenantID, req.Target)
+	if err != nil {
+		c.Error(payload.NewOperationAppError(http.StatusBadRequest, "Branding", "reset", err))
+		return
+	}
+	c.JSON(http.StatusOK, payload.BrandingResponseFromDomain(b))
 }

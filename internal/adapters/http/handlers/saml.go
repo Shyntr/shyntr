@@ -347,6 +347,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		loginChallenge,
 		subject,
 		conn.Name,
+		"saml",
 		existingCtx,
 		c.ClientIP(),
 		c.Request.UserAgent(),
@@ -462,7 +463,7 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 
 	loginVerifier := c.Query("login_verifier")
 	if loginVerifier != "" {
-		loginReq, err := h.AuthUse.GetAuthenticatedLoginRequest(c.Request.Context(), loginVerifier)
+		loginReq, err := h.AuthUse.GetAuthenticatedLoginRequest(c.Request.Context(), tenantID, loginVerifier)
 		if err != nil {
 			logger.FromGin(c).Error("Invalid login verifier for SAML IdP", zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_request", "The login_verifier is invalid or has expired.", nil)
@@ -559,6 +560,12 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
 			return
 		}
+
+		if consumeErr := h.AuthUse.MarkLoginRequestConsumed(c.Request.Context(), loginReq.ID); consumeErr != nil {
+			logger.FromGin(c).Warn("Failed to consume login request after SAML assertion issuance",
+				zap.Error(consumeErr), zap.String("login_request_id", loginReq.ID))
+		}
+
 		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
 		c.Header("Content-Type", "text/html")
 		c.String(http.StatusOK, htmlForm)
@@ -712,7 +719,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
 
-			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), activeSession.ClientID)
+			oidcClient, clientErr := h.OIDCClientUse.GetClient(c.Request.Context(), tenantID, activeSession.ClientID)
 			if clientErr == nil {
 				if oidcClient.BackchannelLogoutURI != "" {
 					h.ClientUseCase.SendBackchannelLogout(c.Request.Context(), tenantID, oidcClient.ID, oidcClient.BackchannelLogoutURI, subject, issuer)

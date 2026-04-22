@@ -22,3 +22,21 @@ func (r *healthRepository) Ping(ctx context.Context) error {
 	}
 	return sqlDB.PingContext(ctx)
 }
+
+func (r *healthRepository) VerifyMigrations(ctx context.Context) error {
+	// Check for a few critical tables to ensure migrations have run.
+	criticalTables := []string{
+		"tenants",
+		"o_auth2_clients",
+		"crypto_keys",
+		"audit_logs",
+	}
+
+	for _, table := range criticalTables {
+		if !r.db.Migrator().HasTable(table) {
+			return gorm.ErrRecordNotFound
+		}
+	}
+
+	return nil
+}

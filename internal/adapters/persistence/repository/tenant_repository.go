@@ -80,6 +80,9 @@ func (r *tenantRepository) CascadeDelete(ctx context.Context, id string) error {
 		if err := tx.Where("tenant_id = ?", id).Delete(&models.LoginRequestGORM{}).Error; err != nil {
 			return fmt.Errorf("failed to delete login requests: %w", err)
 		}
+		if err := tx.Where("tenant_id = ?", id).Delete(&models.TenantBrandingGORM{}).Error; err != nil {
+			return fmt.Errorf("failed to delete tenant branding: %w", err)
+		}
 		if err := tx.Where("id = ?", id).Delete(&models.TenantGORM{}).Error; err != nil {
 			return fmt.Errorf("failed to delete tenant: %w", err)
 		}

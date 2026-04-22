@@ -58,10 +58,16 @@ func (r *oidcConnectionRepository) GetConnectionCount(ctx context.Context, tenan
 }
 func (r *oidcConnectionRepository) Update(ctx context.Context, conn *model.OIDCConnection) error {
 	dbModel := models.FromDomainOIDCConnection(conn)
-	return r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{}).
-		//Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
-		Where("id = ?", conn.ID).
-		Updates(dbModel).Error
+	result := r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{}).
+		Where("tenant_id = ? AND id = ?", conn.TenantID, conn.ID).
+		Updates(dbModel)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("oidc connection not found")
+	}
+	return nil
 }
 
 func (r *oidcConnectionRepository) Delete(ctx context.Context, tenantID, id string) error {
@@ -76,17 +82,14 @@ func (r *oidcConnectionRepository) Delete(ctx context.Context, tenantID, id stri
 }
 
 func (r *oidcConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
-	var dbModels []models.OIDCConnectionGORM
-	query := r.db.WithContext(ctx).Model(&models.OIDCConnectionGORM{})
-
-	if tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
 	}
-
-	if err := query.Find(&dbModels).Error; err != nil {
+	var dbModels []models.OIDCConnectionGORM
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&dbModels).Error; err != nil {
 		return nil, err
 	}
-	entities := make([]*model.OIDCConnection, 0)
+	entities := make([]*model.OIDCConnection, 0, len(dbModels))
 	for _, m := range dbModels {
 		entities = append(entities, m.ToDomain())
 	}
@@ -94,6 +97,9 @@ func (r *oidcConnectionRepository) ListByTenant(ctx context.Context, tenantID st
 }
 
 func (r *oidcConnectionRepository) ListActiveByTenant(ctx context.Context, tenantID string) ([]*model.OIDCConnection, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant_id is required")
+	}
 	var dbModels []models.OIDCConnectionGORM
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND active = ?", tenantID, true).Find(&dbModels).Error; err != nil {
 		return nil, err
