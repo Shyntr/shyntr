@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/beevik/etree v1.6.0
-	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/crewjam/saml v0.5.1
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
