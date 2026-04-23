@@ -72,6 +72,7 @@ services:
     environment:
       - REACT_MANAGEMENT_BACKEND_URL=http://host.docker.internal:7497
       - REACT_PUBLIC_BACKEND_URL=http://host.docker.internal:7496
+      - SHYNTR_EE_BRANDING_ENABLED=true
     depends_on:
       shyntr-backend:
         condition: service_healthy
@@ -81,9 +82,9 @@ services:
   # ----------------------------------------
   # 4. SHYNTR AUTH PORTAL (Next.js)
   # ----------------------------------------
-  shyntr-auth-portal:
-    image: shyntr/shyntr-auth-portal:dev
-    container_name: shyntr_auth_portal
+  shyntr-ee-auth-portal:
+    image: shyntr/shyntr-ee-auth-portal:dev
+    container_name: shyntr_ee_auth_portal
     ports:
       - "3000:3000"
     environment:

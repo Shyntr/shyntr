@@ -40,6 +40,11 @@ func setupManagementBrandingAPI(t *testing.T) (*gin.Engine, *gorm.DB) {
 	dbPath := filepath.Join(t.TempDir(), fmt.Sprintf("%s.db", t.Name()))
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, sqlDB.Close())
+	})
 	require.NoError(t, persistence.MigrateDB(db))
 
 	require.NoError(t, db.Create(&models.TenantGORM{ID: "default", Name: "default"}).Error)
