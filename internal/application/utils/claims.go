@@ -20,6 +20,9 @@ func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes 
 	allowedKeys["tenant_id"] = true
 	allowedKeys["idp"] = true
 	allowedKeys["amr"] = true
+	allowedKeys["acr"] = true
+	allowedKeys["groups"] = true
+	allowedKeys["roles"] = true
 
 	for _, scope := range grantedScopes {
 		for _, claim := range scope.Claims {

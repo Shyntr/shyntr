@@ -95,7 +95,7 @@ func (h *AdminHandler) AcceptLoginRequest(c *gin.Context) {
 		return
 	}
 
-	logger.FromGin(c).Info("Login request accepted", zap.String("challenge", challenge), zap.String("subject", req.Subject))
+	logger.FromGin(c).Info("Login request accepted", zap.String("challenge", challenge))
 
 	redirectURL := buildRedirectURL(h.Config.BaseIssuerURL, loginReq.RequestURL, map[string]string{
 		"login_verifier": loginReq.ID,
