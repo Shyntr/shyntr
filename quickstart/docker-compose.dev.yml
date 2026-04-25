@@ -90,9 +90,23 @@ services:
     environment:
       - SHYNTR_INTERNAL_API_URL=http://host.docker.internal:7497
       - SHYNTR_PUBLIC_API_URL=http://host.docker.internal:7496
+      - SHYNTR_AUTH_ALLOWED_ORIGINS=http://localhost:7499
     depends_on:
       shyntr-backend:
         condition: service_healthy
+    networks:
+      - shyntr-net
+
+  # ----------------------------------------
+  # 5. SHYNTR PASSWORD VERIFIER
+  # ----------------------------------------
+  shyntr-password-verifier:
+    image: shyntr/password-verifier:dev
+    container_name: shyntr_password_verifier
+    ports:
+      - "7499:7499"
+    environment:
+      - VERIFIER_ADDR=0.0.0.0:7499
     networks:
       - shyntr-net
 
