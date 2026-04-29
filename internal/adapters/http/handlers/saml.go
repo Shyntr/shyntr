@@ -728,8 +728,8 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 
 		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, spClient.ID)
 		if err != nil {
-			logger.FromGin(c).Error("active session not found", zap.String("entity_id", logoutReq.NameID.Value),
-				zap.String("entity_id", spClient.EntityID), zap.Error(err))
+			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject", logoutReq.NameID.Value),
+				zap.String("entity_id", spClient.EntityID))
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
 

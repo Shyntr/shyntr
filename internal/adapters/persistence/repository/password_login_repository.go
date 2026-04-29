@@ -155,7 +155,10 @@ func (r *passwordLoginRepository) CountActiveAssignmentsForScope(ctx context.Con
 		query = query.Where("password_login_assignments.tenant_id = ?", *tenantID)
 	}
 
-	return count, query.Count(&count).Error
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // ResolveForTenant resolves the active password login endpoint for tenantID.

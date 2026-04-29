@@ -8,6 +8,8 @@ var scopeToClaims = map[string][]string{
 	"email":   {"email", "email_verified"},
 	"address": {"address"},
 	"phone":   {"phone_number", "phone_number_verified"},
+	"groups":  {"groups"},
+	"roles":   {"roles"},
 }
 
 // MapClaims filters the raw context map based on requested scopes and tenant context.
@@ -21,8 +23,8 @@ func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes 
 	allowedKeys["idp"] = true
 	allowedKeys["amr"] = true
 	allowedKeys["acr"] = true
-	allowedKeys["groups"] = true
-	allowedKeys["roles"] = true
+	//allowedKeys["groups"] = true
+	//allowedKeys["roles"] = true
 
 	for _, scope := range grantedScopes {
 		for _, claim := range scope.Claims {
