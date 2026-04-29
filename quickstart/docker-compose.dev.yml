@@ -72,6 +72,7 @@ services:
     environment:
       - REACT_MANAGEMENT_BACKEND_URL=http://host.docker.internal:7497
       - REACT_PUBLIC_BACKEND_URL=http://host.docker.internal:7496
+      - SHYNTR_EE_BRANDING_ENABLED=true
     depends_on:
       shyntr-backend:
         condition: service_healthy
@@ -81,17 +82,31 @@ services:
   # ----------------------------------------
   # 4. SHYNTR AUTH PORTAL (Next.js)
   # ----------------------------------------
-  shyntr-auth-portal:
-    image: shyntr/shyntr-auth-portal:dev
-    container_name: shyntr_auth_portal
+  shyntr-ee-auth-portal:
+    image: shyntr/shyntr-ee-auth-portal:dev
+    container_name: shyntr_ee_auth_portal
     ports:
       - "3000:3000"
     environment:
       - SHYNTR_INTERNAL_API_URL=http://host.docker.internal:7497
       - SHYNTR_PUBLIC_API_URL=http://host.docker.internal:7496
+      - SHYNTR_AUTH_ALLOWED_ORIGINS=http://localhost:7499
     depends_on:
       shyntr-backend:
         condition: service_healthy
+    networks:
+      - shyntr-net
+
+  # ----------------------------------------
+  # 5. SHYNTR PASSWORD VERIFIER
+  # ----------------------------------------
+  shyntr-password-verifier:
+    image: shyntr/password-verifier:dev
+    container_name: shyntr_password_verifier
+    ports:
+      - "7499:7499"
+    environment:
+      - VERIFIER_ADDR=0.0.0.0:7499
     networks:
       - shyntr-net
 

@@ -37,6 +37,7 @@ func SetupRouter(
 	healthUseCase usecase.HealthUseCase,
 	scopeUseCase usecase.ScopeUseCase,
 	outboundPolicyUseCase usecase.OutboundPolicyUseCase,
+	passwordLoginUseCase usecase.PasswordLoginUseCase,
 	outboundGuard port.OutboundGuard,
 	auditLogger port.AuditLogger,
 	fositeCfg *fosite.Config,
@@ -66,6 +67,7 @@ func SetupRouter(
 	auditHandler := handlers.NewAuditHandler(auditUseCase)
 	scopeHandler := handlers.NewScopeHandler(scopeUseCase)
 	outboundPolicyHandler := handlers.NewOutboundPolicyHandler(outboundPolicyUseCase)
+	passwordLoginHandler := handlers.NewPasswordLoginHandler(passwordLoginUseCase)
 
 	public := gin.New()
 	public.Use(gin.Recovery())
@@ -273,6 +275,20 @@ func SetupRouter(
 			mgmtGroup.GET("/outbound-policies/:id", outboundPolicyHandler.Get)
 			mgmtGroup.PUT("/outbound-policies/:id", outboundPolicyHandler.Update)
 			mgmtGroup.DELETE("/outbound-policies/:id", outboundPolicyHandler.Delete)
+
+			// Password Login Endpoints
+			mgmtGroup.POST("/password-login/endpoints", passwordLoginHandler.CreateEndpoint)
+			mgmtGroup.GET("/password-login/endpoints", passwordLoginHandler.ListEndpoints)
+			mgmtGroup.GET("/password-login/endpoints/:id", passwordLoginHandler.GetEndpoint)
+			mgmtGroup.PUT("/password-login/endpoints/:id", passwordLoginHandler.UpdateEndpoint)
+			mgmtGroup.DELETE("/password-login/endpoints/:id", passwordLoginHandler.DeleteEndpoint)
+
+			// Password Login Assignments
+			mgmtGroup.POST("/password-login/assignments", passwordLoginHandler.CreateAssignment)
+			mgmtGroup.GET("/password-login/assignments", passwordLoginHandler.ListAssignments)
+			mgmtGroup.GET("/password-login/assignments/:id", passwordLoginHandler.GetAssignment)
+			mgmtGroup.PUT("/password-login/assignments/:id", passwordLoginHandler.UpdateAssignment)
+			mgmtGroup.DELETE("/password-login/assignments/:id", passwordLoginHandler.DeleteAssignment)
 		}
 	}
 

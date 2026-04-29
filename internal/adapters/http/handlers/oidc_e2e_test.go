@@ -55,6 +55,7 @@ type oidcE2EEnv struct {
 	router  *gin.Engine
 	baseURL string
 	cfg     *config.Config
+	keyMgr  utils2.KeyManager
 	state   security.FederationStateProvider
 	saml    usecase.SamlBuilderUseCase
 }
@@ -100,7 +101,7 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{"code"},
 		ResponseModes:           []string{"query"},
-		Scopes:                  []string{"openid", "profile"},
+		Scopes:                  []string{"openid", "profile", "email"},
 		PostLogoutRedirectURIs:  []string{"http://client.localhost/logout"},
 	}).Error)
 	require.NoError(t, db.Create(&models.OAuth2ClientGORM{
@@ -114,7 +115,7 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{"code"},
 		ResponseModes:           []string{"query"},
-		Scopes:                  []string{"openid", "profile"},
+		Scopes:                  []string{"openid", "profile", "email"},
 		PostLogoutRedirectURIs:  []string{"http://client.localhost/logout"},
 	}).Error)
 
@@ -205,6 +206,8 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	r.POST("/t/:tenant_id/saml/sp/acs", samlHandler.ACS)
 	r.GET("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
 	r.POST("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
+	r.GET("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
+	r.POST("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
 	r.GET("/t/:tenant_id/saml/idp/slo", samlHandler.IDPSLO)
 	r.POST("/t/:tenant_id/saml/idp/slo", samlHandler.IDPSLO)
 	r.GET("/t/:tenant_id/saml/resume", samlHandler.ResumeSAML)
@@ -217,7 +220,7 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	cfg.ExternalLoginURL = cfg.BaseIssuerURL + "/admin/login"
 	cfg.ExternalConsentURL = cfg.BaseIssuerURL + "/admin/consent"
 
-	return &oidcE2EEnv{db: db, router: r, baseURL: cfg.BaseIssuerURL, cfg: cfg, state: stateProvider, saml: samlBuilderUseCase}
+	return &oidcE2EEnv{db: db, router: r, baseURL: cfg.BaseIssuerURL, cfg: cfg, keyMgr: keyMgr, state: stateProvider, saml: samlBuilderUseCase}
 }
 
 func parseLocationQuery(t *testing.T, loc string) url.Values {
@@ -346,6 +349,25 @@ func extractFormField(t *testing.T, htmlBody, field string) string {
 	end := strings.Index(htmlBody[start:], `"`)
 	require.NotEqual(t, -1, end)
 	return htmlBody[start : start+end]
+}
+
+func encodeRedirectBindingSAMLRequest(t *testing.T, xmlBody string) string {
+	t.Helper()
+	var compressed bytes.Buffer
+	writer, err := flate.NewWriter(&compressed, flate.DefaultCompression)
+	require.NoError(t, err)
+	_, err = writer.Write([]byte(xmlBody))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	return base64.StdEncoding.EncodeToString(compressed.Bytes())
+}
+
+func decodeSAMLResponseXML(t *testing.T, htmlBody string) string {
+	t.Helper()
+	encodedResponse := extractFormField(t, htmlBody, "SAMLResponse")
+	decoded, err := base64.StdEncoding.DecodeString(encodedResponse)
+	require.NoError(t, err)
+	return string(decoded)
 }
 
 func tamperQueryParamValue(t *testing.T, rawURL, param string) string {
@@ -528,12 +550,17 @@ func extractLoginVerifier(t *testing.T, redirectURL string) string {
 
 func mintTenantAToken(t *testing.T, env *oidcE2EEnv) (code string, accessToken string, idToken string) {
 	t.Helper()
+	return mintTenantATokenWithLoginPayload(t, env, []byte(`{"subject":"alice","remember":true,"remember_for":3600,"context":{"email":"alice@example.com","tenant_id":"tenant-a"}}`), "openid%20profile")
+}
+
+func mintTenantATokenWithLoginPayload(t *testing.T, env *oidcE2EEnv, loginPayload []byte, scope string) (code string, accessToken string, idToken string) {
+	t.Helper()
 
 	codeVerifier := "e2e-code-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
 	codeChallenge := pkceS256Challenge(codeVerifier)
 	authURL := "/t/tenant-a/oauth2/auth?client_id=oidc-client-a&response_type=code&redirect_uri=" +
 		url.QueryEscape("http://client.localhost/callback") +
-		"&scope=openid%20profile&state=e2e-state&code_challenge=" + url.QueryEscape(codeChallenge) +
+		"&scope=" + scope + "&state=e2e-state&code_challenge=" + url.QueryEscape(codeChallenge) +
 		"&code_challenge_method=S256"
 
 	authResp := serveRequest(t, env.router, http.MethodGet, authURL, nil, nil)
@@ -544,7 +571,6 @@ func mintTenantAToken(t *testing.T, env *oidcE2EEnv) (code string, accessToken s
 	loginChallenge := loginQuery.Get("login_challenge")
 	require.NotEmpty(t, loginChallenge)
 
-	loginPayload := []byte(`{"subject":"alice","remember":true,"remember_for":3600,"context":{"email":"alice@example.com","tenant_id":"tenant-a"}}`)
 	loginAcceptResp := serveRequest(t, env.router, http.MethodPut, "/admin/login/accept?login_challenge="+url.QueryEscape(loginChallenge), bytes.NewReader(loginPayload), nil)
 	require.Equal(t, http.StatusOK, loginAcceptResp.Code)
 
@@ -565,7 +591,21 @@ func mintTenantAToken(t *testing.T, env *oidcE2EEnv) (code string, accessToken s
 	consentChallenge := consentQuery.Get("consent_challenge")
 	require.NotEmpty(t, consentChallenge)
 
-	consentPayload := []byte(`{"grant_scope":["openid","profile"],"grant_audience":[],"remember":true,"remember_for":3600,"session":{"tenant_id":"tenant-a"}}`)
+	grantScope := []string{"openid", "profile"}
+	if strings.Contains(scope, "email") {
+		grantScope = append(grantScope, "email")
+	}
+	consentBody, err := json.Marshal(map[string]interface{}{
+		"grant_scope":    grantScope,
+		"grant_audience": []string{},
+		"remember":       true,
+		"remember_for":   3600,
+		"session": map[string]interface{}{
+			"tenant_id": "tenant-a",
+		},
+	})
+	require.NoError(t, err)
+	consentPayload := consentBody
 	consentAcceptResp := serveRequest(t, env.router, http.MethodPut, "/admin/consent/accept?consent_challenge="+url.QueryEscape(consentChallenge), bytes.NewReader(consentPayload), nil)
 	require.Equal(t, http.StatusOK, consentAcceptResp.Code)
 
@@ -617,6 +657,25 @@ func mintTenantAToken(t *testing.T, env *oidcE2EEnv) (code string, accessToken s
 	return code, accessToken, idToken
 }
 
+func decodeIDTokenClaims(t *testing.T, env *oidcE2EEnv, rawIDToken string) map[string]interface{} {
+	t.Helper()
+	return decodeSignedJWTClaims(t, env, rawIDToken)
+}
+
+func decodeSignedJWTClaims(t *testing.T, env *oidcE2EEnv, rawToken string) map[string]interface{} {
+	t.Helper()
+
+	token, err := jwt.ParseSigned(rawToken, []jose.SignatureAlgorithm{jose.RS256})
+	require.NoError(t, err)
+	_, cert, _, err := env.keyMgr.GetActiveKeys(context.Background(), "sig")
+	require.NoError(t, err)
+	require.NotNil(t, cert)
+
+	claims := make(map[string]interface{})
+	require.NoError(t, token.Claims(cert.PublicKey, &claims))
+	return claims
+}
+
 func startOIDCAuthChallenge(t *testing.T, env *oidcE2EEnv, tenantID, clientID string) (authURL string, loginChallenge string, codeVerifier string) {
 	t.Helper()
 	codeVerifier = "e2e-code-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
@@ -666,6 +725,115 @@ func TestOIDCE2E_CoreFlow(t *testing.T) {
 
 	logoutLoc := logoutResp.Header().Get("Location")
 	assert.Equal(t, "http://client.localhost/logout?state=logout-state", logoutLoc)
+}
+
+func TestOIDCE2E_NormalizedIdentityProjectsToIDTokenAndUserInfo(t *testing.T) {
+	env := setupOIDCE2EEnv(t)
+
+	loginPayload := []byte(`{
+		"subject": "ext:12345",
+		"remember": true,
+		"remember_for": 3600,
+		"context": {
+			"identity": {
+				"attributes": {
+					"preferred_username": "alice",
+					"email": "alice@example.com",
+					"email_verified": true,
+					"name": "Alice Doe",
+					"given_name": "Alice",
+					"family_name": "Doe",
+					"department": "Engineering"
+				},
+				"groups": ["engineering"],
+				"roles": ["admin"]
+			},
+			"authentication": {
+				"amr": ["pwd", "mfa"],
+				"acr": "urn:shyntr:loa:2"
+			}
+		}
+	}`)
+	_, accessToken, idToken := mintTenantATokenWithLoginPayload(t, env, loginPayload, "openid%20profile%20email")
+
+	idClaims := decodeIDTokenClaims(t, env, idToken)
+	require.Equal(t, "ext:12345", idClaims["sub"])
+	require.Equal(t, "alice", idClaims["preferred_username"])
+	require.Equal(t, "alice@example.com", idClaims["email"])
+	require.Equal(t, true, idClaims["email_verified"])
+	require.Equal(t, "Alice Doe", idClaims["name"])
+	require.Equal(t, "Alice", idClaims["given_name"])
+	require.Equal(t, "Doe", idClaims["family_name"])
+	require.Equal(t, "urn:shyntr:loa:2", idClaims["acr"])
+	assert.ElementsMatch(t, []interface{}{"engineering"}, idClaims["groups"])
+	assert.ElementsMatch(t, []interface{}{"admin"}, idClaims["roles"])
+	assert.ElementsMatch(t, []interface{}{"pwd", "mfa"}, idClaims["amr"])
+	assert.NotContains(t, idClaims, "department")
+
+	accessClaims := decodeSignedJWTClaims(t, env, accessToken)
+	require.Equal(t, "ext:12345", accessClaims["sub"])
+	require.Equal(t, "alice", accessClaims["preferred_username"])
+	require.Equal(t, "alice@example.com", accessClaims["email"])
+	require.Equal(t, true, accessClaims["email_verified"])
+	require.Equal(t, "urn:shyntr:loa:2", accessClaims["acr"])
+	assert.ElementsMatch(t, []interface{}{"engineering"}, accessClaims["groups"])
+	assert.ElementsMatch(t, []interface{}{"admin"}, accessClaims["roles"])
+	assert.ElementsMatch(t, []interface{}{"pwd", "mfa"}, accessClaims["amr"])
+	assert.NotContains(t, accessClaims, "department")
+
+	userInfoResp := serveRequest(t, env.router, http.MethodGet, "/t/tenant-a/userinfo", nil, map[string]string{
+		"Authorization": "Bearer " + accessToken,
+	})
+	require.Equal(t, http.StatusOK, userInfoResp.Code)
+
+	var userInfo map[string]interface{}
+	require.NoError(t, json.NewDecoder(userInfoResp.Body).Decode(&userInfo))
+	require.Equal(t, "ext:12345", userInfo["sub"])
+	require.Equal(t, "alice", userInfo["preferred_username"])
+	require.Equal(t, "alice@example.com", userInfo["email"])
+	require.Equal(t, true, userInfo["email_verified"])
+	require.Equal(t, "Alice Doe", userInfo["name"])
+	require.Equal(t, "Alice", userInfo["given_name"])
+	require.Equal(t, "Doe", userInfo["family_name"])
+	require.Equal(t, "urn:shyntr:loa:2", userInfo["acr"])
+	assert.ElementsMatch(t, []interface{}{"engineering"}, userInfo["groups"])
+	assert.ElementsMatch(t, []interface{}{"admin"}, userInfo["roles"])
+	assert.ElementsMatch(t, []interface{}{"pwd", "mfa"}, userInfo["amr"])
+	assert.NotContains(t, userInfo, "department")
+}
+
+func TestOIDCE2E_NormalizedIdentityIgnoresMalformedOptionalFields(t *testing.T) {
+	env := setupOIDCE2EEnv(t)
+
+	loginPayload := []byte(`{
+		"subject": "ext:malformed",
+		"context": {
+			"identity": {
+				"attributes": {
+					"email": "malformed@example.com",
+					"email_verified": "true"
+				}
+			},
+			"authentication": {
+				"acr": ""
+			}
+		}
+	}`)
+	_, accessToken, idToken := mintTenantATokenWithLoginPayload(t, env, loginPayload, "openid%20profile%20email")
+
+	idClaims := decodeIDTokenClaims(t, env, idToken)
+	require.Equal(t, "ext:malformed", idClaims["sub"])
+	require.Equal(t, "malformed@example.com", idClaims["email"])
+	assert.NotContains(t, idClaims, "email_verified")
+	assert.NotContains(t, idClaims, "acr")
+
+	userInfoResp := serveRequest(t, env.router, http.MethodGet, "/t/tenant-a/userinfo", nil, map[string]string{
+		"Authorization": "Bearer " + accessToken,
+	})
+	require.Equal(t, http.StatusOK, userInfoResp.Code)
+	require.NotContains(t, userInfoResp.Body.String(), "email_verified")
+	require.NotContains(t, userInfoResp.Body.String(), `"acr"`)
+	require.NotContains(t, userInfoResp.Body.String(), "identity")
 }
 
 func TestOIDCE2E_CoreFlow_ConsentRequestRetainsLoginChallenge(t *testing.T) {
@@ -968,6 +1136,95 @@ func TestOIDCE2E_SAMLACS_ResumesOriginalFlow(t *testing.T) {
 		"Content-Type": "application/x-www-form-urlencoded",
 	})
 	require.Equal(t, http.StatusOK, tokenResp.Code)
+}
+
+func TestOIDCE2E_SAMLIDPSSO_ProjectsNormalizedIdentity(t *testing.T) {
+	env := setupOIDCE2EEnv(t)
+	spEntityID := "http://sp.example.test/normalized"
+	acsURL := "http://sp.example.test/acs"
+	require.NoError(t, env.db.Create(&models.SAMLClientGORM{
+		ID:            "saml-client-normalized",
+		TenantID:      "tenant-a",
+		Name:          "Normalized SAML Client",
+		EntityID:      spEntityID,
+		ACSURL:        acsURL,
+		AllowedScopes: []string{"openid", "profile"},
+		Active:        true,
+	}).Error)
+
+	authnRequestXML := fmt.Sprintf(
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="saml-normalized-%d" Version="2.0" IssueInstant="2026-04-23T18:30:00Z" AssertionConsumerServiceURL="%s"><saml:Issuer>%s</saml:Issuer></samlp:AuthnRequest>`,
+		time.Now().UnixNano(),
+		acsURL,
+		spEntityID,
+	)
+	samlRequest := encodeRedirectBindingSAMLRequest(t, authnRequestXML)
+	loginStartResp := serveRequest(t, env.router, http.MethodGet,
+		"/t/tenant-a/saml/idp/sso?SAMLRequest="+url.QueryEscape(samlRequest)+"&RelayState="+url.QueryEscape("relay-normalized"),
+		nil, nil)
+	require.Equal(t, http.StatusFound, loginStartResp.Code)
+
+	loginChallenge := parseLocationQuery(t, loginStartResp.Header().Get("Location")).Get("login_challenge")
+	require.NotEmpty(t, loginChallenge)
+
+	loginPayload := []byte(`{
+		"subject": "ext:12345",
+		"remember": true,
+		"remember_for": 3600,
+		"context": {
+			"identity": {
+				"attributes": {
+					"preferred_username": "alice",
+					"email": "alice@example.com",
+					"email_verified": true,
+					"name": "Alice Doe",
+					"given_name": "Alice",
+					"family_name": "Doe",
+					"locale": "en-US"
+				},
+				"groups": ["engineering"],
+				"roles": ["admin"]
+			},
+			"authentication": {
+				"amr": ["pwd"],
+				"acr": "urn:example:acr"
+			}
+		}
+	}`)
+	loginAcceptResp := serveRequest(t, env.router, http.MethodPut, "/admin/login/accept?login_challenge="+url.QueryEscape(loginChallenge), bytes.NewReader(loginPayload), nil)
+	require.Equal(t, http.StatusOK, loginAcceptResp.Code)
+
+	var loginAcceptBody map[string]string
+	require.NoError(t, json.NewDecoder(loginAcceptResp.Body).Decode(&loginAcceptBody))
+	redirectTo := loginAcceptBody["redirect_to"]
+	require.NotEmpty(t, redirectTo)
+	redirectURL, err := url.Parse(redirectTo)
+	require.NoError(t, err)
+
+	samlResp := serveRequest(t, env.router, http.MethodGet, redirectURL.RequestURI(), nil, nil)
+	require.Equal(t, http.StatusOK, samlResp.Code)
+
+	responseXML := decodeSAMLResponseXML(t, samlResp.Body.String())
+	assert.Contains(t, responseXML, ">ext:12345</NameID>")
+	assert.Contains(t, responseXML, `Name="preferred_username"`)
+	assert.Contains(t, responseXML, ">alice</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="email"`)
+	assert.Contains(t, responseXML, ">alice@example.com</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="name"`)
+	assert.Contains(t, responseXML, ">Alice Doe</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="given_name"`)
+	assert.Contains(t, responseXML, ">Alice</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="family_name"`)
+	assert.Contains(t, responseXML, ">Doe</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="groups"`)
+	assert.Contains(t, responseXML, ">engineering</AttributeValue>")
+	assert.Contains(t, responseXML, `Name="roles"`)
+	assert.Contains(t, responseXML, ">admin</AttributeValue>")
+	assert.NotContains(t, responseXML, `Name="sub"`)
+	assert.NotContains(t, responseXML, "email_verified")
+	assert.NotContains(t, responseXML, "locale")
+	assert.NotContains(t, responseXML, "identity")
+	assert.NotContains(t, responseXML, "urn:example:acr")
 }
 
 func TestOIDCE2E_SAMLACS_RejectsMissingInvalidRelayStateAndCrossTenant(t *testing.T) {

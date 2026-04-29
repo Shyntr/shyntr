@@ -110,6 +110,9 @@ func (u *authUseCase) AcceptLoginRequest(ctx context.Context, challenge string, 
 	if err != nil {
 		return nil, err
 	}
+	if err := model.ValidateNormalizedLoginContextData(contextData); err != nil {
+		return nil, err
+	}
 
 	var contextBytes []byte
 	if contextData != nil {

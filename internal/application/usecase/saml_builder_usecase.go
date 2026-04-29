@@ -537,7 +537,9 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 
 	now := time.Now()
 	subject := "unknown"
-	if v, ok := userAttributes["sub"].(string); ok {
+	if v, ok := userAttributes[utils.SAMLNameIDSubjectAttribute].(string); ok {
+		subject = v
+	} else if v, ok := userAttributes["sub"].(string); ok {
 		subject = v
 	} else if v, ok := userAttributes["email"].(string); ok {
 		subject = v
@@ -586,7 +588,13 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		}
 
 		authnContextClass := "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
-		if amrList, ok := userAttributes["amr"].([]interface{}); ok {
+		if amrList, ok := userAttributes["amr"].([]string); ok {
+			for _, m := range amrList {
+				if m == "ext" || m == "mfa" {
+					authnContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PreviousSession"
+				}
+			}
+		} else if amrList, ok := userAttributes["amr"].([]interface{}); ok {
 			for _, m := range amrList {
 				if m == "ext" || m == "mfa" {
 					authnContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PreviousSession"
@@ -645,6 +653,10 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		}
 
 		for k, v := range userAttributes {
+			if k == utils.SAMLNameIDSubjectAttribute {
+				continue
+			}
+
 			var attrValues []crewjamsaml.AttributeValue
 
 			switch val := v.(type) {

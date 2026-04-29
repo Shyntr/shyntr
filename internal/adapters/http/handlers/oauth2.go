@@ -217,6 +217,12 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			}
 		}
 	}
+	normalizedClaims, hasNormalizedClaims := utils2.ProjectNormalizedIdentityClaims(loginReq)
+	if hasNormalizedClaims {
+		if subject, ok := normalizedClaims["sub"].(string); ok && subject != "" {
+			userID = subject
+		}
+	}
 
 	if prompt == "none" && userID == "" {
 		h.Provider.GetFosite(tenantID).WriteAuthorizeError(ctx, c.Writer, ar, fosite.ErrLoginRequired)
@@ -382,6 +388,29 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			session.Claims.Add(k, v)
 			session.JWTClaims.Extra[k] = v
 		}
+	}
+
+	if hasNormalizedClaims {
+		for k, v := range normalizedClaims {
+			if k == "sub" {
+				continue
+			}
+			if k == "acr" {
+				if acr, ok := v.(string); ok {
+					session.Claims.AuthenticationContextClassReference = acr
+				}
+			}
+			if k == "amr" {
+				if amr, ok := v.([]string); ok {
+					session.Claims.AuthenticationMethodsReferences = amr
+				}
+			}
+			session.Claims.Add(k, v)
+			session.JWTClaims.Extra[k] = v
+		}
+		session.Claims.Subject = userID
+		session.JWTClaims.Subject = userID
+		session.DefaultSession.Subject = userID
 	}
 
 	for _, scope := range grantedScopes {
@@ -676,15 +705,25 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	}
 
 	var userCtx map[string]interface{}
+	var normalizedClaims map[string]interface{}
+	var hasNormalizedClaims bool
 
 	if subject != "" {
 		loginReq, err := h.AuthReq.GetAuthenticatedLoginRequestBySubject(ctx, tenantID, subject)
 		if err == nil && len(loginReq.Context) > 0 {
-			json.Unmarshal(loginReq.Context, &userCtx)
+			normalizedClaims, hasNormalizedClaims = utils2.ProjectNormalizedIdentityClaims(loginReq)
+			if !hasNormalizedClaims {
+				json.Unmarshal(loginReq.Context, &userCtx)
+			}
 		}
 	}
 
-	if userCtx == nil || len(userCtx) == 0 {
+	if hasNormalizedClaims {
+		userCtx = normalizedClaims
+		if normalizedSubject, ok := normalizedClaims["sub"].(string); ok && normalizedSubject != "" {
+			subject = normalizedSubject
+		}
+	} else if userCtx == nil || len(userCtx) == 0 {
 		if sess.Claims != nil && sess.Claims.Extra != nil {
 			userCtx = sess.Claims.Extra
 		} else {
@@ -709,6 +748,14 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 
 	if _, exists := safeClaims["sub"]; !exists {
 		safeClaims["sub"] = subject
+	}
+	if hasNormalizedClaims {
+		for k, v := range normalizedClaims {
+			if k == "sub" {
+				continue
+			}
+			safeClaims[k] = v
+		}
 	}
 
 	client, isExtended := accessRequest.GetClient().(*iam.ExtendedClient)

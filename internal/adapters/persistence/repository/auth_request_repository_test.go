@@ -104,3 +104,46 @@ func TestAuthRequestRepository_GetAuthenticatedLoginRequestBySubject_IsTenantSco
 	require.Equal(t, "tenant-a", login.TenantID)
 	require.Equal(t, "login-a", login.ID)
 }
+
+func TestAuthRequestRepository_LoginRequestContextPersistsNormalizedEnvelope(t *testing.T) {
+	t.Parallel()
+
+	db := setupAuthRequestRepoTestDB(t)
+	repo := repository.NewAuthRequestRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.SaveLoginRequest(ctx, &model.LoginRequest{
+		ID:            "login-with-context",
+		TenantID:      "tenant-a",
+		ClientID:      "client-a",
+		Subject:       "ext:12345",
+		Authenticated: true,
+		Active:        false,
+		Context: []byte(`{
+			"identity": {
+				"attributes": {
+					"preferred_username": "alice",
+					"email": "alice@example.com"
+				},
+				"groups": ["engineering"],
+				"roles": []
+			},
+			"authentication": {
+				"amr": ["pwd"],
+				"authenticated_at": "2026-04-23T18:30:00Z"
+			}
+		}`),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}))
+
+	got, err := repo.GetAuthenticatedLoginRequest(ctx, "tenant-a", "login-with-context")
+	require.NoError(t, err)
+
+	normalized, ok, err := got.NormalizedContext()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "alice", normalized.Identity.Attributes["preferred_username"])
+	require.Equal(t, []string{"engineering"}, normalized.Identity.Groups)
+	require.Equal(t, []string{"pwd"}, normalized.Authentication.AMR)
+}

@@ -145,6 +145,47 @@ func (r *stubMgmtLDAPRepo) List(_ context.Context) ([]*model.LDAPConnection, err
 	return nil, nil
 }
 
+// stubPasswordLoginRepo is a minimal PasswordLoginRepository stub.
+// resolved holds the endpoint to return from ResolveForTenant (nil means no password method).
+// resolveErr holds an error to return from ResolveForTenant.
+type stubPasswordLoginRepo struct {
+	resolved   *model.PasswordLoginEndpoint
+	resolveErr error
+}
+
+func (r *stubPasswordLoginRepo) CreateEndpoint(_ context.Context, _ *model.PasswordLoginEndpoint) error {
+	return nil
+}
+func (r *stubPasswordLoginRepo) GetEndpointByID(_ context.Context, _ string) (*model.PasswordLoginEndpoint, error) {
+	return nil, nil
+}
+func (r *stubPasswordLoginRepo) UpdateEndpoint(_ context.Context, _ *model.PasswordLoginEndpoint) error {
+	return nil
+}
+func (r *stubPasswordLoginRepo) DeleteEndpoint(_ context.Context, _ string) error { return nil }
+func (r *stubPasswordLoginRepo) ListEndpoints(_ context.Context) ([]*model.PasswordLoginEndpoint, error) {
+	return nil, nil
+}
+func (r *stubPasswordLoginRepo) CreateAssignment(_ context.Context, _ *model.PasswordLoginAssignment) error {
+	return nil
+}
+func (r *stubPasswordLoginRepo) GetAssignmentByID(_ context.Context, _ string) (*model.PasswordLoginAssignment, error) {
+	return nil, nil
+}
+func (r *stubPasswordLoginRepo) UpdateAssignment(_ context.Context, _ *model.PasswordLoginAssignment) error {
+	return nil
+}
+func (r *stubPasswordLoginRepo) DeleteAssignment(_ context.Context, _ string) error { return nil }
+func (r *stubPasswordLoginRepo) ListAssignments(_ context.Context, _ *string) ([]*model.PasswordLoginAssignment, error) {
+	return nil, nil
+}
+func (r *stubPasswordLoginRepo) CountActiveAssignmentsForScope(_ context.Context, _ *string) (int64, error) {
+	return 0, nil
+}
+func (r *stubPasswordLoginRepo) ResolveForTenant(_ context.Context, _ string) (*model.PasswordLoginEndpoint, error) {
+	return r.resolved, r.resolveErr
+}
+
 // ---------------------------------------------------------------------------
 // Helper to build a ManagementUseCase with stub repos.
 // ---------------------------------------------------------------------------
@@ -154,9 +195,10 @@ func buildManagementUseCase(
 	oidcRepo *stubOIDCConnRepo,
 	samlRepo *stubSAMLConnRepo,
 	ldapRepo *stubMgmtLDAPRepo,
+	pwdRepo *stubPasswordLoginRepo,
 ) usecase.ManagementUseCase {
 	cfg := &config.Config{BaseIssuerURL: "http://example.test"}
-	return usecase.NewManagementUseCase(cfg, authReq, oidcRepo, samlRepo, ldapRepo)
+	return usecase.NewManagementUseCase(cfg, authReq, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +221,9 @@ func TestGetLoginMethods_AllThreeTypes(t *testing.T) {
 	ldapRepo := &stubMgmtLDAPRepo{active: []*model.LDAPConnection{
 		{ID: "ldap-1", Name: "Corp AD", TenantID: "tenant-a", Active: true},
 	}}
+	pwdRepo := &stubPasswordLoginRepo{}
 
-	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo)
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 	methods, loginReq, err := uc.GetLoginMethods(context.Background(), "challenge-001")
 
 	require.NoError(t, err)
@@ -206,8 +249,9 @@ func TestGetLoginMethods_LDAPListError(t *testing.T) {
 	oidcRepo := &stubOIDCConnRepo{}
 	samlRepo := &stubSAMLConnRepo{}
 	ldapRepo := &stubMgmtLDAPRepo{err: errors.New("db error")}
+	pwdRepo := &stubPasswordLoginRepo{}
 
-	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo)
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 	_, _, err := uc.GetLoginMethods(context.Background(), "challenge-002")
 
 	require.Error(t, err, "LDAP repo error must propagate")
@@ -223,8 +267,9 @@ func TestGetLoginMethods_Empty(t *testing.T) {
 	oidcRepo := &stubOIDCConnRepo{}
 	samlRepo := &stubSAMLConnRepo{}
 	ldapRepo := &stubMgmtLDAPRepo{}
+	pwdRepo := &stubPasswordLoginRepo{}
 
-	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo)
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 	methods, loginReq, err := uc.GetLoginMethods(context.Background(), "challenge-003")
 
 	require.NoError(t, err)
@@ -237,8 +282,9 @@ func TestGetLoginMethods_ChallengeMissing(t *testing.T) {
 	oidcRepo := &stubOIDCConnRepo{}
 	samlRepo := &stubSAMLConnRepo{}
 	ldapRepo := &stubMgmtLDAPRepo{}
+	pwdRepo := &stubPasswordLoginRepo{}
 
-	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo)
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 	_, _, err := uc.GetLoginMethods(context.Background(), "no-such-challenge")
 
 	require.Error(t, err)
@@ -255,10 +301,137 @@ func TestGetLoginMethods_AlreadyAuthenticated(t *testing.T) {
 	oidcRepo := &stubOIDCConnRepo{}
 	samlRepo := &stubSAMLConnRepo{}
 	ldapRepo := &stubMgmtLDAPRepo{}
+	pwdRepo := &stubPasswordLoginRepo{}
 
-	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo)
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
 	_, _, err := uc.GetLoginMethods(context.Background(), "challenge-auth")
 
 	require.Error(t, err)
 	assert.Equal(t, usecase.ErrLoginAlreadyUsed, err)
+}
+
+// ---------------------------------------------------------------------------
+// Password method resolver tests
+// ---------------------------------------------------------------------------
+
+func TestGetLoginMethods_PasswordIncludedWhenTenantSpecificAssignmentResolved(t *testing.T) {
+	req := &model.LoginRequest{ID: "ch-pwd-1", TenantID: "tenant-a", Authenticated: false}
+	authRepo := &stubAuthReqRepo{req: req}
+	pwdRepo := &stubPasswordLoginRepo{
+		resolved: &model.PasswordLoginEndpoint{
+			ID:       "ep-1",
+			Name:     "Username & Password",
+			LoginURL: "https://verifier.example.com/auth/password/verify",
+			IsActive: true,
+		},
+	}
+
+	uc := buildManagementUseCase(authRepo, &stubOIDCConnRepo{}, &stubSAMLConnRepo{}, &stubMgmtLDAPRepo{}, pwdRepo)
+	methods, _, err := uc.GetLoginMethods(context.Background(), "ch-pwd-1")
+
+	require.NoError(t, err)
+	var pwdMethod *model.AuthMethod
+	for i := range methods {
+		if methods[i].Type == "password" {
+			pwdMethod = &methods[i]
+			break
+		}
+	}
+	require.NotNil(t, pwdMethod, "password method must be included")
+	assert.Equal(t, "https://verifier.example.com/auth/password/verify", pwdMethod.LoginURL)
+	assert.Equal(t, "Username & Password", pwdMethod.Name)
+	assert.Equal(t, "ep-1", pwdMethod.ID)
+}
+
+func TestGetLoginMethods_PasswordOmittedWhenNoAssignment(t *testing.T) {
+	req := &model.LoginRequest{ID: "ch-nopwd", TenantID: "tenant-a", Authenticated: false}
+	authRepo := &stubAuthReqRepo{req: req}
+	pwdRepo := &stubPasswordLoginRepo{resolved: nil}
+
+	uc := buildManagementUseCase(authRepo, &stubOIDCConnRepo{}, &stubSAMLConnRepo{}, &stubMgmtLDAPRepo{}, pwdRepo)
+	methods, _, err := uc.GetLoginMethods(context.Background(), "ch-nopwd")
+
+	require.NoError(t, err)
+	for _, m := range methods {
+		assert.NotEqual(t, "password", m.Type, "password method must not appear when no assignment exists")
+	}
+}
+
+func TestGetLoginMethods_PasswordOmittedWhenRepoNil(t *testing.T) {
+	req := &model.LoginRequest{ID: "ch-nilrepo", TenantID: "tenant-a", Authenticated: false}
+	authRepo := &stubAuthReqRepo{req: req}
+
+	// pass nil for PasswordLoginRepo — must not panic and must omit password
+	cfg := &config.Config{BaseIssuerURL: "http://example.test"}
+	uc := usecase.NewManagementUseCase(cfg, authRepo, &stubOIDCConnRepo{}, &stubSAMLConnRepo{}, &stubMgmtLDAPRepo{}, nil)
+
+	methods, _, err := uc.GetLoginMethods(context.Background(), "ch-nilrepo")
+	require.NoError(t, err)
+	for _, m := range methods {
+		assert.NotEqual(t, "password", m.Type)
+	}
+}
+
+func TestGetLoginMethods_PasswordNotReturnedWithEmptyLoginURL(t *testing.T) {
+	req := &model.LoginRequest{ID: "ch-emptyurl", TenantID: "tenant-a", Authenticated: false}
+	authRepo := &stubAuthReqRepo{req: req}
+	// An endpoint with an empty LoginURL (shouldn't normally exist but guard defensively)
+	pwdRepo := &stubPasswordLoginRepo{
+		resolved: &model.PasswordLoginEndpoint{
+			ID:       "ep-empty",
+			Name:     "Password",
+			LoginURL: "",
+			IsActive: true,
+		},
+	}
+
+	uc := buildManagementUseCase(authRepo, &stubOIDCConnRepo{}, &stubSAMLConnRepo{}, &stubMgmtLDAPRepo{}, pwdRepo)
+	methods, _, err := uc.GetLoginMethods(context.Background(), "ch-emptyurl")
+
+	require.NoError(t, err)
+	for _, m := range methods {
+		assert.NotEqual(t, "password", m.Type, "password must not appear with empty login_url")
+	}
+}
+
+func TestGetLoginMethods_NonPasswordMethodsUnchangedWhenPasswordResolved(t *testing.T) {
+	req := &model.LoginRequest{ID: "ch-mixed", TenantID: "tenant-a", Authenticated: false}
+	authRepo := &stubAuthReqRepo{req: req}
+	oidcRepo := &stubOIDCConnRepo{active: []*model.OIDCConnection{
+		{ID: "oidc-x", Name: "OIDC", TenantID: "tenant-a", Active: true},
+	}}
+	samlRepo := &stubSAMLConnRepo{active: []*model.SAMLConnection{
+		{ID: "saml-x", Name: "SAML", TenantID: "tenant-a", Active: true},
+	}}
+	ldapRepo := &stubMgmtLDAPRepo{active: []*model.LDAPConnection{
+		{ID: "ldap-x", Name: "LDAP", TenantID: "tenant-a", Active: true},
+	}}
+	pwdRepo := &stubPasswordLoginRepo{
+		resolved: &model.PasswordLoginEndpoint{
+			ID:       "ep-2",
+			Name:     "Password",
+			LoginURL: "https://verifier.example.com/verify",
+			IsActive: true,
+		},
+	}
+
+	uc := buildManagementUseCase(authRepo, oidcRepo, samlRepo, ldapRepo, pwdRepo)
+	methods, _, err := uc.GetLoginMethods(context.Background(), "ch-mixed")
+
+	require.NoError(t, err)
+	typeSet := map[string]string{}
+	for _, m := range methods {
+		typeSet[m.Type] = m.LoginURL
+	}
+
+	assert.Contains(t, typeSet, "saml")
+	assert.Contains(t, typeSet, "oidc")
+	assert.Contains(t, typeSet, "ldap")
+	assert.Contains(t, typeSet, "password")
+
+	// Verify SAML/OIDC login URLs are still Shyntr-generated (not from password resolver)
+	assert.Contains(t, typeSet["saml"], "/t/tenant-a/saml/login/saml-x")
+	assert.Contains(t, typeSet["oidc"], "/t/tenant-a/oidc/login/oidc-x")
+	assert.Contains(t, typeSet["ldap"], "/t/tenant-a/ldap/login/ldap-x")
+	assert.Equal(t, "https://verifier.example.com/verify", typeSet["password"])
 }

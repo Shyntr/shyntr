@@ -59,6 +59,8 @@ func MigrateDB(db *gorm.DB) error {
 		&models.AuditLogGORM{},
 		&models.OutboundPolicyGORM{},
 		&models.TenantBrandingGORM{},
+		&models.PasswordLoginEndpointGORM{},
+		&models.PasswordLoginAssignmentGORM{},
 	); err != nil {
 		return err
 	}
