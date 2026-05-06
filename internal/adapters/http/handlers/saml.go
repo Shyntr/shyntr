@@ -547,11 +547,25 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		}
 
 		secureClaims := utils.MapClaims(loginReq.Subject, userAttrs, allowedScopeEntities)
+		normalizedClaims, hasNormalizedClaims := utils.ProjectNormalizedSAMLAttributes(loginReq)
+		if hasNormalizedClaims {
+			secureClaims = normalizedClaims
+		}
 
-		finalAttrs, err := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-		if err != nil {
-			logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))
+		finalAttrs := map[string]interface{}{}
+		if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
 			finalAttrs = secureClaims
+		} else {
+			var mapErr error
+			finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+			if mapErr != nil {
+				logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
+				finalAttrs = secureClaims
+			}
+		}
+		if hasNormalizedClaims {
+			finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
+			delete(finalAttrs, "sub")
 		}
 
 		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
@@ -714,8 +728,8 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 
 		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, spClient.ID)
 		if err != nil {
-			logger.FromGin(c).Error("active session not found", zap.String("entity_id", logoutReq.NameID.Value),
-				zap.String("entity_id", spClient.EntityID), zap.Error(err))
+			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject", logoutReq.NameID.Value),
+				zap.String("entity_id", spClient.EntityID))
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
 
@@ -770,6 +784,11 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	loginReq, loginReqErr := h.AuthUse.GetLoginRequest(c.Request.Context(), loginChallenge)
 	if loginReqErr != nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "login_request_not_found"})
+		return
+	}
+
+	if loginReq.TenantID != tenantID {
+		payload.AbortWithSAMLError(c, http.StatusForbidden, "access_denied", "The login request does not belong to this tenant.", nil)
 		return
 	}
 
@@ -835,11 +854,25 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	}
 
 	secureClaims := utils.MapClaims(loginReq.Subject, userAttrs, allowedScopeEntities)
+	normalizedClaims, hasNormalizedClaims := utils.ProjectNormalizedSAMLAttributes(loginReq)
+	if hasNormalizedClaims {
+		secureClaims = normalizedClaims
+	}
 
-	finalAttrs, err := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-	if err != nil {
-		logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(err), zap.String("protocol", "saml"))
+	finalAttrs := map[string]interface{}{}
+	if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
 		finalAttrs = secureClaims
+	} else {
+		var mapErr error
+		finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+		if mapErr != nil {
+			logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
+			finalAttrs = secureClaims
+		}
+	}
+	if hasNormalizedClaims {
+		finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
+		delete(finalAttrs, "sub")
 	}
 
 	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)

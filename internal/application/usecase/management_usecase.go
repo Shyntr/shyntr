@@ -19,18 +19,30 @@ type ManagementUseCase interface {
 }
 
 type managementUseCase struct {
-	Config   *config.Config
-	AuthReq  port.AuthRequestRepository
-	OidcConn port.OIDCConnectionRepository
-	SamlConn port.SAMLConnectionRepository
-	LDAPConn port.LDAPConnectionRepository
+	Config            *config.Config
+	AuthReq           port.AuthRequestRepository
+	OidcConn          port.OIDCConnectionRepository
+	SamlConn          port.SAMLConnectionRepository
+	LDAPConn          port.LDAPConnectionRepository
+	PasswordLoginRepo port.PasswordLoginRepository
 }
 
-func NewManagementUseCase(Config *config.Config, AuthReq port.AuthRequestRepository,
+func NewManagementUseCase(
+	Config *config.Config,
+	AuthReq port.AuthRequestRepository,
 	OidcConn port.OIDCConnectionRepository,
 	SamlConn port.SAMLConnectionRepository,
-	LDAPConn port.LDAPConnectionRepository) ManagementUseCase {
-	return &managementUseCase{Config: Config, AuthReq: AuthReq, OidcConn: OidcConn, SamlConn: SamlConn, LDAPConn: LDAPConn}
+	LDAPConn port.LDAPConnectionRepository,
+	PasswordLoginRepo port.PasswordLoginRepository,
+) ManagementUseCase {
+	return &managementUseCase{
+		Config:            Config,
+		AuthReq:           AuthReq,
+		OidcConn:          OidcConn,
+		SamlConn:          SamlConn,
+		LDAPConn:          LDAPConn,
+		PasswordLoginRepo: PasswordLoginRepo,
+	}
 }
 
 func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge string) ([]model.AuthMethod, *model.LoginRequest, error) {
@@ -64,14 +76,6 @@ func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge strin
 
 	methods := []model.AuthMethod{}
 
-	if tenantID == "default" {
-		methods = append(methods, model.AuthMethod{
-			ID:   "basic-auth",
-			Type: "password",
-			Name: "Username & Password",
-		})
-	}
-
 	for _, conn := range samlConns {
 		methods = append(methods, model.AuthMethod{
 			ID:       conn.ID,
@@ -97,6 +101,20 @@ func (m *managementUseCase) GetLoginMethods(ctx context.Context, challenge strin
 			Name:     conn.Name,
 			LoginURL: m.Config.BaseIssuerURL + "/t/" + tenantID + "/ldap/login/" + conn.ID,
 		})
+	}
+
+	// Resolve backend-managed password login endpoint for this tenant.
+	// Precedence: tenant-specific active assignment → global active assignment → omit.
+	if m.PasswordLoginRepo != nil {
+		pwdEndpoint, resolveErr := m.PasswordLoginRepo.ResolveForTenant(ctx, tenantID)
+		if resolveErr == nil && pwdEndpoint != nil && pwdEndpoint.LoginURL != "" {
+			methods = append(methods, model.AuthMethod{
+				ID:       pwdEndpoint.ID,
+				Type:     "password",
+				Name:     pwdEndpoint.Name,
+				LoginURL: pwdEndpoint.LoginURL,
+			})
+		}
 	}
 
 	return methods, loginReq, nil

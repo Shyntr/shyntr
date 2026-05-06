@@ -56,10 +56,20 @@ func TestGetAuthActivityCounts_SafetyAndDoubleCounting(t *testing.T) {
 		CreatedAt: now,
 	})
 
+	// 4. Test OIDC via SAML success (protocol=oidc, provider_type=saml)
+	detailsOIDCSAML := map[string]interface{}{"protocol": "oidc", "provider_type": "saml"}
+	detailsOIDCSAMLJSON, _ := json.Marshal(detailsOIDCSAML)
+	db.Create(&models.AuditLogGORM{
+		ID:        "a4",
+		Action:    "provider.login.success",
+		Details:   detailsOIDCSAMLJSON,
+		CreatedAt: now,
+	})
+
 	counts, totalSuccess, _, err := repo.GetAuthActivityCounts(ctx, now.Add(-1*time.Hour))
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(3), totalSuccess)
+	assert.Equal(t, int64(4), totalSuccess)
 
 	// 'unknown_proto' should have been initialized and incremented safely
 	require.Contains(t, counts, "unknown_proto")
@@ -69,7 +79,11 @@ func TestGetAuthActivityCounts_SafetyAndDoubleCounting(t *testing.T) {
 	// a2 (protocol=ldap, provider_type=ldap) -> should increment ldap success once
 	// a3 (protocol=oidc, provider_type=ldap) -> should increment oidc success AND ldap success
 	assert.Equal(t, int64(2), counts["ldap"]["success"], "LDAP successes should be 2 (a2 and a3)")
-	assert.Equal(t, int64(1), counts["oidc"]["success"], "OIDC successes should be 1 (a3)")
+
+	// 'saml' success:
+	// a4 (protocol=oidc, provider_type=saml) -> should increment oidc success AND saml success
+	assert.Equal(t, int64(1), counts["saml"]["success"], "SAML successes should include provider_type=saml")
+	assert.Equal(t, int64(2), counts["oidc"]["success"], "OIDC successes should include a3 and a4")
 }
 
 func TestGetAuthFailureMetrics_Safety(t *testing.T) {

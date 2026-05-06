@@ -89,6 +89,9 @@ func (r *auditLogRepository) GetAuthActivityCounts(ctx context.Context, since ti
 			if providerType == "ldap" && protocol != "ldap" {
 				counts["ldap"]["success"]++
 			}
+			if providerType == "saml" && protocol != "saml" {
+				counts["saml"]["success"]++
+			}
 		case "auth.login.reject":
 			totalFailure++
 			if protocol != "" {

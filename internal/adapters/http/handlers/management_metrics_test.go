@@ -31,8 +31,8 @@ func TestGetAuthActivity(t *testing.T) {
 		CreatedAt: now.Add(-10 * time.Minute),
 	})
 
-	// Tenant B: SAML Success
-	detailsSAML, _ := json.Marshal(map[string]interface{}{"protocol": "saml"})
+	// Tenant B: SAML provider success in an OIDC login flow
+	detailsSAML, _ := json.Marshal(map[string]interface{}{"protocol": "oidc", "provider_type": "saml"})
 	db.Create(&models.AuditLogGORM{
 		ID:        "aud2",
 		TenantID:  tenantB,
@@ -80,7 +80,7 @@ func TestGetAuthActivity(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, "1h", activity.Range)
-	assert.Equal(t, int64(2), activity.Protocols["oidc"].Success) // aud1 and aud3
+	assert.Equal(t, int64(3), activity.Protocols["oidc"].Success) // aud1, aud2, and aud3
 	assert.Equal(t, int64(1), activity.Protocols["saml"].Success) // aud2
 	assert.Equal(t, int64(1), activity.Protocols["ldap"].Success) // aud3
 	assert.Equal(t, int64(1), activity.Protocols["ldap"].Failure) // aud4
@@ -95,7 +95,7 @@ func TestGetAuthActivity(t *testing.T) {
 
 	var activity2 model.AuthActivity
 	json.Unmarshal(w2.Body.Bytes(), &activity2)
-	assert.Equal(t, int64(3), activity2.Protocols["oidc"].Success) // aud1, aud3, aud5
+	assert.Equal(t, int64(4), activity2.Protocols["oidc"].Success) // aud1, aud2, aud3, aud5
 }
 
 func TestGetAuthFailures(t *testing.T) {
