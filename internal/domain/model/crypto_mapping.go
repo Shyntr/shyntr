@@ -43,6 +43,10 @@ type AttributeMappingRule struct {
 	TargetScopes []string `json:"target_scopes,omitempty"`
 	Fallback     string   `json:"fallback,omitempty"`
 	Value        string   `json:"value,omitempty"`
+	// NameFormat overrides the SAML attribute NameFormat for the emitted
+	// attribute. Empty means "unset": the emission site derives it from the
+	// output attribute name. Validated against the SAML 2.0 attrname-format set.
+	NameFormat string `json:"name_format,omitempty"`
 }
 
 // JWTSession represents explicitly stored JWT states if required by custom flows or specific Fosite implementations.

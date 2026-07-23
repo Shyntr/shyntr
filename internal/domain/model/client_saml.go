@@ -36,5 +36,10 @@ func (c *SAMLClient) Validate() error {
 	if c.ACSURL == "" {
 		return errors.New("acs_url is required")
 	}
+	for _, rule := range c.AttributeMapping {
+		if rule.NameFormat != "" && !IsValidAttributeNameFormat(rule.NameFormat) {
+			return errors.New("attribute mapping name_format must be a SAML 2.0 attrname-format (uri, basic, or unspecified)")
+		}
+	}
 	return nil
 }

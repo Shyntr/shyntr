@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/Shyntr/shyntr/internal/adapters/persistence/models"
+	"github.com/Shyntr/shyntr/internal/domain/model"
 	"github.com/Shyntr/shyntr/internal/testsupport/samlxml"
 	"github.com/beevik/etree"
 	dsig "github.com/russellhaering/goxmldsig"
@@ -323,6 +324,90 @@ func TestSAMLResponseE2E_B6_MetadataDropsPersistent(t *testing.T) {
 		require.Containsf(t, formats, fmtEmail, "%s must advertise emailAddress", path)
 		require.Containsf(t, formats, fmtTransient, "%s must advertise transient", path)
 	}
+}
+
+// createE2ESAMLClientWithMapping registers a signed SAML SP with an attribute
+// mapping. Mapper.Map keys its output by the mapping map key, so those keys are
+// the emitted attribute Names.
+func createE2ESAMLClientWithMapping(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
+	mapping map[string]model.AttributeMappingRule) {
+	t.Helper()
+	require.NoError(t, env.db.Create(&models.SAMLClientGORM{
+		ID:               clientID,
+		TenantID:         "tenant-a",
+		Name:             "E2E SP " + clientID,
+		EntityID:         entityID,
+		ACSURL:           acsURL,
+		AllowedScopes:    []string{"openid", "profile"},
+		Active:           true,
+		AttributeMapping: mapping,
+	}).Error)
+	require.NoError(t, env.db.Model(&models.SAMLClientGORM{}).Where("id = ?", clientID).
+		Update("sign_response", true).Error)
+}
+
+func driveMappedResponse(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
+	mapping map[string]model.AttributeMappingRule) *etree.Element {
+	t.Helper()
+	createE2ESAMLClientWithMapping(t, env, clientID, entityID, acsURL, mapping)
+	challenge := startE2EIdPSSO(t, env, buildAuthnRequestXML(entityID, acsURL, ""))
+	redirectTo := acceptE2ESAMLLogin(t, env, challenge)
+	return parseE2ESAMLResponse(t, followE2ERedirect(t, env, redirectTo))
+}
+
+// attributeNameFormat returns the NameFormat of the emitted attribute with the
+// given Name, failing if it is not present.
+func attributeNameFormat(t *testing.T, root *etree.Element, attrName string) string {
+	t.Helper()
+	assertion := samlxml.DirectChild(root, samlxml.NSSAML, "Assertion")
+	require.NotNil(t, assertion, "response must contain an Assertion")
+	attrStmt := samlxml.DirectChild(assertion, samlxml.NSSAML, "AttributeStatement")
+	require.NotNil(t, attrStmt, "assertion must contain an AttributeStatement")
+	for _, attr := range attrStmt.ChildElements() {
+		if attr.Tag == "Attribute" && attr.SelectAttrValue("Name", "") == attrName {
+			return attr.SelectAttrValue("NameFormat", "")
+		}
+	}
+	t.Fatalf("attribute %q not found in the emitted assertion", attrName)
+	return ""
+}
+
+// D1: a claim-URI-named attribute is emitted with attrname-format:uri.
+func TestSAMLResponseE2E_D1_ClaimURIAttributeUsesURIFormat(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	claimURI := "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+	root := driveMappedResponse(t, env, "e2e-d1", "http://sp.example.test/d1", "http://sp.example.test/acs",
+		map[string]model.AttributeMappingRule{claimURI: {Source: "email", Type: "string"}})
+	require.Equal(t, model.AttrNameFormatURI, attributeNameFormat(t, root, claimURI))
+}
+
+// D2: a plain-named attribute still uses attrname-format:basic.
+func TestSAMLResponseE2E_D2_PlainAttributeUsesBasicFormat(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveMappedResponse(t, env, "e2e-d2", "http://sp.example.test/d2", "http://sp.example.test/acs",
+		map[string]model.AttributeMappingRule{"email": {Source: "email", Type: "string"}})
+	require.Equal(t, model.AttrNameFormatBasic, attributeNameFormat(t, root, "email"))
+}
+
+// D3: an explicit rule NameFormat overrides the heuristic ("email" is plain, so
+// the heuristic would say basic; the explicit uri override wins).
+func TestSAMLResponseE2E_D3_ExplicitNameFormatOverridesHeuristic(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveMappedResponse(t, env, "e2e-d3", "http://sp.example.test/d3", "http://sp.example.test/acs",
+		map[string]model.AttributeMappingRule{"email": {Source: "email", Type: "string", NameFormat: model.AttrNameFormatURI}})
+	require.Equal(t, model.AttrNameFormatURI, attributeNameFormat(t, root, "email"))
+}
+
+// D4: an invalid NameFormat inserted out-of-band (bypassing Validate) must never
+// reach the assertion; issuance falls back to the heuristic. Proves the security
+// invariant that no unvalidated string reaches the emitted assertion.
+func TestSAMLResponseE2E_D4_InvalidStoredNameFormatFallsBackToHeuristic(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveMappedResponse(t, env, "e2e-d4", "http://sp.example.test/d4", "http://sp.example.test/acs",
+		map[string]model.AttributeMappingRule{"email": {Source: "email", Type: "string", NameFormat: "not-a-valid-format"}})
+	nf := attributeNameFormat(t, root, "email")
+	require.Equal(t, model.AttrNameFormatBasic, nf, "invalid stored NameFormat must fall back to the heuristic")
+	require.True(t, model.IsValidAttributeNameFormat(nf), "the emitted NameFormat must always be valid")
 }
 
 // C1: an AuthnRequest carrying a NameIDPolicy now reaches GenerateSAMLResponse

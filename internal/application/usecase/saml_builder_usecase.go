@@ -736,9 +736,18 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 				})
 			}
 
+			// Resolve NameFormat: an explicit, valid rule override wins; otherwise
+			// derive it from the output attribute name (the mapping map key = k).
+			// A stored value that is not a valid attrname-format is treated as
+			// unset, so an invalid string can never reach the assertion.
+			nameFormat := model.AttributeNameFormatFor(k)
+			if rule, ok := sp.AttributeMapping[k]; ok && model.IsValidAttributeNameFormat(rule.NameFormat) {
+				nameFormat = rule.NameFormat
+			}
+
 			assertion.AttributeStatements[0].Attributes = append(assertion.AttributeStatements[0].Attributes, crewjamsaml.Attribute{
 				Name:       k,
-				NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic",
+				NameFormat: nameFormat,
 				Values:     attrValues,
 			})
 		}
