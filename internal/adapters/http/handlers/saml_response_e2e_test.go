@@ -712,3 +712,158 @@ func TestSAMLResponseE2E_Diagnostic_TimestampsFormatsAttributeNames(t *testing.T
 	// s.now().Truncate(time.Millisecond) source as GenerateSAMLResponse.
 	t.Log("LogoutResponse IssueInstant: not reachable from this SSO-driven gate (produced by the IdP SLO flow)")
 }
+
+// --- H-series: outbound attribute policy (A1 passthrough, A3 fail-closed) ------
+//
+// A1: an empty attribute_mapping must release exactly the scope-gated claims, on
+// BOTH the normalized and non-normalized paths — never "release nothing".
+// A3: a non-empty mapping that yields ZERO attributes cannot be applied, so the
+// IdP fails closed with a Responder error Response (SAML Core 3.2.2.2) and no
+// assertion. A partial result is legitimate and passes.
+
+// seedProfileScope registers a "profile" scope for tenant-a. On the non-normalized
+// (federated) path MapClaims gates attribute release by the client's allowed
+// scopes; the E2E env seeds no scope records, so without this the profile claims
+// would not survive gating. Seeding a scope named "profile" is sufficient: MapClaims
+// consults the well-known scope->claims table by scope name.
+func seedProfileScope(t *testing.T, env *oidcE2EEnv) {
+	t.Helper()
+	require.NoError(t, env.db.Create(&models.ScopeGORM{
+		ID:       "scope-profile-tenant-a",
+		TenantID: "tenant-a",
+		Name:     "profile",
+		Active:   true,
+	}).Error)
+}
+
+// acceptE2ESAMLLoginRaw performs the admin login accept with a NON-normalized
+// context: a flat attribute map carrying neither an "identity" nor an
+// "authentication" envelope, so LoginRequest.NormalizedContext reports false and
+// the handler takes the federated (non-normalized) branch. Returns the
+// login_verifier redirect URL.
+func acceptE2ESAMLLoginRaw(t *testing.T, env *oidcE2EEnv, loginChallenge, subject string, attrs map[string]interface{}) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]interface{}{
+		"subject":      subject,
+		"remember":     true,
+		"remember_for": 3600,
+		"context":      attrs,
+	})
+	require.NoError(t, err)
+	resp := serveRequest(t, env.router, http.MethodPut,
+		"/admin/login/accept?login_challenge="+url.QueryEscape(loginChallenge), bytes.NewReader(body), nil)
+	require.Equal(t, http.StatusOK, resp.Code)
+	var out map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	require.NotEmpty(t, out["redirect_to"])
+	return out["redirect_to"]
+}
+
+// assertionAttributeValues returns the AttributeValue texts of the named attribute
+// in the emitted assertion, or nil if the attribute is absent.
+func assertionAttributeValues(t *testing.T, root *etree.Element, name string) []string {
+	t.Helper()
+	assertion := samlxml.DirectChild(root, samlxml.NSSAML, "Assertion")
+	require.NotNil(t, assertion, "response must contain an Assertion")
+	attrStmt := samlxml.DirectChild(assertion, samlxml.NSSAML, "AttributeStatement")
+	if attrStmt == nil {
+		return nil
+	}
+	for _, attr := range attrStmt.ChildElements() {
+		if attr.Tag == "Attribute" && attr.SelectAttrValue("Name", "") == name {
+			var vals []string
+			for _, v := range attr.ChildElements() {
+				if v.Tag == "AttributeValue" {
+					vals = append(vals, v.Text())
+				}
+			}
+			return vals
+		}
+	}
+	return nil
+}
+
+// assertResponderNoAssertion asserts the A3 fail-closed shape: top-level Status is
+// Responder (the identity provider's fault, SAML Core 3.2.2.2) and no assertion —
+// plaintext or encrypted — is emitted. Mirrors assertInvalidNameIDPolicy but for
+// Responder rather than the Requester used when the SP's request was at fault.
+func assertResponderNoAssertion(t *testing.T, root *etree.Element) {
+	t.Helper()
+	require.Nil(t, samlxml.DirectChild(root, samlxml.NSSAML, "Assertion"),
+		"no assertion may be emitted when the configured mapping cannot be applied")
+	require.Nil(t, samlxml.DirectChild(root, samlxml.NSSAML, "EncryptedAssertion"),
+		"no encrypted assertion may be emitted when the configured mapping cannot be applied")
+	status := samlxml.DirectChild(root, samlxml.NSSAMLP, "Status")
+	require.NotNil(t, status)
+	statusCode := samlxml.DirectChild(status, samlxml.NSSAMLP, "StatusCode")
+	require.NotNil(t, statusCode)
+	require.Equal(t, "urn:oasis:names:tc:SAML:2.0:status:Responder", statusCode.SelectAttrValue("Value", ""),
+		"top-level StatusCode must be Responder")
+}
+
+// H1 — TEETH FOR A1. Non-normalized (federated) login, SAML client with an empty
+// attribute_mapping -> the assertion still carries the user's scope-gated
+// attributes. Before the fix the empty-mapping passthrough covered only the
+// normalized path, so this emitted zero attributes.
+func TestSAMLResponseE2E_H1_NonNormalizedEmptyMappingKeepsAttributes(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	seedProfileScope(t, env)
+	createE2ESAMLClient(t, env, "e2e-h1", "http://sp.example.test/h1", "http://sp.example.test/acs",
+		true, false, false, "")
+	challenge := startE2EIdPSSO(t, env, buildAuthnRequestXML("http://sp.example.test/h1", "http://sp.example.test/acs", ""))
+	redirectTo := acceptE2ESAMLLoginRaw(t, env, challenge, "ext-user@example.test", map[string]interface{}{
+		"given_name":  "Alice",
+		"family_name": "Example",
+	})
+	root := parseE2ESAMLResponse(t, followE2ERedirect(t, env, redirectTo))
+
+	require.Equal(t, []string{"Alice"}, assertionAttributeValues(t, root, "given_name"),
+		"an empty mapping must pass through the scope-gated attributes on the non-normalized path")
+	require.Equal(t, []string{"Example"}, assertionAttributeValues(t, root, "family_name"),
+		"an empty mapping must not strip attributes for a federated login")
+}
+
+// H2 — TEETH FOR A3. A client whose non-empty attribute_mapping cannot be applied
+// (its only source is absent from the available claims, so Map yields zero
+// attributes) -> no assertion is emitted and the failure is signalled with a
+// Responder status. No mapper.go change is needed: the mapper is infallible, and
+// an empty result is the reachable "cannot be applied" condition.
+func TestSAMLResponseE2E_H2_UnappliableMappingFailsClosed(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveMappedResponse(t, env, "e2e-h2", "http://sp.example.test/h2", "http://sp.example.test/acs",
+		map[string]model.AttributeMappingRule{
+			"http://schemas.example.test/claims/absent": {Source: "no_such_source", Type: "string"},
+		})
+	assertResponderNoAssertion(t, root)
+}
+
+// H3 — REGRESSION GUARD. Password login (normalized path) with an empty
+// attribute_mapping still emits attributes exactly as before; the A1 change must
+// not disturb the already-guarded normalized passthrough.
+func TestSAMLResponseE2E_H3_NormalizedEmptyMappingStillEmits(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponse(t, env, "e2e-h3", "http://sp.example.test/h3", "http://sp.example.test/acs",
+		true, false, false, "")
+
+	require.Equal(t, []string{"alice"}, assertionAttributeValues(t, root, "preferred_username"),
+		"normalized empty-mapping passthrough must keep emitting the projected claims")
+	require.Equal(t, []string{"Alice Example"}, assertionAttributeValues(t, root, "name"))
+}
+
+// H4 — CHARACTERIZATION, not a fix. On the normalized path the normalized claims
+// REPLACE the scope-gated claims wholesale, so spClient.AllowedScopes does not gate
+// attribute release. The client below allows only openid+profile, yet "email"
+// (an "email"-scope claim, not allowed) is still emitted.
+func TestSAMLResponseE2E_H4_KnownDefect_NormalizedBypassesScopeGating(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponse(t, env, "e2e-h4", "http://sp.example.test/h4", "http://sp.example.test/acs",
+		true, false, false, "")
+
+	const knownDefect = "KNOWN, DELIBERATE FOR NOW: on the normalized (password-login) path the " +
+		"normalized claims replace the scope-gated claims wholesale, so AllowedScopes does not " +
+		"gate release. The client allows only openid+profile, yet \"email\" is emitted. Whoever " +
+		"makes the normalized path honour AllowedScopes must INVERT this test (assert email is " +
+		"absent), not delete it. Fixing it could remove attributes from the FMN flow, so it is " +
+		"deliberately deferred."
+	require.Equal(t, []string{"alice@example.test"}, assertionAttributeValues(t, root, "email"), knownDefect)
+}

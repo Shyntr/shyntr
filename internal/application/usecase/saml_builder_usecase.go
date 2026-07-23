@@ -44,6 +44,7 @@ type SamlBuilderUseCase interface {
 	GetServiceProvider(r *http.Request, serviceProviderID string) (*crewjamsaml.EntityDescriptor, error)
 	ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*crewjamsaml.AuthnRequest, error)
 	GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error)
+	GenerateSAMLErrorResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, topLevelStatus, statusMessage, relayState string) (string, error)
 	RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*model.SAMLConnection, error)
 	ParseLogoutRequest(req *http.Request) (*crewjamsaml.LogoutRequest, error)
 	GenerateLogoutResponse(ctx context.Context, tenantID string, req *crewjamsaml.LogoutRequest, sp *model.SAMLClient, relayState string) (string, error)
@@ -867,6 +868,64 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 	finalXMLBytes, err = declareXMLSchemaNamespace(finalXMLBytes)
 	if err != nil {
 		return "", err
+	}
+
+	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
+	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
+}
+
+// GenerateSAMLErrorResponse builds a SAML Response carrying a top-level error
+// Status and NO assertion, delivered through the same auto-POST form as a success
+// Response. It is the fail-closed path (SAML Core 3.2.2.2) for when the identity
+// provider cannot produce a usable assertion — e.g. a configured attribute
+// mapping that yields zero attributes. statusMessage is surfaced to the SP in the
+// StatusMessage element and MUST name a failure category only; callers must never
+// pass a claim name or value. The Response is signed when the SP requires it, so
+// the SP can trust the failure signal exactly as it trusts a success.
+func (s *samlBuilderUseCase) GenerateSAMLErrorResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, topLevelStatus, statusMessage, relayState string) (string, error) {
+	idp, err := s.GetIdentityProvider(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
+	now := s.now().Truncate(time.Millisecond)
+
+	response := &crewjamsaml.Response{
+		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
+		InResponseTo: authReq.ID,
+		IssueInstant: now,
+		Version:      "2.0",
+		Destination:  authReq.AssertionConsumerServiceURL,
+		Issuer: &crewjamsaml.Issuer{
+			Value: idp.MetadataURL.String(),
+		},
+		Status: crewjamsaml.Status{
+			StatusCode: crewjamsaml.StatusCode{
+				Value: topLevelStatus,
+			},
+			StatusMessage: &crewjamsaml.StatusMessage{
+				Value: statusMessage,
+			},
+		},
+	}
+
+	respBytes, err := xml.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+	docResp := etree.NewDocument()
+	if err := docResp.ReadFromBytes(respBytes); err != nil {
+		return "", fmt.Errorf("failed to parse response xml: %w", err)
+	}
+	finalXMLBytes, err := docResp.WriteToBytes()
+	if err != nil {
+		return "", err
+	}
+
+	if sp.SignResponse {
+		finalXMLBytes, err = s.signElementXML(finalXMLBytes, idp.Key.(*rsa.PrivateKey), idp.Certificate)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign response: %w", err)
+		}
 	}
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)

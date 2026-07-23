@@ -535,16 +535,9 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 			secureClaims = normalizedClaims
 		}
 
-		finalAttrs := map[string]interface{}{}
-		if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
-			finalAttrs = secureClaims
-		} else {
-			var mapErr error
-			finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-			if mapErr != nil {
-				logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
-				finalAttrs = secureClaims
-			}
+		finalAttrs, mapOK := h.resolveOutboundAttributes(c, tenantID, authReq, spClient, secureClaims, relayState)
+		if !mapOK {
+			return
 		}
 		if hasNormalizedClaims {
 			finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
@@ -856,16 +849,9 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 		secureClaims = normalizedClaims
 	}
 
-	finalAttrs := map[string]interface{}{}
-	if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
-		finalAttrs = secureClaims
-	} else {
-		var mapErr error
-		finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-		if mapErr != nil {
-			logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
-			finalAttrs = secureClaims
-		}
+	finalAttrs, mapOK := h.resolveOutboundAttributes(c, tenantID, authReq, spClient, secureClaims, relayState)
+	if !mapOK {
+		return
 	}
 	if hasNormalizedClaims {
 		finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
@@ -1161,6 +1147,50 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	redirectURL.RawQuery = rawQuery
 
 	c.Redirect(http.StatusFound, redirectURL.String())
+}
+
+// resolveOutboundAttributes applies the SP's outbound attribute policy and returns
+// the attributes to place in the assertion. When it returns ok=false it has
+// already written a fail-closed response and the caller must return immediately.
+//
+//   - empty mapping          -> passthrough: release exactly the scope-gated
+//     claims (A1). This holds on BOTH the normalized and non-normalized paths; an
+//     earlier guard covered only the normalized one, so a federated
+//     (non-normalized) login with an empty mapping had every attribute silently
+//     stripped.
+//   - non-empty, partial     -> pass: a mapping that resolves some of its sources
+//     is legitimate; which claims a user has varies per user.
+//   - non-empty, zero output -> fail closed (SAML Core 3.2.2.2): the identity
+//     provider could not apply the configured mapping, so emit a Responder error
+//     Response with no assertion rather than an attribute-less assertion the SP
+//     cannot use.
+//
+// Map is currently infallible, but a mapping error is handled with the same
+// fail-closed path rather than a fallback: were Map ever made fallible, an error
+// must never fall through to an emitted assertion.
+func (h *SAMLHandler) resolveOutboundAttributes(c *gin.Context, tenantID string, authReq *crewjamsaml.AuthnRequest,
+	spClient *model.SAMLClient, secureClaims map[string]interface{}, relayState string) (map[string]interface{}, bool) {
+
+	if len(spClient.AttributeMapping) == 0 {
+		return secureClaims, true
+	}
+
+	mapped, mapErr := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+	if mapErr != nil || len(mapped) == 0 {
+		logger.FromGin(c).Error("SAML outbound attribute mapping could not be applied; failing closed",
+			zap.Error(mapErr), zap.String("protocol", "saml"), zap.String("sp_entity_id", spClient.EntityID))
+		htmlErr, genErr := h.samlBuilderUseCase.GenerateSAMLErrorResponse(c.Request.Context(), tenantID, authReq, spClient,
+			crewjamsaml.StatusResponder, "The identity provider could not produce the required attributes.", relayState)
+		if genErr != nil {
+			logger.FromGin(c).Error("Failed to generate SAML error response", zap.Error(genErr), zap.String("protocol", "saml"))
+			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", genErr)
+			return nil, false
+		}
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, htmlErr)
+		return nil, false
+	}
+	return mapped, true
 }
 
 func firstNonEmpty(values ...string) string {
