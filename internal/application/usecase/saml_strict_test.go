@@ -41,12 +41,12 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math/big"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Shyntr/shyntr/internal/testsupport/samlxml"
 	"github.com/beevik/etree"
 	crewjamsaml "github.com/crewjam/saml"
 	dsig "github.com/russellhaering/goxmldsig"
@@ -54,14 +54,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SAML 2.0 namespaces used by the content-model tables and fixtures.
-const (
-	nsSAML  = "urn:oasis:names:tc:SAML:2.0:assertion"
-	nsSAMLP = "urn:oasis:names:tc:SAML:2.0:protocol"
-	nsDS    = "http://www.w3.org/2000/09/xmldsig#"
-
-	exclusiveC14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
-)
+// exclusiveC14N is asserted by T-D. The SAML/protocol/dsig/XMLSchema-instance
+// namespaces and the structural validators live in the shared samlxml package.
+const exclusiveC14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
 
 // ---------------------------------------------------------------------------
 // Process-wide signing material (RSA-2048 + self-signed cert), generated once.
@@ -175,186 +170,16 @@ func newResponseWithAssertion(t *testing.T, responseID string, assertion []byte)
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Content-model tables. Members of an xsd:choice group share a rank and may
-// appear in any order among themselves; sequence members have ascending ranks.
-// ---------------------------------------------------------------------------
-
-type modelEntry struct {
-	ns    string
-	local string
-	rank  int
-}
-
-var assertionModel = []modelEntry{
-	{nsSAML, "Issuer", 0},
-	{nsDS, "Signature", 1},
-	{nsSAML, "Subject", 2},
-	{nsSAML, "Conditions", 3},
-	{nsSAML, "Advice", 4},
-	// xsd:choice of statements — shared rank 5.
-	{nsSAML, "Statement", 5},
-	{nsSAML, "AuthnStatement", 5},
-	{nsSAML, "AuthzDecisionStatement", 5},
-	{nsSAML, "AttributeStatement", 5},
-}
-
-var responseModel = []modelEntry{
-	{nsSAML, "Issuer", 0},
-	{nsDS, "Signature", 1},
-	{nsSAMLP, "Extensions", 2},
-	{nsSAMLP, "Status", 3},
-	// xsd:choice — shared rank 4.
-	{nsSAML, "Assertion", 4},
-	{nsSAML, "EncryptedAssertion", 4},
-}
-
-var logoutResponseModel = []modelEntry{
-	{nsSAML, "Issuer", 0},
-	{nsDS, "Signature", 1},
-	{nsSAMLP, "Extensions", 2},
-	{nsSAMLP, "Status", 3},
-}
-
-func contentModelFor(ns, local string) ([]modelEntry, bool) {
-	switch ns + "|" + local {
-	case nsSAMLP + "|Response":
-		return responseModel, true
-	case nsSAMLP + "|LogoutResponse":
-		return logoutResponseModel, true
-	case nsSAML + "|Assertion":
-		return assertionModel, true
-	}
-	return nil, false
-}
-
-func rankOf(model []modelEntry, ns, local string) (int, bool) {
-	for _, m := range model {
-		if m.ns == ns && m.local == local {
-			return m.rank, true
-		}
-	}
-	return 0, false
-}
-
-// ---------------------------------------------------------------------------
-// Inspection helpers.
-// ---------------------------------------------------------------------------
-
-func qname(e *etree.Element) string {
-	if e.Space != "" {
-		return e.Space + ":" + e.Tag
-	}
-	return e.Tag
-}
-
-func observedOrder(e *etree.Element) []string {
-	out := make([]string, 0, len(e.ChildElements()))
-	for _, c := range e.ChildElements() {
-		out = append(out, qname(c))
-	}
-	return out
-}
-
-func directChild(e *etree.Element, ns, local string) *etree.Element {
-	for _, c := range e.ChildElements() {
-		if c.Tag == local && c.NamespaceURI() == ns {
-			return c
-		}
-	}
-	return nil
-}
-
-func descend(root *etree.Element, path ...[2]string) *etree.Element {
-	cur := root
-	for _, step := range path {
-		if cur == nil {
-			return nil
-		}
-		cur = directChild(cur, step[0], step[1])
-	}
-	return cur
-}
-
-// collectOrderViolations validates child ordering against the content-model
-// tables for every element that has a model, recursing into nested elements.
-// Each message includes the observed child order.
-func collectOrderViolations(root *etree.Element) []string {
-	var msgs []string
-	var walk func(e *etree.Element)
-	walk = func(e *etree.Element) {
-		if model, ok := contentModelFor(e.NamespaceURI(), e.Tag); ok {
-			observed := observedOrder(e)
-			lastRank := -1
-			for _, c := range e.ChildElements() {
-				rank, known := rankOf(model, c.NamespaceURI(), c.Tag)
-				if !known {
-					msgs = append(msgs, fmt.Sprintf("%s: unexpected child %s (observed order: %v)",
-						qname(e), qname(c), observed))
-					continue
-				}
-				if rank < lastRank {
-					msgs = append(msgs, fmt.Sprintf("%s: child %s (rank %d) appears after a rank-%d child — sequence violation (observed order: %v)",
-						qname(e), qname(c), rank, lastRank, observed))
-				}
-				if rank > lastRank {
-					lastRank = rank
-				}
-			}
-		}
-		for _, c := range e.ChildElements() {
-			walk(c)
-		}
-	}
-	walk(root)
-	return msgs
-}
-
-// signatureImmediatelyAfterIssuer asserts exactly one direct ds:Signature child,
-// positioned immediately after Issuer. Returns the observed order and count for
-// failure reporting.
-func signatureImmediatelyAfterIssuer(root *etree.Element) (ok bool, observed []string, sigCount int) {
-	children := root.ChildElements()
-	observed = observedOrder(root)
-	issuerIdx := -1
-	for i, c := range children {
-		if c.Tag == "Issuer" && c.NamespaceURI() == nsSAML {
-			issuerIdx = i
-			break
-		}
-	}
-	for _, c := range children {
-		if c.Tag == "Signature" && c.NamespaceURI() == nsDS {
-			sigCount++
-		}
-	}
-	if issuerIdx == -1 || sigCount != 1 || issuerIdx+1 >= len(children) {
-		return false, observed, sigCount
-	}
-	next := children[issuerIdx+1]
-	return next.Tag == "Signature" && next.NamespaceURI() == nsDS, observed, sigCount
-}
-
-// keyName returns the ds:KeyName text inside the root's direct ds:Signature
-// KeyInfo, whether it exists, and the observed KeyInfo child order.
-func keyName(root *etree.Element) (value string, present bool, keyInfoOrder []string) {
-	keyInfo := descend(root, [2]string{nsDS, "Signature"}, [2]string{nsDS, "KeyInfo"})
-	if keyInfo == nil {
-		return "", false, nil
-	}
-	keyInfoOrder = observedOrder(keyInfo)
-	kn := directChild(keyInfo, nsDS, "KeyName")
-	if kn == nil {
-		return "", false, keyInfoOrder
-	}
-	return kn.Text(), true, keyInfoOrder
-}
+// The content-model tables, ds:Signature placement / ds:KeyName validators, and
+// the QName resolution helpers now live in the shared samlxml package. The
+// algorithm-extraction inspectors below stay local to this gate; they consume
+// samlxml.Descend / samlxml.NSDS.
 
 func canonicalizationAlgorithm(root *etree.Element) string {
-	el := descend(root,
-		[2]string{nsDS, "Signature"},
-		[2]string{nsDS, "SignedInfo"},
-		[2]string{nsDS, "CanonicalizationMethod"})
+	el := samlxml.Descend(root,
+		[2]string{samlxml.NSDS, "Signature"},
+		[2]string{samlxml.NSDS, "SignedInfo"},
+		[2]string{samlxml.NSDS, "CanonicalizationMethod"})
 	if el == nil {
 		return ""
 	}
@@ -362,10 +187,10 @@ func canonicalizationAlgorithm(root *etree.Element) string {
 }
 
 func signatureMethodAlgorithm(root *etree.Element) string {
-	el := descend(root,
-		[2]string{nsDS, "Signature"},
-		[2]string{nsDS, "SignedInfo"},
-		[2]string{nsDS, "SignatureMethod"})
+	el := samlxml.Descend(root,
+		[2]string{samlxml.NSDS, "Signature"},
+		[2]string{samlxml.NSDS, "SignedInfo"},
+		[2]string{samlxml.NSDS, "SignatureMethod"})
 	if el == nil {
 		return ""
 	}
@@ -373,11 +198,11 @@ func signatureMethodAlgorithm(root *etree.Element) string {
 }
 
 func digestMethodAlgorithm(root *etree.Element) string {
-	el := descend(root,
-		[2]string{nsDS, "Signature"},
-		[2]string{nsDS, "SignedInfo"},
-		[2]string{nsDS, "Reference"},
-		[2]string{nsDS, "DigestMethod"})
+	el := samlxml.Descend(root,
+		[2]string{samlxml.NSDS, "Signature"},
+		[2]string{samlxml.NSDS, "SignedInfo"},
+		[2]string{samlxml.NSDS, "Reference"},
+		[2]string{samlxml.NSDS, "DigestMethod"})
 	if el == nil {
 		return ""
 	}
@@ -428,15 +253,15 @@ func TestSAMLStrict_A_SigningPaths(t *testing.T) {
 			require.NoError(t, err)
 			root := parseSigned(t, signed)
 
-			ok, observed, sigCount := signatureImmediatelyAfterIssuer(root)
+			ok, observed, sigCount := samlxml.SignatureImmediatelyAfterIssuer(root)
 			assert.Truef(t, ok,
 				"exactly one ds:Signature must appear immediately after Issuer (sigCount=%d, observed order=%v)",
 				sigCount, observed)
 
-			violations := collectOrderViolations(root)
+			violations := samlxml.CollectOrderViolations(root)
 			assert.Emptyf(t, violations, "SAML 2.0 content-model order violations: %v", violations)
 
-			value, present, keyInfoOrder := keyName(root)
+			value, present, keyInfoOrder := samlxml.KeyName(root)
 			if assert.Truef(t, present, "ds:KeyName must be present in KeyInfo (observed KeyInfo children=%v)", keyInfoOrder) {
 				assert.Equalf(t, cert.Subject.String(), value, "ds:KeyName must equal the signing certificate subject")
 			}
@@ -460,7 +285,7 @@ func TestSAMLStrict_B_NestedSignatures(t *testing.T) {
 	require.NoError(t, err)
 
 	innerRoot := parseSigned(t, signedAssertion)
-	okInner, obsInner, cntInner := signatureImmediatelyAfterIssuer(innerRoot)
+	okInner, obsInner, cntInner := samlxml.SignatureImmediatelyAfterIssuer(innerRoot)
 	assert.Truef(t, okInner,
 		"inner Assertion ds:Signature must appear immediately after Issuer (sigCount=%d, observed order=%v)",
 		cntInner, obsInner)
@@ -470,7 +295,7 @@ func TestSAMLStrict_B_NestedSignatures(t *testing.T) {
 	require.NoError(t, err)
 
 	respRoot := parseSigned(t, signedResponse)
-	okOuter, obsOuter, cntOuter := signatureImmediatelyAfterIssuer(respRoot)
+	okOuter, obsOuter, cntOuter := samlxml.SignatureImmediatelyAfterIssuer(respRoot)
 	assert.Truef(t, okOuter,
 		"outer Response ds:Signature must appear immediately after Issuer (sigCount=%d, observed order=%v)",
 		cntOuter, obsOuter)
@@ -483,7 +308,7 @@ func TestSAMLStrict_B_NestedSignatures(t *testing.T) {
 	// post-signing manipulation reaching the nested SignatureValue or
 	// X509Certificate would break the outer digest; both verifications passing
 	// is what proves the nested signature survived embedding and extraction.
-	inner := directChild(respRoot, nsSAML, "Assertion")
+	inner := samlxml.DirectChild(respRoot, samlxml.NSSAML, "Assertion")
 	require.NotNil(t, inner, "embedded Assertion must be present in the signed Response")
 	assert.NoErrorf(t, verifyEnveloped(inner.Copy(), cert),
 		"nested Assertion signature must verify independently after extraction")
@@ -503,7 +328,7 @@ func TestSAMLStrict_C_NegativeControls(t *testing.T) {
 			newResponseWithAssertion(t, "_c-status", []byte(assertionFixtureXML("_c-status-inner"))), key, cert)
 		require.NoError(t, err)
 		root := parseSigned(t, signed)
-		statusCode := descend(root, [2]string{nsSAMLP, "Status"}, [2]string{nsSAMLP, "StatusCode"})
+		statusCode := samlxml.Descend(root, [2]string{samlxml.NSSAMLP, "Status"}, [2]string{samlxml.NSSAMLP, "StatusCode"})
 		require.NotNil(t, statusCode)
 		statusCode.CreateAttr("Value", "urn:oasis:names:tc:SAML:2.0:status:Requester")
 		assert.Error(t, verifyEnveloped(root, cert), "verification must fail after StatusCode mutation")
@@ -513,7 +338,7 @@ func TestSAMLStrict_C_NegativeControls(t *testing.T) {
 		signed, err := builder.signElementXML([]byte(assertionFixtureXML("_c-issuer")), key, cert)
 		require.NoError(t, err)
 		root := parseSigned(t, signed)
-		issuer := directChild(root, nsSAML, "Issuer")
+		issuer := samlxml.DirectChild(root, samlxml.NSSAML, "Issuer")
 		require.NotNil(t, issuer)
 		issuer.SetText("https://attacker.example.invalid/metadata")
 		assert.Error(t, verifyEnveloped(root, cert), "verification must fail after Issuer mutation")
@@ -570,87 +395,16 @@ func TestSAMLStrict_E_SignatureAndDigestAlgorithms(t *testing.T) {
 		"Reference DigestMethod Algorithm must end in #sha256 (observed=%q)", digestMethod)
 }
 
-// ---------------------------------------------------------------------------
-// QName-value namespace resolution helpers.
-//
-// XML rules: an UNPREFIXED attribute is in no namespace (the default xmlns
-// applies to elements, never to attributes). A prefixed name — on an attribute
-// or inside a QName-valued attribute — is only meaningful if its prefix resolves
-// to an in-scope xmlns binding on the element or an ancestor.
-// ---------------------------------------------------------------------------
-
-const xmlSchemaInstanceNS = "http://www.w3.org/2001/XMLSchema-instance"
-
-func walkElements(root *etree.Element, fn func(*etree.Element)) {
-	fn(root)
-	for _, c := range root.ChildElements() {
-		walkElements(c, fn)
-	}
-}
-
+// findFirstElement returns the first element with the given local name, using
+// the shared depth-first walker.
 func findFirstElement(root *etree.Element, local string) *etree.Element {
 	var found *etree.Element
-	walkElements(root, func(el *etree.Element) {
+	samlxml.WalkElements(root, func(el *etree.Element) {
 		if found == nil && el.Tag == local {
 			found = el
 		}
 	})
 	return found
-}
-
-// resolvePrefix resolves an xmlns prefix to its namespace URI using the xmlns
-// declarations in scope at el or any ancestor. An empty prefix resolves the
-// default namespace declaration.
-func resolvePrefix(el *etree.Element, prefix string) (string, bool) {
-	for cur := el; cur != nil; cur = cur.Parent() {
-		for _, a := range cur.Attr {
-			if prefix == "" {
-				if a.Space == "" && a.Key == "xmlns" {
-					return a.Value, true
-				}
-			} else if a.Space == "xmlns" && a.Key == prefix {
-				return a.Value, true
-			}
-		}
-	}
-	return "", false
-}
-
-// inScopePrefixes returns every xmlns binding visible at el (nearest declaration
-// wins). The default namespace, if any, is keyed by the empty string.
-func inScopePrefixes(el *etree.Element) map[string]string {
-	var chain []*etree.Element
-	for cur := el; cur != nil; cur = cur.Parent() {
-		chain = append(chain, cur)
-	}
-	bindings := map[string]string{}
-	for i := len(chain) - 1; i >= 0; i-- {
-		for _, a := range chain[i].Attr {
-			switch {
-			case a.Space == "xmlns":
-				bindings[a.Key] = a.Value
-			case a.Space == "" && a.Key == "xmlns":
-				bindings[""] = a.Value
-			}
-		}
-	}
-	return bindings
-}
-
-func sortedPrefixKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func splitQName(value string) (prefix, local string, hasPrefix bool) {
-	if i := strings.IndexByte(value, ':'); i >= 0 {
-		return value[:i], value[i+1:], true
-	}
-	return "", value, false
 }
 
 // ---------------------------------------------------------------------------
@@ -680,25 +434,25 @@ func TestSAMLStrict_F_KnownDefect_DanglingQNameAttribute(t *testing.T) {
 	root := parseSigned(t, signed)
 
 	var violations []string
-	walkElements(root, func(el *etree.Element) {
+	samlxml.WalkElements(root, func(el *etree.Element) {
 		for _, a := range el.Attr {
 			// xsi:type is a prefixed attribute; unprefixed attributes are
 			// namespaceless and cannot be the {XMLSchema-instance}type attribute.
 			if a.Space == "" || a.Key != "type" {
 				continue
 			}
-			ns, ok := resolvePrefix(el, a.Space)
-			if !ok || ns != xmlSchemaInstanceNS {
+			ns, ok := samlxml.ResolvePrefix(el, a.Space)
+			if !ok || ns != samlxml.NSXMLSchemaInstance {
 				continue
 			}
-			prefix, _, hasPrefix := splitQName(a.Value)
+			prefix, _, hasPrefix := samlxml.SplitQName(a.Value)
 			if !hasPrefix {
 				continue
 			}
-			if _, bound := resolvePrefix(el, prefix); !bound {
+			if _, bound := samlxml.ResolvePrefix(el, prefix); !bound {
 				violations = append(violations, fmt.Sprintf(
 					"element <%s>: xsi:type value %q references prefix %q which is not in scope; in-scope prefixes: %v",
-					qname(el), a.Value, prefix, sortedPrefixKeys(inScopePrefixes(el))))
+					samlxml.QName(el), a.Value, prefix, samlxml.SortedPrefixKeys(samlxml.InScopePrefixes(el))))
 			}
 		}
 	})
@@ -752,9 +506,9 @@ func TestSAMLStrict_G_XSITypeNamespaceCorrect(t *testing.T) {
 	}
 	require.Truef(t, found, "AttributeValue must carry a prefixed type attribute")
 
-	ns, ok := resolvePrefix(av, prefix)
+	ns, ok := samlxml.ResolvePrefix(av, prefix)
 	require.Truef(t, ok, "type attribute prefix %q must resolve to a namespace", prefix)
-	assert.Equalf(t, xmlSchemaInstanceNS, ns,
+	assert.Equalf(t, samlxml.NSXMLSchemaInstance, ns,
 		"type attribute (prefix %q) must resolve to the XMLSchema-instance namespace", prefix)
 }
 
@@ -772,7 +526,7 @@ func TestSAMLStrict_H_QNameBindingDiagnostic(t *testing.T) {
 	require.NoError(t, err)
 	root := parseSigned(t, signed)
 
-	t.Logf("xmlns bindings in scope on signed Assertion root: %v", inScopePrefixes(root))
+	t.Logf("xmlns bindings in scope on signed Assertion root: %v", samlxml.InScopePrefixes(root))
 
 	av := findFirstElement(root, "AttributeValue")
 	if av == nil {
@@ -781,10 +535,10 @@ func TestSAMLStrict_H_QNameBindingDiagnostic(t *testing.T) {
 	}
 	for _, a := range av.Attr {
 		if a.Key == "type" && a.Space != "" {
-			ns, ok := resolvePrefix(av, a.Space)
+			ns, ok := samlxml.ResolvePrefix(av, a.Space)
 			t.Logf("type attribute literal prefix: %q (resolves=%v, namespace=%q)", a.Space, ok, ns)
 			t.Logf("type attribute value (QName): %q", a.Value)
 		}
 	}
-	t.Logf("xmlns bindings in scope on the AttributeValue element: %v", inScopePrefixes(av))
+	t.Logf("xmlns bindings in scope on the AttributeValue element: %v", samlxml.InScopePrefixes(av))
 }
