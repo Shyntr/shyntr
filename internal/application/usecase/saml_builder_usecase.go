@@ -59,10 +59,20 @@ type samlBuilderUseCase struct {
 	KeyMgr        utils.KeyManager
 	Config        *config.Config
 	stateProvider security.FederationStateProvider
+	clock         func() time.Time
 }
 
 func NewSamlBuilderUseCase(clientRepo port.SAMLClientRepository, connRepo port.SAMLConnectionRepository,
 	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config, stateProvider security.FederationStateProvider) SamlBuilderUseCase {
+	return NewSamlBuilderUseCaseWithClock(clientRepo, connRepo, replayRepo, km, cfg, stateProvider, nil)
+}
+
+// NewSamlBuilderUseCaseWithClock is like NewSamlBuilderUseCase but accepts an
+// injectable clock so issuance timestamps are deterministic under test. A nil
+// clock means wall-clock time (identical to NewSamlBuilderUseCase).
+func NewSamlBuilderUseCaseWithClock(clientRepo port.SAMLClientRepository, connRepo port.SAMLConnectionRepository,
+	replayRepo port.SAMLReplayRepository, km utils.KeyManager, cfg *config.Config, stateProvider security.FederationStateProvider,
+	clock func() time.Time) SamlBuilderUseCase {
 	return &samlBuilderUseCase{
 		clientRepo:    clientRepo,
 		connRepo:      connRepo,
@@ -70,7 +80,18 @@ func NewSamlBuilderUseCase(clientRepo port.SAMLClientRepository, connRepo port.S
 		KeyMgr:        km,
 		Config:        cfg,
 		stateProvider: stateProvider,
+		clock:         clock,
 	}
+}
+
+// now returns the current time from the injected clock, or wall-clock time when
+// no clock is set. It tolerates a nil clock so a zero-value samlBuilderUseCase
+// (as constructed directly in tests) does not panic.
+func (s *samlBuilderUseCase) now() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock()
 }
 
 type SingleCertStore struct {
@@ -536,7 +557,7 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		return "", err
 	}
 
-	now := time.Now()
+	now := s.now()
 	subject := "unknown"
 	if v, ok := userAttributes[utils.SAMLNameIDSubjectAttribute].(string); ok {
 		subject = v
@@ -839,7 +860,7 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 	if err != nil {
 		return "", err
 	}
-	now := time.Now()
+	now := s.now()
 
 	resp := &crewjamsaml.LogoutResponse{
 		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
@@ -950,6 +971,11 @@ func encryptAssertionBytes(assertionXML []byte, cert *x509.Certificate) (*etree.
 	return encAssert, nil
 }
 
+// signElementXML applies an enveloped signature and places ds:Signature
+// immediately after the root's Issuer child. The root MUST have an Issuer child;
+// otherwise the function returns an error rather than failing open, since emitting
+// the signature in the wrong position would silently reintroduce the strict-reader
+// (ADFS) ordering defect this function exists to prevent.
 func (s *samlBuilderUseCase) signElementXML(xmlBytes []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
 	signingContext, err := goxmldsig.NewSigningContext(key, [][]byte{cert.Raw})
 	if err != nil {
