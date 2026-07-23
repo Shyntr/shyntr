@@ -579,7 +579,7 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		subject = v
 	}
 
-	nameIDFormat := string(crewjamsaml.PersistentNameIDFormat)
+	nameIDFormat := string(crewjamsaml.UnspecifiedNameIDFormat)
 	if authReq.NameIDPolicy != nil && authReq.NameIDPolicy.Format != nil {
 		requestedFormat := *authReq.NameIDPolicy.Format
 		if requestedFormat != "" {
@@ -592,6 +592,10 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 	nameIDValue := subject
 
 	switch nameIDFormat {
+	case string(crewjamsaml.UnspecifiedNameIDFormat):
+		// Supported default. The NameID value is the subject as-is; this case is
+		// handled explicitly so it is a supported outcome, not a fall-through.
+
 	case string(crewjamsaml.EmailAddressNameIDFormat):
 		email, ok := userAttributes["email"].(string)
 		if !ok || email == "" {
@@ -612,6 +616,23 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 
 	case string(crewjamsaml.TransientNameIDFormat):
 		nameIDValue = uuid.New().String()
+
+	default:
+		// Fail closed: an unsupported NameID format must never yield an assertion
+		// labelled with a format the IdP did not actually produce (SAML Core
+		// 3.4.1.1). Persistent lands here — it is not satisfiable until real
+		// opaque pairwise identifiers exist.
+		samlStatus = crewjamsaml.Status{
+			StatusCode: crewjamsaml.StatusCode{
+				Value: crewjamsaml.StatusRequester,
+				StatusCode: &crewjamsaml.StatusCode{
+					Value: "urn:oasis:names:tc:SAML:2.0:status:InvalidNameIDPolicy",
+				},
+			},
+			StatusMessage: &crewjamsaml.StatusMessage{
+				Value: fmt.Sprintf("Requested NameID format is not supported: %s", nameIDFormat),
+			},
+		}
 	}
 
 	if samlStatus.StatusCode.Value == "" {

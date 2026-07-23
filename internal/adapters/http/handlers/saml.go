@@ -84,8 +84,10 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 	metaDesc := sp.Metadata()
 
 	if len(metaDesc.SPSSODescriptors) > 0 {
+		// Persistent is intentionally omitted: it is not satisfiable until real
+		// opaque pairwise identifiers exist, and advertising a format we fake is
+		// worse than not offering it.
 		metaDesc.SPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.PersistentNameIDFormat,   // urn:oasis:names:tc:SAML:2.0:nameid-format:persistent
 			crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
 			crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
 			crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
@@ -424,8 +426,8 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 	metaDesc := idp.Metadata()
 
 	if len(metaDesc.IDPSSODescriptors) > 0 {
+		// Persistent is intentionally omitted (see SPMetadata).
 		metaDesc.IDPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.PersistentNameIDFormat,
 			crewjamsaml.EmailAddressNameIDFormat,
 			crewjamsaml.UnspecifiedNameIDFormat,
 			crewjamsaml.TransientNameIDFormat,

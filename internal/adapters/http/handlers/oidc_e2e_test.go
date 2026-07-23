@@ -215,6 +215,8 @@ func setupOIDCE2EEnvWithClock(t *testing.T, samlClock func() time.Time) *oidcE2E
 	r.POST("/t/:tenant_id/saml/sp/acs", samlHandler.ACS)
 	r.GET("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
 	r.POST("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
+	r.GET("/t/:tenant_id/saml/idp/metadata", samlHandler.IDPMetadata)
+	r.GET("/t/:tenant_id/saml/sp/metadata", samlHandler.SPMetadata)
 	r.GET("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
 	r.POST("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
 	r.GET("/t/:tenant_id/saml/idp/slo", samlHandler.IDPSLO)

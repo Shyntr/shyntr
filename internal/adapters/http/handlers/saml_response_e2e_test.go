@@ -211,6 +211,120 @@ func driveIdPSSOResponse(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsU
 		signResponse, signAssertion, encryptAssertion, spCertPEM, "")
 }
 
+// responseNameID returns the Subject NameID element of the emitted assertion.
+func responseNameID(t *testing.T, root *etree.Element) *etree.Element {
+	t.Helper()
+	assertion := samlxml.DirectChild(root, samlxml.NSSAML, "Assertion")
+	require.NotNil(t, assertion, "response must contain an Assertion")
+	subject := samlxml.DirectChild(assertion, samlxml.NSSAML, "Subject")
+	require.NotNil(t, subject)
+	nameID := samlxml.DirectChild(subject, samlxml.NSSAML, "NameID")
+	require.NotNil(t, nameID)
+	return nameID
+}
+
+// assertInvalidNameIDPolicy asserts the fail-closed shape: Status is
+// InvalidNameIDPolicy nested under Requester, and no assertion is emitted.
+func assertInvalidNameIDPolicy(t *testing.T, root *etree.Element) {
+	t.Helper()
+	require.Nil(t, samlxml.DirectChild(root, samlxml.NSSAML, "Assertion"),
+		"no assertion may be emitted on the InvalidNameIDPolicy path")
+	require.Nil(t, samlxml.DirectChild(root, samlxml.NSSAML, "EncryptedAssertion"),
+		"no encrypted assertion may be emitted on the InvalidNameIDPolicy path")
+	status := samlxml.DirectChild(root, samlxml.NSSAMLP, "Status")
+	require.NotNil(t, status)
+	statusCode := samlxml.DirectChild(status, samlxml.NSSAMLP, "StatusCode")
+	require.NotNil(t, statusCode)
+	require.Equal(t, "urn:oasis:names:tc:SAML:2.0:status:Requester", statusCode.SelectAttrValue("Value", ""),
+		"top-level StatusCode must be Requester")
+	nested := samlxml.DirectChild(statusCode, samlxml.NSSAMLP, "StatusCode")
+	require.NotNil(t, nested, "InvalidNameIDPolicy must be nested under Requester")
+	require.Equal(t, "urn:oasis:names:tc:SAML:2.0:status:InvalidNameIDPolicy", nested.SelectAttrValue("Value", ""))
+}
+
+// metadataNameIDFormats fetches a metadata endpoint and returns the advertised
+// NameIDFormat URNs.
+func metadataNameIDFormats(t *testing.T, env *oidcE2EEnv, path string) []string {
+	t.Helper()
+	resp := serveRequest(t, env.router, http.MethodGet, path, nil, nil)
+	require.Equalf(t, http.StatusOK, resp.Code, "metadata endpoint %s must return 200", path)
+	doc := etree.NewDocument()
+	require.NoError(t, doc.ReadFromString(resp.Body.String()))
+	var formats []string
+	samlxml.WalkElements(doc.Root(), func(el *etree.Element) {
+		if el.Tag == "NameIDFormat" {
+			formats = append(formats, strings.TrimSpace(el.Text()))
+		}
+	})
+	return formats
+}
+
+const (
+	fmtUnspecified = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+	fmtEmail       = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+	fmtTransient   = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+	fmtPersistent  = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
+)
+
+// B1: no NameIDPolicy -> Format is unspecified (the new default).
+func TestSAMLResponseE2E_B1_DefaultFormatUnspecified(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponse(t, env, "e2e-b1", "http://sp.example.test/b1", "http://sp.example.test/acs",
+		true, false, false, "")
+	require.Equal(t, fmtUnspecified, responseNameID(t, root).SelectAttrValue("Format", ""))
+}
+
+// B2: request emailAddress with an email present -> emailAddress format, email value.
+func TestSAMLResponseE2E_B2_EmailAddressFormat(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponseWithChildren(t, env, "e2e-b2", "http://sp.example.test/b2", "http://sp.example.test/acs",
+		true, false, false, "", fmt.Sprintf(`<samlp:NameIDPolicy Format="%s"/>`, fmtEmail))
+	nameID := responseNameID(t, root)
+	require.Equal(t, fmtEmail, nameID.SelectAttrValue("Format", ""))
+	require.Equal(t, "alice@example.test", nameID.Text())
+}
+
+// B3: request transient -> transient format, value neither the subject nor the email.
+func TestSAMLResponseE2E_B3_TransientFormat(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponseWithChildren(t, env, "e2e-b3", "http://sp.example.test/b3", "http://sp.example.test/acs",
+		true, false, false, "", fmt.Sprintf(`<samlp:NameIDPolicy Format="%s"/>`, fmtTransient))
+	nameID := responseNameID(t, root)
+	require.Equal(t, fmtTransient, nameID.SelectAttrValue("Format", ""))
+	value := nameID.Text()
+	require.NotEmpty(t, value)
+	require.NotEqual(t, "ext-subject@example.test", value, "transient value must not be the subject")
+	require.NotEqual(t, "alice@example.test", value, "transient value must not be the email")
+}
+
+// B4: request persistent -> InvalidNameIDPolicy, no assertion.
+func TestSAMLResponseE2E_B4_PersistentRejected(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponseWithChildren(t, env, "e2e-b4", "http://sp.example.test/b4", "http://sp.example.test/acs",
+		true, false, false, "", fmt.Sprintf(`<samlp:NameIDPolicy Format="%s"/>`, fmtPersistent))
+	assertInvalidNameIDPolicy(t, root)
+}
+
+// B5: request a syntactically valid but unsupported URN -> same as B4.
+func TestSAMLResponseE2E_B5_UnsupportedFormatRejected(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponseWithChildren(t, env, "e2e-b5", "http://sp.example.test/b5", "http://sp.example.test/acs",
+		true, false, false, "", `<samlp:NameIDPolicy Format="urn:example:unsupported:nameid-format:custom"/>`)
+	assertInvalidNameIDPolicy(t, root)
+}
+
+// B6: neither metadata list advertises persistent; all three others remain.
+func TestSAMLResponseE2E_B6_MetadataDropsPersistent(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	for _, path := range []string{"/t/tenant-a/saml/idp/metadata", "/t/tenant-a/saml/sp/metadata"} {
+		formats := metadataNameIDFormats(t, env, path)
+		require.NotContainsf(t, formats, fmtPersistent, "%s must not advertise persistent", path)
+		require.Containsf(t, formats, fmtUnspecified, "%s must advertise unspecified", path)
+		require.Containsf(t, formats, fmtEmail, "%s must advertise emailAddress", path)
+		require.Containsf(t, formats, fmtTransient, "%s must advertise transient", path)
+	}
+}
+
 // C1: an AuthnRequest carrying a NameIDPolicy now reaches GenerateSAMLResponse
 // intact. Observable proof: requesting emailAddress makes the emitted NameID
 // Format emailAddress with the user's email as its value. Before this fix the
@@ -430,7 +544,7 @@ func TestSAMLResponseE2E_Diagnostic_TimestampsFormatsAttributeNames(t *testing.T
 
 	if subject := samlxml.DirectChild(assertion, samlxml.NSSAML, "Subject"); subject != nil {
 		if nameID := samlxml.DirectChild(subject, samlxml.NSSAML, "NameID"); nameID != nil {
-			t.Logf("NameID Format (no NameIDPolicy in request): %q", nameID.SelectAttrValue("Format", ""))
+			t.Logf("NameID Format (no NameIDPolicy in request; default is now unspecified): %q", nameID.SelectAttrValue("Format", ""))
 			t.Logf("NameID value: %q", nameID.Text())
 		}
 		if sc := samlxml.DirectChild(subject, samlxml.NSSAML, "SubjectConfirmation"); sc != nil {
