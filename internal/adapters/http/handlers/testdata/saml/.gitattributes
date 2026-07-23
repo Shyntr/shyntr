@@ -1,0 +1,4 @@
+# Keep the vendored schemas byte-exact so their recorded SHA-256 provenance stays
+# verifiable. OASIS schemas ship with CRLF, W3C ones with LF; -text tells git to
+# store them as-is and never normalize line endings on add/checkout.
+*.xsd -text

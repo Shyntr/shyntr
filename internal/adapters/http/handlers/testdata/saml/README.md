@@ -1,11 +1,16 @@
 # Vendored SAML 2.0 / XML-DSig / XML-Enc schemas
 
-Normative XSDs used by the handler-package tests to validate Shyntr's SAML output
-with tooling that shares no code with the signer (xmllint). Fetched from their
-OASIS / W3C canonical locations on **2026-07-23**. Do not substitute copies from
-other sources.
+Normative XSDs used by the handler-package tests (`saml_xmlverify_e2e_test.go`,
+E1/E5) to validate Shyntr's SAML output with tooling that shares no code with the
+signer (`xmllint`). Fetched from their OASIS / W3C canonical locations on
+**2026-07-23**. Do not substitute copies from other sources.
 
-| File | Source URL | SHA-256 (as fetched) |
+## Provenance — every file is byte-identical to its canonical source
+
+Each vendored file is stored **exactly as fetched** (no edits), so a third party
+can verify provenance directly: fetch the URL, `shasum -a 256`, compare.
+
+| File | Source URL | SHA-256 (as fetched = as committed) |
 |---|---|---|
 | `saml-schema-protocol-2.0.xsd` | https://docs.oasis-open.org/security/saml/v2.0/saml-schema-protocol-2.0.xsd | `554250583cd5eacc6ce5f094f6ff50fc2547972c436dc96e2e7eb41abf2c817e` |
 | `saml-schema-assertion-2.0.xsd` | https://docs.oasis-open.org/security/saml/v2.0/saml-schema-assertion-2.0.xsd | `006eb7553843cb7baa9b08da2a9d444346c0e982fb9d9293babe08ede680924b` |
@@ -13,39 +18,37 @@ other sources.
 | `xenc-schema.xsd` | https://www.w3.org/TR/2002/REC-xmlenc-core-20021210/xenc-schema.xsd | `5dd57f074870e1d91f7eb814aa92967cefcce9011a86adf5e12a769fcf2a237e` |
 | `xml.xsd` | https://www.w3.org/2001/xml.xsd | `61960fb3131e38022caad5360e2f33a3382578ab3c80cd58bd74320ede61b20c` |
 
-The SHA-256 column records the bytes **as fetched**. The `schemaLocation`
-rewrites below (needed for offline resolution) change some files, so their
-current on-disk SHA-256 will differ from the value above for the three edited
-files; the table is the provenance of the original download.
+Because the files are unedited, **there is a single hash per file** — as-fetched
+equals as-committed. (OASIS schemas ship with CRLF, W3C with LF; `.gitattributes`
+sets `*.xsd -text` so git never normalizes line endings and the committed bytes
+keep matching these hashes.) An earlier iteration edited the `schemaLocation`
+attributes for offline resolution, which changed some hashes; that approach is
+**superseded** by the XML catalog below, which keeps every schema byte-exact.
 
-## `schemaLocation` rewrites (for offline `--nonet` resolution)
+## Offline resolution — `catalog.xml` (no schema edits)
 
-The OASIS/W3C schemas reference each other by absolute remote URL. Each remote
-reference was rewritten to the local sibling filename so the import chain resolves
-without network access. Only `<import>` `schemaLocation` values were changed;
-nothing else was touched.
-
-| File | Original `schemaLocation` | New value | Why |
-|---|---|---|---|
-| `saml-schema-assertion-2.0.xsd` | `http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd` | `xmldsig-core-schema.xsd` | resolve `ds:` import locally |
-| `saml-schema-assertion-2.0.xsd` | `http://www.w3.org/TR/2002/REC-xmlenc-core-20021210/xenc-schema.xsd` | `xenc-schema.xsd` | resolve `xenc:` import locally |
-| `saml-schema-protocol-2.0.xsd` | `http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd` | `xmldsig-core-schema.xsd` | resolve `ds:` import locally |
-| `xenc-schema.xsd` | `http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd` | `xmldsig-core-schema.xsd` | resolve `ds:` import locally |
-
-Not edited:
-- `saml-schema-protocol-2.0.xsd` already referenced `saml-schema-assertion-2.0.xsd` by relative path.
-- `xmldsig-core-schema.xsd` has no `<import>`/`schemaLocation`.
-- `xml.xsd` — its only `schemaLocation` occurrences are inside `<xs:documentation>`
-  `<pre>` examples (escaped `&lt;import…`), not real imports; left untouched.
-  No SAML/DSig/XEnc schema imports the `xml` namespace, so `xml.xsd` is not part
-  of the active import chain for Response validation. It is vendored per the
-  provenance set for completeness.
-
-## Offline resolution proof
+The OASIS/W3C schemas reference each other by **remote** `xs:import`
+`schemaLocation` URLs. Rather than edit them (which would break provenance),
+`catalog.xml` — an OASIS XML catalog — maps each remote URL to its local sibling,
+so `xmllint` resolves the whole import chain with **no network access**:
 
 ```
-xmllint --nonet --noout --schema saml-schema-protocol-2.0.xsd <minimal-response.xml>
-=> validates   (exit 0)
+XML_CATALOG_FILES=<abs path>/catalog.xml \
+  xmllint --nonet --catalogs --noout --schema saml-schema-protocol-2.0.xsd <response.xml>
 ```
-Confirms the protocol → assertion → {xmldsig, xenc} import chain resolves with no
-network access.
+
+Verified offline (`--nonet`) with no "failed to load external entity" warning.
+The tests set `XML_CATALOG_FILES` and pass `--catalogs`; see `runXmllintSchema`.
+
+Import chain resolved by the catalog: `protocol → {assertion (local), xmldsig}`,
+`assertion → {xmldsig, xenc}`, `xenc → xmldsig`. `xml.xsd` is vendored for
+completeness but is not referenced by this chain (no schema imports the `xml`
+namespace).
+
+## Test caching caveat
+
+Go's test result cache does **not** invalidate when files in this directory
+change (they are read by the external `xmllint`/`xmlsec1` processes; even
+`//go:embed` was verified not to bust the cache). CI runs the verification tests
+with `-count=1`. Locally, use `go test -count=1 ./internal/adapters/http/handlers`
+after changing any schema. See the caveat comment atop `saml_xmlverify_e2e_test.go`.

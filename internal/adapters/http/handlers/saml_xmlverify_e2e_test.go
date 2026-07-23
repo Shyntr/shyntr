@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,8 +39,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TEST-CACHING CAVEAT — read before trusting a green run of this file.
+// Go's test result cache does NOT invalidate when files under testdata/ change:
+// the schemas are read by the external xmllint/xmlsec1 processes, not tracked by
+// the go tool. A `//go:embed testdata/saml` directive was tried as an in-code fix
+// and VERIFIED not to bust the result cache in this repo (modifying an embedded
+// schema still returned "ok (cached)"). There is therefore no reliable in-code
+// fix. A stale "ok (cached)" once masked a genuine failure here. CI runs these
+// tests with `-count=1` (see .github/workflows/dev.yml); locally, run
+// `go test -count=1 ./internal/adapters/http/handlers` after changing any schema.
+
 const (
 	schemaDir     = "testdata/saml"
+	schemaCatalog = schemaDir + "/catalog.xml"
 	protocolXSD   = schemaDir + "/saml-schema-protocol-2.0.xsd"
 	assertionXSD  = schemaDir + "/saml-schema-assertion-2.0.xsd"
 	nsProtoResp   = "urn:oasis:names:tc:SAML:2.0:protocol:Response"
@@ -78,6 +90,27 @@ func runCmd(name string, args ...string) (int, string) {
 		return 0, string(out)
 	}
 	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode(), string(out)
+	}
+	return -1, string(out)
+}
+
+// runXmllintSchema validates docPath against schemaPath OFFLINE. The vendored
+// schemas are byte-identical to their canonical OASIS/W3C sources and reference
+// each other by remote URL; the local OASIS catalog (catalog.xml) maps those URLs
+// to the local siblings, so --nonet resolves the whole xs:import chain without
+// network access and without editing any schema.
+func runXmllintSchema(t *testing.T, schemaPath, docPath string) (int, string) {
+	t.Helper()
+	catalog, err := filepath.Abs(schemaCatalog)
+	require.NoError(t, err)
+	cmd := exec.Command("xmllint", "--nonet", "--catalogs", "--noout", "--schema", schemaPath, docPath)
+	cmd.Env = append(os.Environ(), "XML_CATALOG_FILES="+catalog)
+	out, cmdErr := cmd.CombinedOutput()
+	if cmdErr == nil {
+		return 0, string(out)
+	}
+	if ee, ok := cmdErr.(*exec.ExitError); ok {
 		return ee.ExitCode(), string(out)
 	}
 	return -1, string(out)
@@ -138,7 +171,7 @@ func TestSAMLXMLVerify_E1_ResponseValidatesAgainstXSD(t *testing.T) {
 	raw := driveRawResponse(t, env, "e2e-e1", "http://sp.example.test/e1", "http://sp.example.test/acs", true, true, false, "")
 	file := writeTemp(t, "response.xml", []byte(raw))
 
-	code, out := runCmd("xmllint", "--nonet", "--noout", "--schema", protocolXSD, file)
+	code, out := runXmllintSchema(t, protocolXSD, file)
 	require.Equalf(t, 0, code, "Response must validate against the SAML protocol XSD; xmllint output:\n%s", out)
 }
 
@@ -282,6 +315,6 @@ func TestSAMLXMLVerify_E5_DecryptedAssertionValidatesAgainstXSD(t *testing.T) {
 	require.Contains(t, string(plain), `xmlns:xs="`+xmlSchemaNS+`"`, "decrypted assertion must declare xmlns:xs")
 	file := writeTemp(t, "decrypted_assertion.xml", plain)
 
-	code, out := runCmd("xmllint", "--nonet", "--noout", "--schema", assertionXSD, file)
+	code, out := runXmllintSchema(t, assertionXSD, file)
 	require.Equalf(t, 0, code, "decrypted assertion must validate against the SAML assertion XSD; xmllint output:\n%s", out)
 }
