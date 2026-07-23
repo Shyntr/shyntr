@@ -377,16 +377,22 @@ func (s *samlBuilderUseCase) GetIdentityProvider(ctx context.Context, tenantID s
 	ssoURL, _ := url.Parse(baseURLStr + "/idp/sso")
 	logoutURL, _ := url.Parse(baseURLStr + "/idp/slo")
 
-	privKey, _, err := s.KeyMgr.GetActivePrivateKey(ctx, "sig")
+	privKey, cert, _, err := s.KeyMgr.GetActiveKeys(ctx, "sig")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load active signing key: %w", err)
 	}
 	if privKey == nil {
 		return nil, errors.New("active signing key is nil")
 	}
-	cert, err := s.generateSelfSignedCert(privKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate idp cert: %w", err)
+	// Sign with, and advertise, the certificate stored for the active signing key
+	// so IdP metadata and issued assertions present a stable certificate. Fall
+	// back to a self-signed certificate only when none is stored (e.g. a key that
+	// was imported or rotated without an accompanying certificate).
+	if cert == nil {
+		cert, err = s.generateSelfSignedCert(privKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate idp cert: %w", err)
+		}
 	}
 
 	idp := &crewjamsaml.IdentityProvider{
