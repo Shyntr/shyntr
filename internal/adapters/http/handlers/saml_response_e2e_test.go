@@ -31,6 +31,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,6 +247,59 @@ func TestSAMLResponseE2E_A4_EncryptedAssertion(t *testing.T) {
 		"Response signature must still verify over the encrypted assertion")
 }
 
+// assertMillisecondTimestamp asserts a serialized xs:dateTime carries at most
+// three fractional-second digits and equals the expected millisecond-truncated
+// instant.
+func assertMillisecondTimestamp(t *testing.T, label, serialized string, expected time.Time) {
+	t.Helper()
+	require.NotEmptyf(t, serialized, "%s must be present", label)
+	if dot := strings.IndexByte(serialized, '.'); dot >= 0 {
+		frac := serialized[dot+1:]
+		if z := strings.IndexAny(frac, "Z+-"); z >= 0 {
+			frac = frac[:z]
+		}
+		require.LessOrEqualf(t, len(frac), 3,
+			"%s: %q carries more than three fractional-second digits", label, serialized)
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, serialized)
+	require.NoErrorf(t, err, "%s: cannot parse %q", label, serialized)
+	require.Truef(t, parsed.Equal(expected),
+		"%s: got %q, want millisecond-truncated %q", label, serialized, expected.Format(time.RFC3339Nano))
+}
+
+// Timestamp truncation: every SAML issuance timestamp must be millisecond
+// precision. The clock deliberately carries a nanosecond component (123456789ns)
+// that is not a whole millisecond, so an untruncated value would serialize with
+// more than three fractional digits and fail this test.
+func TestSAMLResponseE2E_IssuanceTimestampsTruncatedToMillisecond(t *testing.T) {
+	base := time.Date(2026, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	expectedNow := base.Truncate(time.Millisecond) // 2026-01-02T03:04:05.123Z
+
+	env := setupOIDCE2EEnvWithClock(t, func() time.Time { return base })
+	root := driveIdPSSOResponse(t, env, "e2e-ts", "http://sp.example.test/ts", "http://sp.example.test/acs",
+		true, false, false, "")
+
+	assertion := samlxml.DirectChild(root, samlxml.NSSAML, "Assertion")
+	require.NotNil(t, assertion, "signed Response must contain a plaintext Assertion")
+	conditions := samlxml.DirectChild(assertion, samlxml.NSSAML, "Conditions")
+	require.NotNil(t, conditions)
+	subject := samlxml.DirectChild(assertion, samlxml.NSSAML, "Subject")
+	require.NotNil(t, subject)
+	scd := samlxml.Descend(subject,
+		[2]string{samlxml.NSSAML, "SubjectConfirmation"},
+		[2]string{samlxml.NSSAML, "SubjectConfirmationData"})
+	require.NotNil(t, scd)
+	authnStmt := samlxml.DirectChild(assertion, samlxml.NSSAML, "AuthnStatement")
+	require.NotNil(t, authnStmt)
+
+	assertMillisecondTimestamp(t, "Response IssueInstant", root.SelectAttrValue("IssueInstant", ""), expectedNow)
+	assertMillisecondTimestamp(t, "Assertion IssueInstant", assertion.SelectAttrValue("IssueInstant", ""), expectedNow)
+	assertMillisecondTimestamp(t, "Conditions NotBefore", conditions.SelectAttrValue("NotBefore", ""), expectedNow.Add(-5*time.Minute))
+	assertMillisecondTimestamp(t, "Conditions NotOnOrAfter", conditions.SelectAttrValue("NotOnOrAfter", ""), expectedNow.Add(5*time.Minute))
+	assertMillisecondTimestamp(t, "SubjectConfirmationData NotOnOrAfter", scd.SelectAttrValue("NotOnOrAfter", ""), expectedNow.Add(5*time.Minute))
+	assertMillisecondTimestamp(t, "AuthnStatement AuthnInstant", authnStmt.SelectAttrValue("AuthnInstant", ""), expectedNow)
+}
+
 // A5: the CanonicalizationMethod in real output is exclusive C14N.
 func TestSAMLResponseE2E_A5_ExclusiveCanonicalization(t *testing.T) {
 	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
@@ -304,4 +358,10 @@ func TestSAMLResponseE2E_Diagnostic_TimestampsFormatsAttributeNames(t *testing.T
 			}
 		}
 	}
+
+	// LogoutResponse IssueInstant is produced by GenerateLogoutResponse via the
+	// IdP SLO endpoint (a separate flow this SSO-driven gate does not exercise),
+	// so it is not reachable here without adding a new flow. It uses the same
+	// s.now().Truncate(time.Millisecond) source as GenerateSAMLResponse.
+	t.Log("LogoutResponse IssueInstant: not reachable from this SSO-driven gate (produced by the IdP SLO flow)")
 }

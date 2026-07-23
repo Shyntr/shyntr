@@ -563,7 +563,13 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		return "", err
 	}
 
-	now := s.now()
+	// Truncate issuance timestamps to millisecond precision. Go's clock carries
+	// nanoseconds, which serialize as xs:dateTime values with up to nine
+	// fractional digits; strict readers such as ADFS parse at milliseconds and
+	// mishandle finer values. Truncating once here covers every field derived
+	// from now (all use now or now.Add(...)). Truncation moves the instant
+	// backwards by under a millisecond, so no validity window is lengthened.
+	now := s.now().Truncate(time.Millisecond)
 	subject := "unknown"
 	if v, ok := userAttributes[utils.SAMLNameIDSubjectAttribute].(string); ok {
 		subject = v
@@ -866,7 +872,13 @@ func (s *samlBuilderUseCase) GenerateLogoutResponse(ctx context.Context, tenantI
 	if err != nil {
 		return "", err
 	}
-	now := s.now()
+	// Truncate issuance timestamps to millisecond precision. Go's clock carries
+	// nanoseconds, which serialize as xs:dateTime values with up to nine
+	// fractional digits; strict readers such as ADFS parse at milliseconds and
+	// mishandle finer values. Truncating once here covers every field derived
+	// from now (all use now or now.Add(...)). Truncation moves the instant
+	// backwards by under a millisecond, so no validity window is lengthened.
+	now := s.now().Truncate(time.Millisecond)
 
 	resp := &crewjamsaml.LogoutResponse{
 		ID:           fmt.Sprintf("resp-%d", now.UnixNano()),
