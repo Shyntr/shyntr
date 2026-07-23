@@ -534,20 +534,21 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 	}
 
 	if spClient.SPCertificate != "" {
-		block, _ := pem.Decode([]byte(spClient.SPCertificate))
-		if block == nil {
-			return nil, fmt.Errorf("invalid SP certificate format")
-		}
-		spCert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
-		}
-
 		if isRedirectBinding {
-			if err := verifyRedirectSignature(req, spCert); err != nil {
+			// The unified verifier owns PEM/certificate parsing so every redirect
+			// failure path is handled in one place; pass the PEM as-is.
+			if err := VerifyRedirectSignature(req, spClient.SPCertificate); err != nil {
 				return nil, fmt.Errorf("signature validation failed: %w", err)
 			}
 		} else {
+			block, _ := pem.Decode([]byte(spClient.SPCertificate))
+			if block == nil {
+				return nil, fmt.Errorf("invalid SP certificate format")
+			}
+			spCert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
+			}
 			if err := verifyPostSignature(xmlBytes, spCert); err != nil {
 				return nil, fmt.Errorf("xml signature validation failed: %w", err)
 			}
@@ -1189,37 +1190,131 @@ func (s *samlBuilderUseCase) signElementXML(xmlBytes []byte, key *rsa.PrivateKey
 	return newDoc.WriteToBytes()
 }
 
-func verifyRedirectSignature(req *http.Request, cert *x509.Certificate) error {
-	query := req.URL.Query()
-	signature := query.Get("Signature")
-	sigAlg := query.Get("SigAlg")
-	samlRequest := query.Get("SAMLRequest")
-	relayState := query.Get("RelayState")
-	if signature == "" {
-		return errors.New("missing signature")
+// rawQueryParam returns the value substring for key exactly as it appears in the
+// raw query string — still percent-encoded, never decoded and re-encoded. The
+// second return reports whether the key was present at all. Parameter names in
+// the SAML redirect binding are plain ASCII, so the name is compared literally.
+func rawQueryParam(rawQuery, key string) (string, bool) {
+	for _, pair := range strings.Split(rawQuery, "&") {
+		if pair == "" {
+			continue
+		}
+		name := pair
+		value := ""
+		if eq := strings.IndexByte(pair, '='); eq >= 0 {
+			name = pair[:eq]
+			value = pair[eq+1:]
+		}
+		if name == key {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+// VerifyRedirectSignature verifies the signature on a SAML HTTP-Redirect binding
+// message (SAMLRequest or SAMLResponse) per SAML 2.0 Bindings §3.4.4.1.
+//
+// The signature is computed by the sender over the URL-encoded query string it
+// constructed, in the exact order SAMLRequest|SAMLResponse, then RelayState (only
+// if present), then SigAlg. Percent-encoding is NOT canonical: %20 vs '+', hex
+// case, and the treatment of ~ ! * ( ) all yield different octets for the same
+// logical value. Reconstructing the signed string with url.QueryEscape therefore
+// silently fails whenever the sender's encoding differs from Go's. To avoid that,
+// this function verifies over the RAW value substrings taken verbatim from the
+// request's query string; only SigAlg and Signature are decoded, and never fed
+// back into the signed string.
+//
+// It fails closed on every error path. Error messages name the failure category
+// only and never include the query, the signature, the certificate, or any
+// parameter value.
+func VerifyRedirectSignature(req *http.Request, certPEM string) error {
+	rawQuery := req.URL.RawQuery
+
+	// Exactly one message parameter must be present; neither or both is invalid.
+	samlReqRaw, hasReq := rawQueryParam(rawQuery, "SAMLRequest")
+	samlResRaw, hasRes := rawQueryParam(rawQuery, "SAMLResponse")
+	if hasReq == hasRes {
+		return errors.New("exactly one of SAMLRequest or SAMLResponse is required")
+	}
+	messageField, messageRaw := "SAMLRequest", samlReqRaw
+	if hasRes {
+		messageField, messageRaw = "SAMLResponse", samlResRaw
 	}
 
-	var signedString string
-	if relayState != "" {
-		signedString = fmt.Sprintf("SAMLRequest=%s&RelayState=%s&SigAlg=%s", url.QueryEscape(samlRequest), url.QueryEscape(relayState), url.QueryEscape(sigAlg))
-	} else {
-		signedString = fmt.Sprintf("SAMLRequest=%s&SigAlg=%s", url.QueryEscape(samlRequest), url.QueryEscape(sigAlg))
+	sigAlgRaw, hasSigAlg := rawQueryParam(rawQuery, "SigAlg")
+	if !hasSigAlg {
+		return errors.New("missing SigAlg parameter")
+	}
+	signatureRaw, hasSig := rawQueryParam(rawQuery, "Signature")
+	if !hasSig {
+		return errors.New("missing Signature parameter")
+	}
+	relayStateRaw, hasRelayState := rawQueryParam(rawQuery, "RelayState")
+
+	// Decode SigAlg (to select the digest) and Signature (to compare) — but never
+	// re-encode them back into the signed string.
+	sigAlg, err := url.QueryUnescape(sigAlgRaw)
+	if err != nil {
+		return errors.New("malformed SigAlg encoding")
+	}
+	signatureEncoded, err := url.QueryUnescape(signatureRaw)
+	if err != nil {
+		return errors.New("malformed Signature encoding")
+	}
+	sigBytes, err := base64.StdEncoding.DecodeString(signatureEncoded)
+	if err != nil {
+		return errors.New("invalid signature base64")
 	}
 
+	// Rebuild the signed string from the RAW received octets, in the specified
+	// order. RelayState is included only when the sender sent it.
+	var signed strings.Builder
+	signed.WriteString(messageField)
+	signed.WriteByte('=')
+	signed.WriteString(messageRaw)
+	if hasRelayState {
+		signed.WriteString("&RelayState=")
+		signed.WriteString(relayStateRaw)
+	}
+	signed.WriteString("&SigAlg=")
+	signed.WriteString(sigAlgRaw)
+
+	// Exact URI match, no suffix matching. The accepted set is the union of the two
+	// former implementations (SHA-1, SHA-256, SHA-512): the handler accepted
+	// SHA-512, the use case did not, and the union preserves behavioural
+	// equivalence for both call sites without widening either beyond what it had.
 	var hashAlg crypto.Hash
 	switch sigAlg {
 	case "http://www.w3.org/2000/09/xmldsig#rsa-sha1":
 		hashAlg = crypto.SHA1
 	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256":
 		hashAlg = crypto.SHA256
+	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512":
+		hashAlg = crypto.SHA512
 	default:
-		return fmt.Errorf("unsupported signature algorithm: %s", sigAlg)
+		return errors.New("unsupported signature algorithm")
 	}
 
-	sigBytes, _ := base64.StdEncoding.DecodeString(signature)
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return errors.New("failed to decode SP certificate PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return errors.New("failed to parse SP certificate")
+	}
+	rsaPub, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return errors.New("SP certificate public key is not RSA")
+	}
+
 	hasher := hashAlg.New()
-	hasher.Write([]byte(signedString))
-	return rsa.VerifyPKCS1v15(cert.PublicKey.(*rsa.PublicKey), hashAlg, hasher.Sum(nil), sigBytes)
+	hasher.Write([]byte(signed.String()))
+	if err := rsa.VerifyPKCS1v15(rsaPub, hashAlg, hasher.Sum(nil), sigBytes); err != nil {
+		return errors.New("signature verification failed")
+	}
+	return nil
 }
 
 func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {

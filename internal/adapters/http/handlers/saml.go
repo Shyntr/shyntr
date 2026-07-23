@@ -7,11 +7,9 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -697,7 +695,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	}
 
 	if spClient.SPCertificate != "" && c.Request.Method == http.MethodGet {
-		if err := verifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
+		if err := usecase.VerifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
 			logger.FromGin(c).Error("SAML SLO Signature Verification Failed! Possible session riding attempt.",
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_signature", "The SAML logout request signature is invalid.", err)
@@ -1163,68 +1161,6 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	redirectURL.RawQuery = rawQuery
 
 	c.Redirect(http.StatusFound, redirectURL.String())
-}
-
-func verifyRedirectSignature(req *http.Request, certPEM string) error {
-	query := req.URL.Query()
-	sig := query.Get("Signature")
-	sigAlg := query.Get("SigAlg")
-
-	if sig == "" || sigAlg == "" {
-		return errors.New("missing Signature or SigAlg in request")
-	}
-
-	sigBytes, err := base64.StdEncoding.DecodeString(sig)
-	if err != nil {
-		return errors.New("invalid signature base64 format")
-	}
-
-	block, _ := pem.Decode([]byte(certPEM))
-	if block == nil {
-		return errors.New("failed to parse SP certificate PEM")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return errors.New("invalid SP X509 certificate")
-	}
-
-	rsaPub, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return errors.New("SP certificate is not an RSA public key")
-	}
-
-	escape := func(s string) string {
-		return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
-	}
-
-	var parts []string
-	if samlReq := query.Get("SAMLRequest"); samlReq != "" {
-		parts = append(parts, "SAMLRequest="+escape(samlReq))
-	} else if samlRes := query.Get("SAMLResponse"); samlRes != "" {
-		parts = append(parts, "SAMLResponse="+escape(samlRes))
-	}
-	if rs := query.Get("RelayState"); rs != "" {
-		parts = append(parts, "RelayState="+escape(rs))
-	}
-	parts = append(parts, "SigAlg="+escape(sigAlg))
-	signString := strings.Join(parts, "&")
-
-	var hash crypto.Hash
-	if strings.HasSuffix(sigAlg, "rsa-sha256") {
-		hash = crypto.SHA256
-	} else if strings.HasSuffix(sigAlg, "rsa-sha1") {
-		hash = crypto.SHA1
-	} else if strings.HasSuffix(sigAlg, "rsa-sha512") {
-		hash = crypto.SHA512
-	} else {
-		return errors.New("unsupported signature algorithm: " + sigAlg)
-	}
-
-	hasher := hash.New()
-	hasher.Write([]byte(signString))
-	hashed := hasher.Sum(nil)
-
-	return rsa.VerifyPKCS1v15(rsaPub, hash, hashed, sigBytes)
 }
 
 func firstNonEmpty(values ...string) string {
