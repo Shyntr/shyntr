@@ -24,9 +24,21 @@ jobs:
           go-version: '1.25.7'
           check-latest: true
 
+      - name: Install XML verification tools
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils xmlsec1
+
       # Federation and SAML flows are kept in a dedicated lane job to isolate bind-sensitive fixtures.
       - name: Run Main Lane Command
         run: go test ./internal/adapters/http/handlers -run 'TestOIDCE2E_(CoreFlow|TenantIsolation|RedirectURIExactMatching|Logout_|FederationCallback|SAMLACS|SAMLSLO)' -count=1
+
+      # Independent SAML verification with external tools (xmllint XSD + xmlsec1 signature),
+      # sharing no code with the signer. SHYNTR_REQUIRE_XML_TOOLS makes an absent tool FAIL
+      # rather than silently skip. Assertions key on process exit status, not tool stderr
+      # wording, so a libxml2/xmlsec1 version difference does not break the lane.
+      - name: Independent SAML XML verification (xmllint + xmlsec1)
+        env:
+          SHYNTR_REQUIRE_XML_TOOLS: "1"
+        run: go test ./internal/adapters/http/handlers -run 'TestSAMLXMLVerify' -count=1
 
   release-docker:
     name: Build and Push Docker Image

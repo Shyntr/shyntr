@@ -789,7 +789,20 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 				if block != nil {
 					spCert, err := x509.ParseCertificate(block.Bytes)
 					if err == nil {
-						assertBytesToEncrypt, _ := docAssert.WriteToBytes()
+						assertBytesToEncrypt, werr := docAssert.WriteToBytes()
+						if werr != nil {
+							return "", werr
+						}
+						// Declare xmlns:xs INSIDE the assertion, before encryption, so
+						// the xsi:type="xs:string" QName resolves in the assertion the SP
+						// recovers on decrypt. The response-root declaration is outside
+						// the ciphertext and cannot reach the decrypted assertion. Added
+						// after signing; exclusive C14N excludes xs from the assertion
+						// digest, so the assertion signature still verifies after decrypt.
+						assertBytesToEncrypt, werr = declareXMLSchemaNamespace(assertBytesToEncrypt)
+						if werr != nil {
+							return "", werr
+						}
 						encryptedElem, err := encryptAssertionBytes(assertBytesToEncrypt, spCert)
 						if err != nil {
 							return "", fmt.Errorf("failed to encrypt assertion: %w", err)
