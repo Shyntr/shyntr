@@ -840,8 +840,39 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		}
 	}
 
+	// Declare xmlns:xs on the response root so the xsi:type="xs:string" QName that
+	// encoding/xml emits on every AttributeValue resolves to an in-scope binding.
+	// Go declares the XMLSchema-instance namespace (it names the type attribute)
+	// but never xs (which appears only inside the attribute value), leaving a
+	// dangling QName that fails XSD validation. This is done AFTER signing: the
+	// signing canonicalizer is exclusive C14N, which strips a namespace not used
+	// in any element or attribute name from the element in place, so a
+	// before-signing declaration does not survive into the serialized output. On
+	// verification the same exclusive C14N excludes xs from every digest (response
+	// and any nested assertion), so adding it here does not affect any signature.
+	finalXMLBytes, err = declareXMLSchemaNamespace(finalXMLBytes)
+	if err != nil {
+		return "", err
+	}
+
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
+}
+
+// declareXMLSchemaNamespace adds xmlns:xs="http://www.w3.org/2001/XMLSchema" to
+// the root element of a signed SAML document so the xsi:type="xs:string" QName on
+// descendant AttributeValues resolves. It must run after signing (see caller).
+func declareXMLSchemaNamespace(xmlBytes []byte) ([]byte, error) {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(xmlBytes); err != nil {
+		return nil, fmt.Errorf("failed to parse response xml for namespace declaration: %w", err)
+	}
+	doc.Root().CreateAttr("xmlns:xs", "http://www.w3.org/2001/XMLSchema")
+	out, err := doc.WriteToBytes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-serialize response xml: %w", err)
+	}
+	return out, nil
 }
 
 func (s *samlBuilderUseCase) RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*model.SAMLConnection, error) {

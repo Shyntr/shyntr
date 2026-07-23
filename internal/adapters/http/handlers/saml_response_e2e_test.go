@@ -410,6 +410,61 @@ func TestSAMLResponseE2E_D4_InvalidStoredNameFormatFallsBackToHeuristic(t *testi
 	require.True(t, model.IsValidAttributeNameFormat(nf), "the emitted NameFormat must always be valid")
 }
 
+// F1: every {XMLSchema-instance}type attribute in the emitted Response carries a
+// QName whose prefix resolves to an in-scope xmlns binding (no dangling QName).
+func TestSAMLResponseE2E_F1_NoDanglingQNameInTypeAttributes(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponse(t, env, "e2e-f1", "http://sp.example.test/f1", "http://sp.example.test/acs",
+		true, true, false, "")
+
+	var violations []string
+	samlxml.WalkElements(root, func(el *etree.Element) {
+		for _, a := range el.Attr {
+			if a.Space == "" || a.Key != "type" {
+				continue
+			}
+			ns, ok := samlxml.ResolvePrefix(el, a.Space)
+			if !ok || ns != samlxml.NSXMLSchemaInstance {
+				continue
+			}
+			prefix, _, hasPrefix := samlxml.SplitQName(a.Value)
+			if !hasPrefix {
+				continue
+			}
+			if _, bound := samlxml.ResolvePrefix(el, prefix); !bound {
+				violations = append(violations, fmt.Sprintf(
+					"element <%s>: xsi:type value %q references prefix %q with no in-scope binding",
+					samlxml.QName(el), a.Value, prefix))
+			}
+		}
+	})
+	require.Empty(t, violations, "every xsi:type QName must resolve to an in-scope binding: %v", violations)
+}
+
+// F2: the xs prefix specifically resolves to http://www.w3.org/2001/XMLSchema at
+// the AttributeValue carrying xsi:type="xs:string".
+func TestSAMLResponseE2E_F2_XSPrefixResolvesToXMLSchema(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	root := driveIdPSSOResponse(t, env, "e2e-f2", "http://sp.example.test/f2", "http://sp.example.test/acs",
+		true, true, false, "")
+
+	var av *etree.Element
+	samlxml.WalkElements(root, func(el *etree.Element) {
+		if av == nil && el.Tag == "AttributeValue" {
+			for _, a := range el.Attr {
+				if a.Key == "type" && a.Space != "" {
+					av = el
+				}
+			}
+		}
+	})
+	require.NotNil(t, av, "response must contain an AttributeValue carrying an xsi:type")
+
+	ns, ok := samlxml.ResolvePrefix(av, "xs")
+	require.True(t, ok, "the xs prefix must resolve in scope at the AttributeValue")
+	require.Equal(t, "http://www.w3.org/2001/XMLSchema", ns)
+}
+
 // C1: an AuthnRequest carrying a NameIDPolicy now reaches GenerateSAMLResponse
 // intact. Observable proof: requesting emailAddress makes the emitted NameID
 // Format emailAddress with the user's email as its value. Before this fix the
