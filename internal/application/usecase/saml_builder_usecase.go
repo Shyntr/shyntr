@@ -367,7 +367,12 @@ func (s *samlBuilderUseCase) HandleACS(ctx context.Context, tenantID string, req
 
 	assertion, err := sp.ParseResponse(req, knownIDs)
 	if err != nil {
-		return nil, "", fmt.Errorf("validation failed: %w", err)
+		// crewjam's *InvalidResponseError.Error() is the constant "Authentication
+		// failed", and its PrivateErr / Response fields carry document content
+		// (attacker-controlled values, raw response XML). Surface only a stable,
+		// document-independent category — never %w the raw error, so it cannot
+		// propagate to a log or the client through the error chain.
+		return nil, "", fmt.Errorf("saml acs validation failed [%s]", classifyACSValidationError(err))
 	}
 
 	if err := s.replayRepo.CheckAndSaveMessageID(ctx, assertion.ID, tenantID, 1*time.Hour); err != nil {
