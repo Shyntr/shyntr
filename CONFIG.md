@@ -38,6 +38,7 @@ The following environment variables affect runtime behavior, but they are **not 
 | `APP_PRIVATE_KEY_BASE64` | `""` (Empty) | Base64 encoded RSA Private Key (PKCS#1 or PKCS#8 format). If left empty, Shyntr will auto-generate a secure RSA key pair and store it encrypted in the database. |
 | `COOKIE_SECURE` | `false` | Set to `true` in production to enforce `Secure` flag on HTTP cookies (requires HTTPS). |
 | `SKIP_TLS_VERIFY` | `false` | If `true`, ignores SSL/TLS certificate errors on outbound HTTPS requests. This affects TLS verification behavior only and does **not** bypass outbound policy enforcement. **Use only in development!** |
+| `SAML_ALLOW_SHA1_SIGNATURES` | `false` | Governs inbound SAML signature verification on both the redirect and embedded (POST/ACS) bindings. When `false` (the default), SHA-1 signature **and** digest algorithms are rejected — FMN Spiral 4 mandates SHA-256. Set to `true` only for legacy interoperability; enabling it is a deliberate, explicit downgrade with no per-connection override and no automatic fallback. |
 
 ### ⚠️ Outbound Security Note
 

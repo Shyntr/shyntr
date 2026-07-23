@@ -688,7 +688,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	}
 
 	if spClient.SPCertificate != "" && c.Request.Method == http.MethodGet {
-		if err := usecase.VerifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
+		if err := h.samlBuilderUseCase.VerifyInboundRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
 			logger.FromGin(c).Error("SAML SLO Signature Verification Failed! Possible session riding attempt.",
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_signature", "The SAML logout request signature is invalid.", err)

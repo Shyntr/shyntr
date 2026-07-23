@@ -43,6 +43,7 @@ type SamlBuilderUseCase interface {
 	GetIdentityProvider(ctx context.Context, tenantID string) (*crewjamsaml.IdentityProvider, error)
 	GetServiceProvider(r *http.Request, serviceProviderID string) (*crewjamsaml.EntityDescriptor, error)
 	ParseAuthnRequest(ctx context.Context, tenantID string, req *http.Request) (*crewjamsaml.AuthnRequest, error)
+	VerifyInboundRedirectSignature(req *http.Request, certPEM string) error
 	GenerateSAMLResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, userAttributes map[string]interface{}, relayState string) (string, error)
 	GenerateSAMLErrorResponse(ctx context.Context, tenantID string, authReq *crewjamsaml.AuthnRequest, sp *model.SAMLClient, topLevelStatus, statusMessage, relayState string) (string, error)
 	RegisterConnection(ctx context.Context, tenantID, name, metadataXML string) (*model.SAMLConnection, error)
@@ -358,6 +359,12 @@ func (s *samlBuilderUseCase) HandleACS(ctx context.Context, tenantID string, req
 		knownIDs = append(knownIDs, possibleRequestID)
 	}
 
+	// crewjam builds its own goxmldsig validation context internally, which accepts
+	// SHA-1. Override its verification with the inbound algorithm policy: the custom
+	// verifier pre-inspects the signature/digest algorithms (rejecting SHA-1 by
+	// default) and then delegates the actual crypto to that same context.
+	sp.SignatureVerifier = signatureAlgorithmVerifier{policy: s.signaturePolicy()}
+
 	assertion, err := sp.ParseResponse(req, knownIDs)
 	if err != nil {
 		return nil, "", fmt.Errorf("validation failed: %w", err)
@@ -537,8 +544,9 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 	if spClient.SPCertificate != "" {
 		if isRedirectBinding {
 			// The unified verifier owns PEM/certificate parsing so every redirect
-			// failure path is handled in one place; pass the PEM as-is.
-			if err := VerifyRedirectSignature(req, spClient.SPCertificate); err != nil {
+			// failure path is handled in one place; the policy gate rejects a
+			// disabled algorithm (SHA-1 by default) before the crypto.
+			if err := s.VerifyInboundRedirectSignature(req, spClient.SPCertificate); err != nil {
 				return nil, fmt.Errorf("signature validation failed: %w", err)
 			}
 		} else {
@@ -550,7 +558,7 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse SP certificate: %w", err)
 			}
-			if err := verifyPostSignature(xmlBytes, spCert); err != nil {
+			if err := verifyPostSignature(xmlBytes, spCert, s.signaturePolicy()); err != nil {
 				return nil, fmt.Errorf("xml signature validation failed: %w", err)
 			}
 		}
@@ -1376,7 +1384,23 @@ func VerifyRedirectSignature(req *http.Request, certPEM string) error {
 	return nil
 }
 
-func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {
+// VerifyInboundRedirectSignature verifies an inbound HTTP-Redirect binding
+// signature under Shyntr's inbound signature-algorithm policy. It rejects a
+// disabled algorithm (SHA-1 by default) first — failing closed with an error that
+// names the algorithm category only — then delegates the cryptographic
+// verification to VerifyRedirectSignature, which is unchanged and policy-agnostic.
+func (s *samlBuilderUseCase) VerifyInboundRedirectSignature(req *http.Request, certPEM string) error {
+	if err := s.signaturePolicy().checkRedirectSignatureAlgorithm(req); err != nil {
+		return err
+	}
+	return VerifyRedirectSignature(req, certPEM)
+}
+
+// verifyPostSignature validates an embedded (POST-binding) XML-DSig signature. It
+// first applies the inbound algorithm policy (rejecting SHA-1 signature/digest by
+// default) by pre-inspecting the SignatureMethod/DigestMethod URIs, since goxmldsig
+// exposes no algorithm allow-list, then performs the cryptographic validation.
+func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate, policy signatureAlgorithmPolicy) error {
 	ks := &SingleCertStore{Cert: cert}
 	ctx := goxmldsig.NewDefaultValidationContext(ks)
 	doc := etree.NewDocument()
@@ -1385,6 +1409,9 @@ func verifyPostSignature(xmlBytes []byte, cert *x509.Certificate) error {
 	}
 	if doc.Root() == nil {
 		return errors.New("empty xml doc")
+	}
+	if err := policy.checkEmbeddedSignatureAlgorithms(doc.Root()); err != nil {
+		return err
 	}
 	_, err := ctx.Validate(doc.Root())
 	return err
