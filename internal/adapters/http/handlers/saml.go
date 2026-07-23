@@ -481,45 +481,28 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		samlReqBase64 := origURL.Query().Get("SAMLRequest")
 		relayState := origURL.Query().Get("RelayState")
 
-		var requestID, acsURL, issuer string
+		var authReq *crewjamsaml.AuthnRequest
 		if samlReqBase64 != "" {
-			samlReqBase64 = strings.ReplaceAll(samlReqBase64, " ", "+")
-			decoded, err := base64.StdEncoding.DecodeString(samlReqBase64)
-			if err == nil {
-				flater := flate.NewReader(bytes.NewReader(decoded))
-				inflated, err := io.ReadAll(flater)
-				flater.Close()
-				if err == nil {
-					decoded = inflated
-				}
-
-				var tempReq struct {
-					ID                          string `xml:"ID,attr"`
-					AssertionConsumerServiceURL string `xml:"AssertionConsumerServiceURL,attr"`
-					Issuer                      struct {
-						Value string `xml:",chardata"`
-					} `xml:"Issuer"`
-				}
-				_ = xml.Unmarshal(decoded, &tempReq)
-				requestID = tempReq.ID
-				acsURL = tempReq.AssertionConsumerServiceURL
-				issuer = tempReq.Issuer.Value
+			parsed, parseErr := parseStoredAuthnRequest(samlReqBase64)
+			if parseErr != nil {
+				logger.FromGin(c).Error("Failed to parse stored SAML AuthnRequest", zap.Error(parseErr), zap.String("protocol", "saml"))
+				payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_saml_request", "The stored SAMLRequest could not be parsed.", nil)
+				return
 			}
+			authReq = parsed
+		} else {
+			// No AuthnRequest was stored (e.g. IdP-initiated); use a minimal one.
+			authReq = &crewjamsaml.AuthnRequest{}
 		}
 
-		if acsURL == "" {
-			acsURL = spClient.ACSURL
+		// Preserve fallbacks for values a request may legitimately omit. A parse
+		// failure was already turned into an error above, so an empty field here
+		// is a genuine absence, not a swallowed parse error.
+		if authReq.AssertionConsumerServiceURL == "" {
+			authReq.AssertionConsumerServiceURL = spClient.ACSURL
 		}
-		if issuer == "" {
-			issuer = spClient.EntityID
-		}
-
-		authReq := &crewjamsaml.AuthnRequest{
-			ID:                          requestID,
-			AssertionConsumerServiceURL: acsURL,
-			Issuer: &crewjamsaml.Issuer{
-				Value: issuer,
-			},
+		if authReq.Issuer == nil || authReq.Issuer.Value == "" {
+			authReq.Issuer = &crewjamsaml.Issuer{Value: spClient.EntityID}
 		}
 
 		var ctxData map[string]interface{}
@@ -809,17 +792,31 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	}
 
 	relayState, _ := ctxData["relay_state_raw"].(string)
-	requestID, _ := ctxData["request_id"].(string)
-	acsURL, _ := ctxData["acs_url"].(string)
-	issuer, _ := ctxData["issuer"].(string)
 
-	authReq := &crewjamsaml.AuthnRequest{
-		ID:                          requestID,
-		AssertionConsumerServiceURL: acsURL,
-		Issuer: &crewjamsaml.Issuer{
-			Value: issuer,
-		},
+	var authReq *crewjamsaml.AuthnRequest
+	if samlRequest, ok := ctxData["saml_request"].(string); ok && samlRequest != "" {
+		parsed, parseErr := parseStoredAuthnRequest(samlRequest)
+		if parseErr != nil {
+			logger.FromGin(c).Error("Failed to parse stored SAML AuthnRequest", zap.Error(parseErr), zap.String("protocol", "saml"))
+			payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_saml_request", "The stored SAMLRequest could not be parsed.", nil)
+			return
+		}
+		authReq = parsed
+	} else {
+		authReq = &crewjamsaml.AuthnRequest{}
 	}
+
+	// Preserve fallbacks for values a request may legitimately omit.
+	if authReq.AssertionConsumerServiceURL == "" {
+		if acsURL, ok := ctxData["acs_url"].(string); ok {
+			authReq.AssertionConsumerServiceURL = acsURL
+		}
+	}
+	if authReq.Issuer == nil || authReq.Issuer.Value == "" {
+		fallbackIssuer, _ := ctxData["issuer"].(string)
+		authReq.Issuer = &crewjamsaml.Issuer{Value: fallbackIssuer}
+	}
+	issuer := authReq.Issuer.Value
 
 	spClient, spClientErr := h.SAMLClientUse.GetClientByEntityID(c.Request.Context(), tenantID, issuer)
 	if spClientErr != nil {
@@ -1235,6 +1232,34 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// parseStoredAuthnRequest decodes a previously received SAMLRequest string (as it
+// arrived on the wire: base64-encoded, and DEFLATE-compressed for the
+// HTTP-Redirect binding) and unmarshals it into a full AuthnRequest, preserving
+// every field the service provider sent (NameIDPolicy, ForceAuthn, and so on). It
+// fails closed: a request that cannot be decoded or unmarshalled returns an error
+// instead of an empty request that would silently fall back to service-provider
+// defaults. Error values never carry the request body.
+func parseStoredAuthnRequest(encoded string) (*crewjamsaml.AuthnRequest, error) {
+	encoded = strings.ReplaceAll(encoded, " ", "+")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errors.New("SAMLRequest is not valid base64")
+	}
+	// HTTP-Redirect binding is DEFLATE-compressed; HTTP-POST is not. Inflate when
+	// possible, otherwise use the decoded bytes as-is.
+	flater := flate.NewReader(bytes.NewReader(decoded))
+	if inflated, inflateErr := io.ReadAll(flater); inflateErr == nil {
+		decoded = inflated
+	}
+	flater.Close()
+
+	var authReq crewjamsaml.AuthnRequest
+	if err := xml.Unmarshal(decoded, &authReq); err != nil {
+		return nil, errors.New("SAMLRequest could not be unmarshalled")
+	}
+	return &authReq, nil
 }
 
 func setSAMLDiagnosticContext(c *gin.Context, tenantID, errorCode, failureStage string) {

@@ -25,11 +25,13 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -88,50 +90,58 @@ func generateSPCertPEM(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
 
-// driveIdPSSOResponse registers a SAML SP with the given signing/encryption flags,
-// drives the real IdP SSO flow (AuthnRequest with NO NameIDPolicy → login accept →
-// SAMLResponse), and returns the parsed Response root element.
-func driveIdPSSOResponse(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
-	signResponse, signAssertion, encryptAssertion bool, spCertPEM string) *etree.Element {
+// createE2ESAMLClient registers a SAML SP with exact signing/encryption flags.
+// The encryption target is SPEncryptionCertificate, not SPCertificate: setting
+// SPCertificate would make ParseAuthnRequest require a signed AuthnRequest (these
+// tests send unsigned ones), unrelated to assertion encryption.
+func createE2ESAMLClient(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
+	signResponse, signAssertion, encryptAssertion bool, spEncCertPEM string) {
 	t.Helper()
-
 	require.NoError(t, env.db.Create(&models.SAMLClientGORM{
-		ID:       clientID,
-		TenantID: "tenant-a",
-		Name:     "E2E SP " + clientID,
-		EntityID: entityID,
-		ACSURL:   acsURL,
-		// Encryption target. Deliberately SPEncryptionCertificate, not
-		// SPCertificate: setting SPCertificate would make ParseAuthnRequest
-		// require a signed AuthnRequest (this test sends an unsigned one), which
-		// is unrelated to assertion encryption.
-		SPEncryptionCertificate: spCertPEM,
+		ID:                      clientID,
+		TenantID:                "tenant-a",
+		Name:                    "E2E SP " + clientID,
+		EntityID:                entityID,
+		ACSURL:                  acsURL,
+		SPEncryptionCertificate: spEncCertPEM,
 		AllowedScopes:           []string{"openid", "profile"},
 		Active:                  true,
 	}).Error)
-	// Force the boolean flags explicitly. GORM's `default:true` tags would
-	// otherwise override a zero-value (false) on insert; a map update sets the
-	// exact values regardless.
+	// Force the boolean flags explicitly; GORM's `default:true` tags would
+	// otherwise override a zero-value (false) on insert.
 	require.NoError(t, env.db.Model(&models.SAMLClientGORM{}).Where("id = ?", clientID).
 		Updates(map[string]interface{}{
 			"sign_response":     signResponse,
 			"sign_assertion":    signAssertion,
 			"encrypt_assertion": encryptAssertion,
 		}).Error)
+}
 
-	authnRequestXML := fmt.Sprintf(
-		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="e2e-req-%d" Version="2.0" IssueInstant="2026-01-02T03:04:05Z" AssertionConsumerServiceURL="%s"><saml:Issuer>%s</saml:Issuer></samlp:AuthnRequest>`,
-		time.Now().UnixNano(), acsURL, entityID)
+// buildAuthnRequestXML builds an AuthnRequest with Issuer and optional extra
+// children (e.g. a NameIDPolicy) inserted after Issuer.
+func buildAuthnRequestXML(entityID, acsURL, extraChildren string) string {
+	return fmt.Sprintf(
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="e2e-req-%d" Version="2.0" IssueInstant="2026-01-02T03:04:05Z" AssertionConsumerServiceURL="%s"><saml:Issuer>%s</saml:Issuer>%s</samlp:AuthnRequest>`,
+		time.Now().UnixNano(), acsURL, entityID, extraChildren)
+}
+
+// startE2EIdPSSO drives the initial IdP SSO request and returns the login challenge.
+func startE2EIdPSSO(t *testing.T, env *oidcE2EEnv, authnRequestXML string) string {
+	t.Helper()
 	samlRequest := encodeRedirectBindingSAMLRequest(t, authnRequestXML)
-
-	loginStartResp := serveRequest(t, env.router, http.MethodGet,
+	resp := serveRequest(t, env.router, http.MethodGet,
 		"/t/tenant-a/saml/idp/sso?SAMLRequest="+url.QueryEscape(samlRequest)+"&RelayState="+url.QueryEscape("relay-e2e-gate"),
 		nil, nil)
-	require.Equal(t, http.StatusFound, loginStartResp.Code)
-	loginChallenge := parseLocationQuery(t, loginStartResp.Header().Get("Location")).Get("login_challenge")
-	require.NotEmpty(t, loginChallenge)
+	require.Equal(t, http.StatusFound, resp.Code)
+	challenge := parseLocationQuery(t, resp.Header().Get("Location")).Get("login_challenge")
+	require.NotEmpty(t, challenge)
+	return challenge
+}
 
-	// Synthetic identity only; example.test hostnames.
+// acceptE2ESAMLLogin performs the admin login accept and returns redirect_to (the
+// login_verifier URL). Synthetic identity only; example.test hostnames.
+func acceptE2ESAMLLogin(t *testing.T, env *oidcE2EEnv, loginChallenge string) string {
+	t.Helper()
 	loginPayload := []byte(`{
 		"subject": "ext-subject@example.test",
 		"remember": true,
@@ -151,26 +161,109 @@ func driveIdPSSOResponse(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsU
 			"authentication": {"amr": ["pwd"]}
 		}
 	}`)
-	loginAcceptResp := serveRequest(t, env.router, http.MethodPut,
+	resp := serveRequest(t, env.router, http.MethodPut,
 		"/admin/login/accept?login_challenge="+url.QueryEscape(loginChallenge), bytes.NewReader(loginPayload), nil)
-	require.Equal(t, http.StatusOK, loginAcceptResp.Code)
-
+	require.Equal(t, http.StatusOK, resp.Code)
 	var body map[string]string
-	require.NoError(t, json.NewDecoder(loginAcceptResp.Body).Decode(&body))
-	redirectTo := body["redirect_to"]
-	require.NotEmpty(t, redirectTo)
-	redirectURL, err := url.Parse(redirectTo)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.NotEmpty(t, body["redirect_to"])
+	return body["redirect_to"]
+}
+
+// followE2ERedirect issues a GET to the login_verifier URL and returns the raw
+// recorder, without asserting its status (callers assert success or failure).
+func followE2ERedirect(t *testing.T, env *oidcE2EEnv, redirectTo string) *httptest.ResponseRecorder {
+	t.Helper()
+	u, err := url.Parse(redirectTo)
 	require.NoError(t, err)
+	return serveRequest(t, env.router, http.MethodGet, u.RequestURI(), nil, nil)
+}
 
-	samlResp := serveRequest(t, env.router, http.MethodGet, redirectURL.RequestURI(), nil, nil)
-	require.Equal(t, http.StatusOK, samlResp.Code)
-
-	responseXML := decodeSAMLResponseXML(t, samlResp.Body.String())
+// parseE2ESAMLResponse requires an OK response, decodes the SAMLResponse from the
+// auto-post form, and returns the parsed Response root element.
+func parseE2ESAMLResponse(t *testing.T, resp *httptest.ResponseRecorder) *etree.Element {
+	t.Helper()
+	require.Equal(t, http.StatusOK, resp.Code)
+	responseXML := decodeSAMLResponseXML(t, resp.Body.String())
 	doc := etree.NewDocument()
 	require.NoError(t, doc.ReadFromString(responseXML))
 	root := doc.Root()
 	require.NotNil(t, root)
 	return root
+}
+
+// driveIdPSSOResponseWithChildren drives the full IdP SSO flow with optional extra
+// AuthnRequest children and returns the parsed Response root element.
+func driveIdPSSOResponseWithChildren(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
+	signResponse, signAssertion, encryptAssertion bool, spCertPEM, extraAuthnReqChildren string) *etree.Element {
+	t.Helper()
+	createE2ESAMLClient(t, env, clientID, entityID, acsURL, signResponse, signAssertion, encryptAssertion, spCertPEM)
+	challenge := startE2EIdPSSO(t, env, buildAuthnRequestXML(entityID, acsURL, extraAuthnReqChildren))
+	redirectTo := acceptE2ESAMLLogin(t, env, challenge)
+	return parseE2ESAMLResponse(t, followE2ERedirect(t, env, redirectTo))
+}
+
+// driveIdPSSOResponse drives the flow with no extra AuthnRequest children.
+func driveIdPSSOResponse(t *testing.T, env *oidcE2EEnv, clientID, entityID, acsURL string,
+	signResponse, signAssertion, encryptAssertion bool, spCertPEM string) *etree.Element {
+	t.Helper()
+	return driveIdPSSOResponseWithChildren(t, env, clientID, entityID, acsURL,
+		signResponse, signAssertion, encryptAssertion, spCertPEM, "")
+}
+
+// C1: an AuthnRequest carrying a NameIDPolicy now reaches GenerateSAMLResponse
+// intact. Observable proof: requesting emailAddress makes the emitted NameID
+// Format emailAddress with the user's email as its value. Before this fix the
+// handler discarded NameIDPolicy, so the output fell back to the default format.
+// (C2 — ForceAuthn survival — is NOT asserted: GenerateSAMLResponse does not act
+// on ForceAuthn, so it has no observable effect in the emitted assertion at this
+// commit. It is carried through the parsed request but cannot be observed without
+// inspecting internals.)
+func TestSAMLResponseE2E_C1_NameIDPolicyReachesUseCase(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	nameIDPolicy := `<samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"/>`
+	root := driveIdPSSOResponseWithChildren(t, env, "e2e-c1", "http://sp.example.test/c1", "http://sp.example.test/acs",
+		true, false, false, "", nameIDPolicy)
+
+	assertion := samlxml.DirectChild(root, samlxml.NSSAML, "Assertion")
+	require.NotNil(t, assertion, "a successful login must emit an Assertion")
+	subject := samlxml.DirectChild(assertion, samlxml.NSSAML, "Subject")
+	require.NotNil(t, subject)
+	nameID := samlxml.DirectChild(subject, samlxml.NSSAML, "NameID")
+	require.NotNil(t, nameID)
+
+	require.Equal(t, "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress", nameID.SelectAttrValue("Format", ""),
+		"the requested NameIDPolicy emailAddress format must survive to GenerateSAMLResponse")
+	require.Equal(t, "alice@example.test", nameID.Text(),
+		"the emailAddress NameID value must be the user's email")
+}
+
+// C3: a malformed stored AuthnRequest must fail closed — an error response, not a
+// successful login using SP defaults. MUST have teeth.
+func TestSAMLResponseE2E_C3_MalformedStoredRequestFailsClosed(t *testing.T) {
+	env := setupOIDCE2EEnvWithClock(t, e2eFixedClock)
+	createE2ESAMLClient(t, env, "e2e-c3", "http://sp.example.test/c3", "http://sp.example.test/acs",
+		true, false, false, "")
+	challenge := startE2EIdPSSO(t, env, buildAuthnRequestXML("http://sp.example.test/c3", "http://sp.example.test/acs", ""))
+	redirectTo := acceptE2ESAMLLogin(t, env, challenge)
+
+	// Corrupt the stored AuthnRequest so it can no longer be parsed. A fail-open
+	// handler would swallow the parse error and issue an assertion using SP
+	// defaults; a fail-closed handler must return an error and emit no assertion.
+	malformed := base64.StdEncoding.EncodeToString([]byte("this is not a valid SAML AuthnRequest"))
+	corruptURL := fmt.Sprintf("%s/t/tenant-a/saml/idp/sso?SAMLRequest=%s&RelayState=relay-e2e-gate",
+		env.cfg.BaseIssuerURL, url.QueryEscape(malformed))
+	require.NoError(t, env.db.Model(&models.LoginRequestGORM{}).Where("id = ?", challenge).
+		Update("request_url", corruptURL).Error)
+
+	resp := followE2ERedirect(t, env, redirectTo)
+
+	require.NotEqualf(t, http.StatusOK, resp.Code,
+		"a malformed stored AuthnRequest must not yield a successful login (got %d)", resp.Code)
+	require.Equal(t, http.StatusBadRequest, resp.Code,
+		"a malformed stored AuthnRequest must produce a client error")
+	require.NotContains(t, resp.Body.String(), "SAMLResponse",
+		"no SAMLResponse (assertion) may be emitted on the fail-closed path")
 }
 
 // A1: signed Response — valid content model, one ds:Signature after Issuer, and a
