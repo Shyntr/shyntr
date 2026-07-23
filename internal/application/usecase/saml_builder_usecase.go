@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Shyntr/shyntr/config"
@@ -955,6 +956,11 @@ func (s *samlBuilderUseCase) signElementXML(xmlBytes []byte, key *rsa.PrivateKey
 		return nil, err
 	}
 
+	// Use exclusive C14N 1.0 with an empty inclusive-namespace prefix list.
+	// goxmldsig defaults to Canonical XML 1.1, which strict SAML readers such as
+	// ADFS support poorly. No prefix-list entries are needed on this path.
+	signingContext.Canonicalizer = goxmldsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
+
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(xmlBytes); err != nil {
 		return nil, err
@@ -969,6 +975,96 @@ func (s *samlBuilderUseCase) signElementXML(xmlBytes []byte, key *rsa.PrivateKey
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve the signature that belongs to THIS root only: its direct
+	// ds:Signature child (SignEnveloped appends it as the last child). When
+	// signing a Response that already contains a signed Assertion, the inner
+	// Assertion signature is nested and must not be touched here. A descendant
+	// search would wrongly match the inner signature, and mutating inner content
+	// after the outer digest is computed would invalidate the outer signature.
+	var signatureEl *etree.Element
+	for _, child := range signedElement.ChildElements() {
+		if child.Tag == "Signature" {
+			signatureEl = child
+			break
+		}
+	}
+	if signatureEl == nil {
+		return nil, errors.New("signed element is missing its Signature child")
+	}
+
+	// Scoped lookups: only ever traverse this root's own signature subtree.
+	findChild := func(parent *etree.Element, tag string) *etree.Element {
+		for _, c := range parent.ChildElements() {
+			if c.Tag == tag {
+				return c
+			}
+		}
+		return nil
+	}
+	var collect func(el *etree.Element, tag string, out *[]*etree.Element)
+	collect = func(el *etree.Element, tag string, out *[]*etree.Element) {
+		for _, c := range el.ChildElements() {
+			if c.Tag == tag {
+				*out = append(*out, c)
+			}
+			collect(c, tag, out)
+		}
+	}
+
+	// Emit ds:KeyName as the first child of KeyInfo, carrying the signing
+	// certificate's Subject DN. KeyInfo lives inside the Signature and is
+	// excluded from the enveloped digest, so this is safe after signing.
+	if keyInfo := findChild(signatureEl, "KeyInfo"); keyInfo != nil {
+		keyName := etree.NewElement("KeyName")
+		keyName.Space = "ds"
+		keyName.SetText(cert.Subject.String())
+		keyInfo.InsertChildAt(0, keyName)
+	}
+
+	// Strip newlines, carriage returns and spaces from the base64 text of the
+	// certificate and signature nodes belonging to THIS signature only.
+	strip := func(v string) string {
+		return strings.NewReplacer("\n", "", "\r", "", " ", "").Replace(v)
+	}
+	var certNodes, sigValueNodes []*etree.Element
+	collect(signatureEl, "X509Certificate", &certNodes)
+	collect(signatureEl, "SignatureValue", &sigValueNodes)
+	for _, n := range certNodes {
+		n.SetText(strip(n.Text()))
+	}
+	for _, n := range sigValueNodes {
+		n.SetText(strip(n.Text()))
+	}
+
+	// Relocate the signature to immediately after Issuer, as SAML 2.0 requires.
+	// The enveloped-signature transform excludes the Signature element from the
+	// digest by identity, not position, so moving it does not affect validity.
+	// goxmldsig appends the Signature via a raw slice append and never sets its
+	// parent pointer, so RemoveChild (which checks the parent) is a no-op here;
+	// locate both nodes by scanning the child-token slice and remove by index.
+	sigIndex, issuerIndex := -1, -1
+	for i, tok := range signedElement.Child {
+		el, ok := tok.(*etree.Element)
+		if !ok {
+			continue
+		}
+		if el == signatureEl {
+			sigIndex = i
+		} else if el.Tag == "Issuer" && issuerIndex == -1 {
+			issuerIndex = i
+		}
+	}
+	if issuerIndex == -1 {
+		return nil, errors.New("cannot place signature: root has no Issuer child")
+	}
+	if sigIndex == -1 {
+		return nil, errors.New("cannot place signature: signature child not found")
+	}
+	// The Signature is appended last, so sigIndex > issuerIndex and removing it
+	// does not shift issuerIndex.
+	signedElement.RemoveChildAt(sigIndex)
+	signedElement.InsertChildAt(issuerIndex+1, signatureEl)
 
 	newDoc := etree.NewDocument()
 	newDoc.SetRoot(signedElement)
