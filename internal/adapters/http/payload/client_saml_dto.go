@@ -16,6 +16,7 @@ type CreateSAMLClientRequest struct {
 	SPEncryptionCertificate string                                `json:"sp_encryption_certificate" example:"MIID...[Base64_Cert]...=="`
 	MetadataURL             string                                `json:"metadata_url" example:"https://finance.acme.corp/saml/metadata.xml"`
 	AttributeMapping        map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	NameIDFormat            string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	AllowedScopes           []string                              `json:"allowed_scopes" example:"email,profile,groups"`
 	ForceAuthn              bool                                  `json:"force_authn" example:"true"`
 	SignResponse            bool                                  `json:"sign_response" example:"true"`
@@ -34,6 +35,7 @@ type SAMLClientResponse struct {
 	SPEncryptionCertificate string                                `json:"sp_encryption_certificate"`
 	MetadataURL             string                                `json:"metadata_url" example:"https://finance.acme.corp/saml/metadata.xml"`
 	AttributeMapping        map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	NameIDFormat            string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	AllowedScopes           []string                              `json:"allowed_scopes" example:"email,profile,groups"`
 	ForceAuthn              bool                                  `json:"force_authn" example:"true"`
 	SignResponse            bool                                  `json:"sign_response" example:"true"`
@@ -55,6 +57,7 @@ func (req *CreateSAMLClientRequest) ToDomain() *model.SAMLClient {
 		SPEncryptionCertificate: req.SPEncryptionCertificate,
 		MetadataURL:             req.MetadataURL,
 		AttributeMapping:        req.AttributeMapping,
+		NameIDFormat:            req.NameIDFormat,
 		AllowedScopes:           req.AllowedScopes,
 		ForceAuthn:              req.ForceAuthn,
 		SignResponse:            req.SignResponse,
@@ -75,6 +78,7 @@ func FromDomainSAMLClient(c *model.SAMLClient) *SAMLClientResponse {
 		SPEncryptionCertificate: c.SPEncryptionCertificate,
 		MetadataURL:             c.MetadataURL,
 		AttributeMapping:        c.AttributeMapping,
+		NameIDFormat:            c.NameIDFormat,
 		AllowedScopes:           c.AllowedScopes,
 		ForceAuthn:              c.ForceAuthn,
 		SignResponse:            c.SignResponse,

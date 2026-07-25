@@ -18,6 +18,7 @@ type SAMLConnection struct {
 	MetadataURL              string                          `json:"metadata_url"`
 	SPPrivateKey             string                          `json:"-"`
 	AttributeMapping         map[string]AttributeMappingRule `json:"attribute_mapping"`
+	NameIDFormat             string                          `json:"name_id_format,omitempty"`
 	ForceAuthn               bool                            `json:"force_authn"`
 	SignRequest              bool                            `json:"sign_request"`
 	Active                   bool                            `json:"active"`
@@ -39,6 +40,14 @@ func (c *SAMLConnection) Validate() error {
 	}
 	if c.IdpCertificate == "" {
 		return errors.New("idp_certificate is required")
+	}
+	for _, rule := range c.AttributeMapping {
+		if rule.NameFormat != "" && !IsValidAttributeNameFormat(rule.NameFormat) {
+			return errors.New("attribute mapping name_format must be a SAML 2.0 attrname-format (uri, basic, or unspecified)")
+		}
+	}
+	if c.NameIDFormat != "" && !IsValidNameIDFormat(c.NameIDFormat) {
+		return errors.New("name_id_format must be a supported SAML 2.0 nameid-format (unspecified, emailAddress, or transient)")
 	}
 	return nil
 }

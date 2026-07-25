@@ -667,6 +667,7 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		SPEncryptionCertificate: client.SPEncryptionCertificate,
 		MetadataURL:             client.MetadataURL,
 		AttributeMapping:        client.AttributeMapping,
+		NameIDFormat:            client.NameIDFormat,
 		ForceAuthn:              client.ForceAuthn,
 		SignResponse:            client.SignResponse,
 		SignAssertion:           client.SignAssertion,
@@ -716,6 +717,7 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.ACSURL = req.ACSURL
 	client.SPCertificate = req.SPCertificate
 	client.AttributeMapping = req.AttributeMapping
+	client.NameIDFormat = req.NameIDFormat
 	client.ForceAuthn = req.ForceAuthn
 	client.SignResponse = req.SignResponse
 	client.SignAssertion = req.SignAssertion
@@ -862,6 +864,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		MetadataURL:              conn.MetadataURL,
 		SPPrivateKey:             conn.SPPrivateKey,
 		AttributeMapping:         conn.AttributeMapping,
+		NameIDFormat:             conn.NameIDFormat,
 		ForceAuthn:               conn.ForceAuthn,
 		SignRequest:              conn.SignRequest,
 		Active:                   true,
@@ -991,6 +994,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		MetadataURL:              req.MetadataURL,
 		SPPrivateKey:             req.SPPrivateKey,
 		AttributeMapping:         req.AttributeMapping,
+		NameIDFormat:             req.NameIDFormat,
 		ForceAuthn:               req.ForceAuthn,
 		SignRequest:              req.SignRequest,
 		Active:                   true,

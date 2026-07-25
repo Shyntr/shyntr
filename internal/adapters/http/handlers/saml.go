@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,6 +73,21 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 		tenantID = h.Config.DefaultTenantID
 	}
 
+	// An optional connection_id lets an operator publish SP metadata tailored to a
+	// specific SAML connection: its pinned NameIDFormat and an
+	// AttributeConsumingService derived from its attribute_mapping. Without it, the
+	// endpoint returns the tenant-generic SP metadata unchanged.
+	var conn *model.SAMLConnection
+	if connectionID := c.Query("connection_id"); connectionID != "" {
+		var connErr error
+		conn, connErr = h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
+		if connErr != nil {
+			logger.FromGin(c).Warn("SP metadata requested for unknown connection", zap.String("connection_id", connectionID))
+			payload.WriteSAMLError(c, http.StatusNotFound, "connection_not_found", "The configured SAML connection could not be found for this tenant.", connErr)
+			return
+		}
+	}
+
 	sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, nil)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize SP", zap.Error(err), zap.String("protocol", "saml"))
@@ -82,13 +98,16 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 	metaDesc := sp.Metadata()
 
 	if len(metaDesc.SPSSODescriptors) > 0 {
-		// Persistent is intentionally omitted: it is not satisfiable until real
-		// opaque pairwise identifiers exist, and advertising a format we fake is
-		// worse than not offering it.
-		metaDesc.SPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
-			crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
-			crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+		configured := ""
+		if conn != nil {
+			configured = conn.NameIDFormat
+		}
+		metaDesc.SPSSODescriptors[0].NameIDFormats = samlMetadataNameIDFormats(configured)
+
+		if conn != nil {
+			if acs, ok := buildAttributeConsumingService(conn.Name, conn.AttributeMapping); ok {
+				metaDesc.SPSSODescriptors[0].AttributeConsumingServices = []crewjamsaml.AttributeConsumingService{acs}
+			}
 		}
 	}
 
@@ -404,6 +423,20 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 		tenantID = h.Config.DefaultTenantID
 	}
 
+	// An optional client_id lets an operator publish IdP metadata tailored to a
+	// specific SP client: the single NameIDFormat that SP has been pinned to.
+	// Without it, the endpoint returns the tenant-generic IdP metadata unchanged.
+	var spClient *model.SAMLClient
+	if clientID := c.Query("client_id"); clientID != "" {
+		var clientErr error
+		spClient, clientErr = h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, clientID)
+		if clientErr != nil {
+			logger.FromGin(c).Warn("IdP metadata requested for unknown SP client", zap.String("client_id", clientID))
+			payload.WriteSAMLError(c, http.StatusNotFound, "sp_not_found", "The service provider configuration could not be found for this tenant.", clientErr)
+			return
+		}
+	}
+
 	idp, err := h.samlBuilderUseCase.GetIdentityProvider(c.Request.Context(), tenantID)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize IdP", zap.Error(err), zap.String("protocol", "saml"))
@@ -424,18 +457,91 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 	metaDesc := idp.Metadata()
 
 	if len(metaDesc.IDPSSODescriptors) > 0 {
-		// Persistent is intentionally omitted (see SPMetadata).
-		metaDesc.IDPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.EmailAddressNameIDFormat,
-			crewjamsaml.UnspecifiedNameIDFormat,
-			crewjamsaml.TransientNameIDFormat,
+		configured := ""
+		if spClient != nil {
+			configured = spClient.NameIDFormat
 		}
+		metaDesc.IDPSSODescriptors[0].NameIDFormats = samlMetadataNameIDFormats(configured)
 	}
 
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
 		logger.FromGin(c).Error("Failed to write metadata XML", zap.Error(err), zap.String("protocol", "saml"))
 	}
+}
+
+// samlMetadataNameIDFormats returns the NameIDFormat list to advertise. When a
+// single valid format is configured, it advertises exactly that one; otherwise it
+// falls back to the default set.
+//
+// persistent is never advertised: it is not in the configurable set (config-time
+// validation rejects it) and it is absent from the default list, because the
+// issuance path fails closed on it. The IsValidNameIDFormat guard is defence in
+// depth: a value that somehow bypassed validation (an out-of-band write) can never
+// cause metadata to advertise a format the issuance path would refuse to produce;
+// such a value falls back to the safe default set instead.
+func samlMetadataNameIDFormats(configured string) []crewjamsaml.NameIDFormat {
+	if model.IsValidNameIDFormat(configured) {
+		return []crewjamsaml.NameIDFormat{crewjamsaml.NameIDFormat(configured)}
+	}
+	return []crewjamsaml.NameIDFormat{
+		crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
+		crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+		crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+	}
+}
+
+// buildAttributeConsumingService builds the SP AttributeConsumingService that
+// declares one RequestedAttribute per attribute_mapping entry, so published
+// metadata matches what the SP actually consumes. It returns ok=false for an empty
+// mapping, in which case no AttributeConsumingService is emitted (current
+// behaviour).
+//
+// Each RequestedAttribute's Name is the mapping output name (the map key). Its
+// NameFormat is the rule's explicit NameFormat when it is a valid attrname-format,
+// otherwise the same heuristic the issuance path uses (model.AttributeNameFormatFor
+// from T2-4). This is deliberately not a URI-name special case: a URI-named claim
+// whose rule pins basic (e.g. the FMN-mandated role claim) is advertised as basic,
+// faithfully reflecting the operator's configuration. Keys are sorted so the
+// emitted metadata is deterministic.
+func buildAttributeConsumingService(serviceName string, mapping map[string]model.AttributeMappingRule) (crewjamsaml.AttributeConsumingService, bool) {
+	if len(mapping) == 0 {
+		return crewjamsaml.AttributeConsumingService{}, false
+	}
+
+	names := make([]string, 0, len(mapping))
+	for name := range mapping {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	requested := make([]crewjamsaml.RequestedAttribute, 0, len(names))
+	for _, name := range names {
+		rule := mapping[name]
+		nameFormat := model.AttributeNameFormatFor(name)
+		if model.IsValidAttributeNameFormat(rule.NameFormat) {
+			nameFormat = rule.NameFormat
+		}
+		requested = append(requested, crewjamsaml.RequestedAttribute{
+			Attribute: crewjamsaml.Attribute{
+				Name:       name,
+				NameFormat: nameFormat,
+			},
+		})
+	}
+
+	// SAML metadata requires at least one ServiceName in an
+	// AttributeConsumingService; fall back to a stable label when the connection
+	// has no name.
+	if strings.TrimSpace(serviceName) == "" {
+		serviceName = "Shyntr Service Provider"
+	}
+
+	return crewjamsaml.AttributeConsumingService{
+		Index:               1,
+		ServiceNames:        []crewjamsaml.LocalizedName{{Lang: "en", Value: serviceName}},
+		RequestedAttributes: requested,
+	}, true
 }
 
 // IDPSSO godoc
