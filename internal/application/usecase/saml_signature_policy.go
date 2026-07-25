@@ -85,8 +85,8 @@ func (p signatureAlgorithmPolicy) checkDigestAlgorithm(uri string) error {
 
 // checkRedirectSignatureAlgorithm reads the (decoded) SigAlg from the raw query of
 // an HTTP-Redirect binding message and rejects SHA-1 per policy. A missing or
-// malformed SigAlg is left to VerifyRedirectSignature, which already fails closed
-// on it; this check only adds the algorithm-policy gate.
+// malformed SigAlg is left to VerifyInboundRedirectSignature's crypto stage, which
+// already fails closed on it; this check only adds the algorithm-policy gate.
 func (p signatureAlgorithmPolicy) checkRedirectSignatureAlgorithm(req *http.Request) error {
 	if p.allowSHA1 {
 		return nil

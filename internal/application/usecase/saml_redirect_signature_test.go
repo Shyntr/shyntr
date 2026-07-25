@@ -1,7 +1,7 @@
 // SAML HTTP-Redirect binding signature verification harness (G1–G5).
 //
 // WHY THIS FILE EXISTS
-// VerifyRedirectSignature is the single, unified verifier for the SAML 2.0
+// VerifyInboundRedirectSignature is the single, unified verifier for the SAML 2.0
 // HTTP-Redirect binding (Bindings §3.4.4.1). It replaced two divergent
 // implementations that both rebuilt the signed string with url.QueryEscape
 // instead of verifying over the octets as received. Percent-encoding is not
@@ -48,7 +48,7 @@ var redirectHashByAlg = map[string]crypto.Hash{
 }
 
 // redirectTestKey returns an RSA-2048 key and a self-signed certificate PEM for
-// that key — the shape VerifyRedirectSignature accepts as its cert input.
+// that key — the shape VerifyInboundRedirectSignature accepts as its cert input.
 func redirectTestKey(t *testing.T) (*rsa.PrivateKey, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -117,7 +117,7 @@ func TestVerifyRedirectSignature_G1_RawReceivedOctetsVerify(t *testing.T) {
 	require.Contains(t, raw, "%20", "test must sign over a %20-encoded space")
 	require.Contains(t, raw, "one!two", "test must sign over a literal '!'")
 
-	err := VerifyRedirectSignature(redirectRequest(raw), certPEM)
+	err := strictPolicyUseCase().VerifyInboundRedirectSignature(redirectRequest(raw), certPEM)
 	require.NoError(t, err, "signature over the raw received query must verify")
 }
 
@@ -130,7 +130,7 @@ func TestVerifyRedirectSignature_G2_TamperedRelayStateRejected(t *testing.T) {
 	tampered := strings.Replace(raw, "state%20one!two", "Xtate%20one!two", 1)
 	require.NotEqual(t, raw, tampered, "tamper must actually change the query")
 
-	err := VerifyRedirectSignature(redirectRequest(tampered), certPEM)
+	err := strictPolicyUseCase().VerifyInboundRedirectSignature(redirectRequest(tampered), certPEM)
 	require.Error(t, err, "a tampered RelayState must not verify")
 }
 
@@ -140,7 +140,12 @@ func TestVerifyRedirectSignature_G3_SAMLResponseVerifies(t *testing.T) {
 	key, certPEM := redirectTestKey(t)
 	raw := signedRedirectQuery(t, key, redirectAlgSHA1, "SAMLResponse", sampleSAMLResponse, redirectStr(exoticRelay))
 
-	err := VerifyRedirectSignature(redirectRequest(raw), certPEM)
+	// G3 signs with SHA-1. After consolidation the only redirect verifier applies
+	// the inbound policy, so SHA-1 acceptance is exercised through the SHA-1-enabled
+	// configuration (SAML_ALLOW_SHA1_SIGNATURES=true) — a real, production-reachable
+	// setting, not a policy-free bypass. The assertion is unchanged: a signed
+	// SAMLResponse redirect verifies.
+	err := sha1EnabledUseCase().VerifyInboundRedirectSignature(redirectRequest(raw), certPEM)
 	require.NoError(t, err, "a signed SAMLResponse redirect must verify")
 }
 
@@ -181,7 +186,7 @@ func TestVerifyRedirectSignature_G4_ErrorPathsFailClosed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := VerifyRedirectSignature(redirectRequest(tc.query), certPEM)
+			err := strictPolicyUseCase().VerifyInboundRedirectSignature(redirectRequest(tc.query), certPEM)
 			require.Error(t, err, "%s must be rejected", tc.name)
 		})
 	}
@@ -190,8 +195,8 @@ func TestVerifyRedirectSignature_G4_ErrorPathsFailClosed(t *testing.T) {
 	// the query cases above, using a valid, well-formed signed query.
 	t.Run("non-RSA certificate rejected", func(t *testing.T) {
 		raw := signedRedirectQuery(t, key, redirectAlgSHA256, "SAMLRequest", sampleSAMLRequest, redirectStr(exoticRelay))
-		require.Error(t, VerifyRedirectSignature(redirectRequest(raw), "-----BEGIN CERTIFICATE-----\nnot a cert\n-----END CERTIFICATE-----\n"))
-		require.Error(t, VerifyRedirectSignature(redirectRequest(raw), "not a pem block at all"))
+		require.Error(t, strictPolicyUseCase().VerifyInboundRedirectSignature(redirectRequest(raw), "-----BEGIN CERTIFICATE-----\nnot a cert\n-----END CERTIFICATE-----\n"))
+		require.Error(t, strictPolicyUseCase().VerifyInboundRedirectSignature(redirectRequest(raw), "not a pem block at all"))
 	})
 }
 
@@ -207,7 +212,11 @@ func TestVerifyRedirectSignature_G5_BehaviouralEquivalence(t *testing.T) {
 			// Plain alphanumeric values: raw octets equal what url.QueryEscape would
 			// have produced, so this is a query both former verifiers accepted.
 			raw := signedRedirectQuery(t, key, alg, "SAMLRequest", "PlainRequest0Token", redirectStr("plainrelay0state"))
-			err := VerifyRedirectSignature(redirectRequest(raw), certPEM)
+			// The set under test includes SHA-1. The single policy-aware verifier
+			// accepts SHA-1 only under the SHA-1-enabled configuration, so the whole
+			// union (SHA-1/256/512) is exercised through it. SHA-256/512 verify
+			// identically under either policy, so the assertions are unchanged.
+			err := sha1EnabledUseCase().VerifyInboundRedirectSignature(redirectRequest(raw), certPEM)
 			require.NoError(t, err, "a canonically-encoded query must still verify under %s", alg)
 		})
 	}

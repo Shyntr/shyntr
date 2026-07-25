@@ -1284,8 +1284,15 @@ func rawQueryParam(rawQuery, key string) (string, bool) {
 	return "", false
 }
 
-// VerifyRedirectSignature verifies the signature on a SAML HTTP-Redirect binding
-// message (SAMLRequest or SAMLResponse) per SAML 2.0 Bindings §3.4.4.1.
+// VerifyInboundRedirectSignature verifies the signature on an inbound SAML 2.0
+// HTTP-Redirect binding message (SAMLRequest or SAMLResponse) per Bindings
+// §3.4.4.1, under Shyntr's inbound signature-algorithm policy. It is the single
+// redirect-binding verifier: there is no separately-callable, policy-free path a
+// caller could reach.
+//
+// The policy is applied first — a disabled algorithm (SHA-1 by default) is rejected
+// before any cryptography, failing closed with an error that names the algorithm
+// category only.
 //
 // The signature is computed by the sender over the URL-encoded query string it
 // constructed, in the exact order SAMLRequest|SAMLResponse, then RelayState (only
@@ -1293,14 +1300,18 @@ func rawQueryParam(rawQuery, key string) (string, bool) {
 // case, and the treatment of ~ ! * ( ) all yield different octets for the same
 // logical value. Reconstructing the signed string with url.QueryEscape therefore
 // silently fails whenever the sender's encoding differs from Go's. To avoid that,
-// this function verifies over the RAW value substrings taken verbatim from the
-// request's query string; only SigAlg and Signature are decoded, and never fed
-// back into the signed string.
+// verification is over the RAW value substrings taken verbatim from the request's
+// query string; only SigAlg and Signature are decoded, and never fed back into the
+// signed string.
 //
 // It fails closed on every error path. Error messages name the failure category
 // only and never include the query, the signature, the certificate, or any
 // parameter value.
-func VerifyRedirectSignature(req *http.Request, certPEM string) error {
+func (s *samlBuilderUseCase) VerifyInboundRedirectSignature(req *http.Request, certPEM string) error {
+	if err := s.signaturePolicy().checkRedirectSignatureAlgorithm(req); err != nil {
+		return err
+	}
+
 	rawQuery := req.URL.RawQuery
 
 	// Exactly one message parameter must be present; neither or both is invalid.
@@ -1387,18 +1398,6 @@ func VerifyRedirectSignature(req *http.Request, certPEM string) error {
 		return errors.New("signature verification failed")
 	}
 	return nil
-}
-
-// VerifyInboundRedirectSignature verifies an inbound HTTP-Redirect binding
-// signature under Shyntr's inbound signature-algorithm policy. It rejects a
-// disabled algorithm (SHA-1 by default) first — failing closed with an error that
-// names the algorithm category only — then delegates the cryptographic
-// verification to VerifyRedirectSignature, which is unchanged and policy-agnostic.
-func (s *samlBuilderUseCase) VerifyInboundRedirectSignature(req *http.Request, certPEM string) error {
-	if err := s.signaturePolicy().checkRedirectSignatureAlgorithm(req); err != nil {
-		return err
-	}
-	return VerifyRedirectSignature(req, certPEM)
 }
 
 // verifyPostSignature validates an embedded (POST-binding) XML-DSig signature. It
