@@ -810,7 +810,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 
 		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, spClient.ID)
 		if err != nil {
-			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject", logoutReq.NameID.Value),
+			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject_sha256", hashForLog(logoutReq.NameID.Value)),
 				zap.String("entity_id", spClient.EntityID))
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
@@ -1045,7 +1045,7 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 		if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 			subject := logoutReq.NameID.Value
 			_ = h.OAuthSessionUse.Delete(c.Request.Context(), subject)
-			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject", subject))
+			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject_sha256", hashForLog(subject)))
 		}
 		sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, conn)
 		if err != nil {
