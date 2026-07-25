@@ -156,7 +156,8 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 	c.SetSameSite(sameSiteMode)
 	c.SetCookie("shyntr_fed_csrf", csrfToken, 600, "/", "", h.Config.CookieSecure, true)
 
-	redirectURLOrHTML, requestID, err := h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	ssoCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	redirectURLOrHTML, requestID, err := h.samlBuilderUseCase.InitiateSSO(ssoCtx, tenantID, connectionID, loginChallenge, csrfToken)
 	providerCtx := map[string]interface{}{
 		"connection_id": connectionID,
 	}
@@ -164,7 +165,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		providerCtx["saml_request_id"] = requestID
 	}
 	_ = h.AuthUse.MarkLoginAsProviderStarted(c.Request.Context(), loginReq.ID, "saml", connectionID, providerCtx, c.ClientIP(), c.Request.UserAgent())
-	redirectURLOrHTML, requestID, err = h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	redirectURLOrHTML, requestID, err = h.samlBuilderUseCase.InitiateSSO(ssoCtx, tenantID, connectionID, loginChallenge, csrfToken)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initiate SAML SSO", zap.Error(err), zap.String("protocol", "saml"))
 		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to initiate SAML SSO with the external identity provider.", err)
@@ -274,7 +275,8 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		return
 	}
 
-	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
+	acsCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	assertion, _, err := h.samlBuilderUseCase.HandleACS(acsCtx, tenantID, c.Request, loginReq.SAMLRequestID)
 	if err != nil {
 		setSAMLDiagnosticContext(c, tenantID, "invalid_saml_response", "acs_response_validation")
 		logger.FromGin(c).Error("Failed to handle SAML ACS",
