@@ -102,12 +102,15 @@ func (km *DefaultKeyManager) loadOrGenerateActiveKey(ctx context.Context, use st
 	}
 
 	template := x509.Certificate{
-		SerialNumber:          big.NewInt(time.Now().UnixNano()),
-		Subject:               pkix.Name{CommonName: "Shyntr Global Identity - " + use},
-		NotBefore:             time.Now().Add(-1 * time.Minute),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "Shyntr Global Identity - " + use},
+		NotBefore:    time.Now().Add(-1 * time.Minute),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour * 10),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		// No ExtKeyUsage: this is a SAML/JWT signing (and encryption) identity
+		// certificate, not a TLS server certificate. ServerAuth is semantically
+		// wrong here and a strict verifier that checks EKU may reject it. A signing
+		// certificate carries no ExtKeyUsage (S19).
 		BasicConstraintsValid: true,
 	}
 
@@ -487,12 +490,15 @@ func (km *DefaultKeyManager) generateKeyInternal(ctx context.Context, use string
 	}
 
 	template := x509.Certificate{
-		SerialNumber:          big.NewInt(time.Now().UnixNano()),
-		Subject:               pkix.Name{CommonName: "Shyntr Global Identity - " + use},
-		NotBefore:             time.Now().Add(-1 * time.Minute),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour * 10),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "Shyntr Global Identity - " + use},
+		NotBefore:    time.Now().Add(-1 * time.Minute),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour * 10),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		// No ExtKeyUsage: this is a SAML/JWT signing (and encryption) identity
+		// certificate, not a TLS server certificate. ServerAuth is semantically
+		// wrong here and a strict verifier that checks EKU may reject it. A signing
+		// certificate carries no ExtKeyUsage (S19).
 		BasicConstraintsValid: true,
 	}
 
