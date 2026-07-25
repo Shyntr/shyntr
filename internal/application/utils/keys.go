@@ -324,9 +324,22 @@ func (km *DefaultKeyManager) GetActiveKeys(ctx context.Context, use string) (*rs
 
 	var cert *x509.Certificate
 	if dbKey.CertData != "" {
+		// A malformed stored certificate must never silently change the advertised
+		// signing identity (S21). Since the D3 fix makes the SAML IdP trust this
+		// stored certificate, a parse failure that quietly returned a nil cert would
+		// let the caller fall back to a transient self-signed certificate under the
+		// same identity with no signal — breaking a partner who pinned the previous
+		// certificate. Surface the failure loudly instead. The log names only the
+		// key id, use, and a failure category — never the certificate bytes.
 		block, _ := pem.Decode([]byte(dbKey.CertData))
-		if block != nil {
-			cert, _ = x509.ParseCertificate(block.Bytes)
+		if block == nil {
+			logger.Log.Error("Stored signing certificate could not be PEM-decoded; provisioning is broken and the advertised identity may fall back to a transient certificate",
+				zap.String("use", use), zap.String("kid", dbKey.ID), zap.String("reason", "pem_decode_failed"))
+		} else if parsedCert, parseErr := x509.ParseCertificate(block.Bytes); parseErr != nil {
+			logger.Log.Error("Stored signing certificate could not be parsed; provisioning is broken and the advertised identity may fall back to a transient certificate",
+				zap.String("use", use), zap.String("kid", dbKey.ID), zap.String("reason", "x509_parse_failed"))
+		} else {
+			cert = parsedCert
 		}
 	}
 
