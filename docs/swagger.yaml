@@ -220,6 +220,16 @@ definitions:
         type: array
       app_id:
         type: string
+      attribute_exclude:
+        items:
+          type: string
+        type: array
+      attribute_mapping:
+        additionalProperties:
+          $ref: '#/definitions/model.AttributeMappingRule'
+        type: object
+      attribute_passthrough:
+        type: boolean
       audience:
         items:
           type: string
@@ -287,10 +297,16 @@ definitions:
     properties:
       active:
         type: boolean
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         additionalProperties:
           $ref: '#/definitions/model.AttributeMappingRule'
         type: object
+      attribute_passthrough:
+        type: boolean
       authorization_endpoint:
         type: string
       client_id:
@@ -359,10 +375,16 @@ definitions:
         items:
           type: string
         type: array
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         additionalProperties:
           $ref: '#/definitions/model.AttributeMappingRule'
         type: object
+      attribute_passthrough:
+        type: boolean
       created_at:
         type: string
       encrypt_assertion:
@@ -394,10 +416,16 @@ definitions:
     properties:
       active:
         type: boolean
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         additionalProperties:
           $ref: '#/definitions/model.AttributeMappingRule'
         type: object
+      attribute_passthrough:
+        type: boolean
       created_at:
         type: string
       force_authn:
@@ -571,8 +599,14 @@ definitions:
     type: object
   payload.CreateLDAPConnectionRequest:
     properties:
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         type: object
+      attribute_passthrough:
+        type: boolean
       base_dn:
         example: dc=corp,dc=example,dc=com
         type: string
@@ -632,6 +666,14 @@ definitions:
         items:
           type: string
         type: array
+      attribute_exclude:
+        items:
+          type: string
+        type: array
+      attribute_mapping:
+        type: object
+      attribute_passthrough:
+        type: boolean
       audience:
         example:
         - api-service
@@ -725,8 +767,14 @@ definitions:
     type: object
   payload.CreateOIDCConnectionRequest:
     properties:
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         type: object
+      attribute_passthrough:
+        type: boolean
       authorization_endpoint:
         example: https://accounts.google.com/o/oauth2/v2/auth
         type: string
@@ -892,8 +940,14 @@ definitions:
         items:
           type: string
         type: array
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         type: object
+      attribute_passthrough:
+        type: boolean
       encrypt_assertion:
         example: false
         type: boolean
@@ -933,8 +987,14 @@ definitions:
     type: object
   payload.CreateSAMLConnectionRequest:
     properties:
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         type: object
+      attribute_passthrough:
+        type: boolean
       force_authn:
         example: false
         type: boolean
@@ -1014,8 +1074,14 @@ definitions:
       active:
         example: true
         type: boolean
+      attribute_exclude:
+        items:
+          type: string
+        type: array
       attribute_mapping:
         type: object
+      attribute_passthrough:
+        type: boolean
       base_dn:
         example: dc=corp,dc=example,dc=com
         type: string

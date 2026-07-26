@@ -5558,6 +5558,21 @@
                 "app_id": {
                     "type": "string"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "attribute_mapping": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/model.AttributeMappingRule"
+                    }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
+                },
                 "audience": {
                     "type": "array",
                     "items": {
@@ -5659,11 +5674,20 @@
                 "active": {
                     "type": "boolean"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "authorization_endpoint": {
                     "type": "string"
@@ -5769,11 +5793,20 @@
                         "type": "string"
                     }
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
@@ -5822,11 +5855,20 @@
                 "active": {
                     "type": "boolean"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
@@ -6092,8 +6134,17 @@
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "base_dn": {
                     "type": "string",
@@ -6174,6 +6225,18 @@
                     "example": [
                         "https://app.example.com"
                     ]
+                },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "attribute_mapping": {
+                    "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "audience": {
                     "type": "array",
@@ -6306,8 +6369,17 @@
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "authorization_endpoint": {
                     "type": "string",
@@ -6530,8 +6602,17 @@
                         "groups"
                     ]
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "encrypt_assertion": {
                     "type": "boolean",
@@ -6590,8 +6671,17 @@
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "force_authn": {
                     "type": "boolean",
@@ -6694,8 +6784,17 @@
                     "type": "boolean",
                     "example": true
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "base_dn": {
                     "type": "string",

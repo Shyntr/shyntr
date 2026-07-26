@@ -5566,6 +5566,21 @@ const docTemplate = `{
                 "app_id": {
                     "type": "string"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "attribute_mapping": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/model.AttributeMappingRule"
+                    }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
+                },
                 "audience": {
                     "type": "array",
                     "items": {
@@ -5667,11 +5682,20 @@ const docTemplate = `{
                 "active": {
                     "type": "boolean"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "authorization_endpoint": {
                     "type": "string"
@@ -5777,11 +5801,20 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
@@ -5830,11 +5863,20 @@ const docTemplate = `{
                 "active": {
                     "type": "boolean"
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/model.AttributeMappingRule"
                     }
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
@@ -6100,8 +6142,17 @@ const docTemplate = `{
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "base_dn": {
                     "type": "string",
@@ -6182,6 +6233,18 @@ const docTemplate = `{
                     "example": [
                         "https://app.example.com"
                     ]
+                },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "attribute_mapping": {
+                    "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "audience": {
                     "type": "array",
@@ -6314,8 +6377,17 @@ const docTemplate = `{
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "authorization_endpoint": {
                     "type": "string",
@@ -6538,8 +6610,17 @@ const docTemplate = `{
                         "groups"
                     ]
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "encrypt_assertion": {
                     "type": "boolean",
@@ -6598,8 +6679,17 @@ const docTemplate = `{
                 "tenant_id"
             ],
             "properties": {
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "force_authn": {
                     "type": "boolean",
@@ -6702,8 +6792,17 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": true
                 },
+                "attribute_exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "attribute_mapping": {
                     "type": "object"
+                },
+                "attribute_passthrough": {
+                    "type": "boolean"
                 },
                 "base_dn": {
                     "type": "string",
