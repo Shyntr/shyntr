@@ -388,6 +388,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
 		JSONWebKeys:             req.JWKS,
+		AttributeMapping:        req.AttributeMapping,
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
@@ -523,6 +524,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		PostLogoutRedirectURIs:  req.PostLogoutRedirectURIs,
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
+		AttributeMapping:        req.AttributeMapping,
 	}
 
 	// Secret handling (Keep existing if not changed)
