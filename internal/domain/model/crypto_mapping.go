@@ -46,7 +46,7 @@ type AttributeMappingRule struct {
 	// NameFormat overrides the SAML attribute NameFormat for the emitted
 	// attribute. Empty means "unset": the emission site derives it from the
 	// output attribute name. Validated against the SAML 2.0 attrname-format set.
-	NameFormat string `json:"name_format,omitempty"`
+	NameFormat string `json:"name_format,omitempty" example:"urn:oasis:names:tc:SAML:2.0:attrname-format:uri"`
 }
 
 // JWTSession represents explicitly stored JWT states if required by custom flows or specific Fosite implementations.

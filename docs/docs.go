@@ -464,44 +464,6 @@ const docTemplate = `{
             }
         },
         "/admin/management/clients/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Retrieves details of a specific OAuth2/OIDC client. Secrets are masked.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "OAuth2 Clients"
-                ],
-                "summary": "Get OIDC Client",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/model.OAuth2Client"
-                        }
-                    },
-                    "404": {
-                        "description": "OIDC Client not found",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    }
-                }
-            },
             "put": {
                 "security": [
                     {
@@ -569,6 +531,51 @@ const docTemplate = `{
             }
         },
         "/admin/management/clients/{tenant_id}/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves details of a specific OAuth2/OIDC client. Secrets are masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth2 Clients"
+                ],
+                "summary": "Get OIDC Client",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Client ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.OAuth2Client"
+                        }
+                    },
+                    "404": {
+                        "description": "OIDC Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -612,6 +619,130 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/management/dashboard/auth-activity": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves real-time authentication success and failure counts by protocol for a given time range across all tenants.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Get Authentication Activity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Time range (1h, 24h, 7d)",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AuthActivity"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/dashboard/auth-failures": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves failure intelligence and breakdown by reason and protocol across all tenants.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Get Authentication Failures",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Time range (1h, 24h, 7d)",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AuthFailures"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/dashboard/health-summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves a high-level health summary of critical system components (database, keys, migrations).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Get Dashboard Health Summary",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.HealthSummary"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/dashboard/routing-insights": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves patterns of protocol transitions (e.g., OIDC -\u003e SAML) across all authentication flows.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Get Protocol Routing Insights",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Time range (1h, 24h, 7d)",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.RoutingInsights"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/management/dashboard/stats": {
             "get": {
                 "security": [
@@ -641,6 +772,300 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/ldap-connections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all federated LDAP Identity Providers.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "List All LDAP Connections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/payload.LDAPConnectionResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve LDAP connections",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Registers an external LDAP/Active-Directory Identity Provider for federated authentication.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "Create LDAP Connection (IdP)",
+                "parameters": [
+                    {
+                        "description": "LDAP Connection Configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.CreateLDAPConnectionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/payload.LDAPConnectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create LDAP connection",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/ldap-connections/{tenant_id}/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves details of a specific LDAP Identity Provider. BindPassword is never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "Get LDAP Connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.LDAPConnectionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "LDAP Connection not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates an existing LDAP Identity Provider. Pass empty string or \"*****\" for bind_password to keep the existing value.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "Update LDAP Connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "LDAP Connection Update Configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.CreateLDAPConnectionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "status: updated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Connection does not belong to this tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to update LDAP connection",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a federated LDAP Identity Provider from a tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "Delete LDAP Connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Failed to delete LDAP connection",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/ldap-connections/{tenant_id}/{id}/test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Verifies connectivity and service-account bind credentials for an LDAP connection.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "Test LDAP Connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "status: ok",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Connection test failed",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
                         }
                     }
                 }
@@ -809,7 +1234,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Tenant ID",
-                        "name": "tenant_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -1124,6 +1549,372 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/management/password-login/assignments": {
+            "get": {
+                "description": "Lists all assignments. Optionally filter by tenant_id query parameter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "List password login assignments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by tenant ID",
+                        "name": "tenant_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/payload.PasswordLoginAssignmentResponse"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Assigns a password login endpoint to a tenant (or globally when tenant_id is omitted/null).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Create password login assignment",
+                "parameters": [
+                    {
+                        "description": "Create request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.CreatePasswordLoginAssignmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginAssignmentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/password-login/assignments/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Get password login assignment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Assignment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginAssignmentResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Update password login assignment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Assignment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.UpdatePasswordLoginAssignmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginAssignmentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Delete password login assignment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Assignment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/password-login/endpoints": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "List password login endpoints",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/payload.PasswordLoginEndpointResponse"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Defines a new external password verifier endpoint that can be assigned to tenants.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Create password login endpoint",
+                "parameters": [
+                    {
+                        "description": "Create request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.CreatePasswordLoginEndpointRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/password-login/endpoints/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Get password login endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginEndpointResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Update password login endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.UpdatePasswordLoginEndpointRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.PasswordLoginEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Password Login"
+                ],
+                "summary": "Delete password login endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/admin/management/saml-clients": {
             "get": {
                 "security": [
@@ -1200,55 +1991,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to create SAML client",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/management/saml-clients/tenant/{tenant_id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lists all SAML Service Providers for a specific tenant.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "SAML Clients"
-                ],
-                "summary": "List SAML Clients By Tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenant_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.SAMLClient"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "tenant_id is required",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to retrieve SAML clients for tenant",
                         "schema": {
                             "$ref": "#/definitions/payload.AppError"
                         }
@@ -1336,7 +2078,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Tenant ID",
-                        "name": "tenant_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -1569,7 +2311,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Tenant ID",
-                        "name": "tenant_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -1868,6 +2610,487 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/management/tenants/{id}/branding": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the current draft and published branding config for a tenant. Returns defaults when no branding has been configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Branding"
+                ],
+                "summary": "Get Tenant Branding",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.BrandingResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/branding/discard": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resets the draft to the published state. If never published, resets to defaults.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Branding"
+                ],
+                "summary": "Discard Branding Draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.BrandingResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/branding/draft": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validates and saves a new branding draft for the tenant. Does not affect the published state.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Branding"
+                ],
+                "summary": "Update Branding Draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Branding config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.UpdateBrandingDraftRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.BrandingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/branding/publish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atomically copies the draft config into the published config.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Branding"
+                ],
+                "summary": "Publish Branding Draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.BrandingResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/branding/reset": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resets draft (and optionally published) to system defaults.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Branding"
+                ],
+                "summary": "Reset Branding",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Reset target",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/payload.ResetBrandingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payload.BrandingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid target",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/clients": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all OAuth2/OIDC clients for a specific tenant. Secrets are masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth2 Clients"
+                ],
+                "summary": "List OIDC Clients By Tenant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.OAuth2Client"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "tenant_id is required",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve clients for tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/ldap-connections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all federated LDAP Identity Providers for a specific tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "LDAP Connections"
+                ],
+                "summary": "List LDAP Connections By Tenant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/payload.LDAPConnectionResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "tenant_id is required",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve LDAP connections for tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/oidc-connections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all federated OIDC Identity Providers for a specific tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OIDC Connections"
+                ],
+                "summary": "List OIDC Connections By Tenant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.OIDCConnection"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "tenant_id is required",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve OIDC connections for tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/saml-clients": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all SAML Service Providers for a specific tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SAML Clients"
+                ],
+                "summary": "List SAML Clients By Tenant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.SAMLClient"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "tenant_id is required",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve SAML clients for tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/management/tenants/{id}/saml-connections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all federated SAML Identity Providers for a specific tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SAML Connections"
+                ],
+                "summary": "List SAML Connections By Tenant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.SAMLConnection"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "tenant_id is required",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve SAML connections for tenant",
+                        "schema": {
+                            "$ref": "#/definitions/payload.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/management/tenants/{id}/scopes": {
             "get": {
                 "security": [
@@ -2115,153 +3338,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to delete scope",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/management/tenants/{tenant_id}/clients": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lists all OAuth2/OIDC clients for a specific tenant. Secrets are masked.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "OAuth2 Clients"
-                ],
-                "summary": "List OIDC Clients By Tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenant_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.OAuth2Client"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "tenant_id is required",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to retrieve clients for tenant",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/management/tenants/{tenant_id}/oidc-connections": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lists all federated OIDC Identity Providers for a specific tenant.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "OIDC Connections"
-                ],
-                "summary": "List OIDC Connections By Tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenant_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.OIDCConnection"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "tenant_id is required",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to retrieve OIDC connections for tenant",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/management/tenants/{tenant_id}/saml-connections": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lists all federated SAML Identity Providers for a specific tenant.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "SAML Connections"
-                ],
-                "summary": "List SAML Connections By Tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenant_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.SAMLConnection"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "tenant_id is required",
-                        "schema": {
-                            "$ref": "#/definitions/payload.AppError"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to retrieve SAML connections for tenant",
                         "schema": {
                             "$ref": "#/definitions/payload.AppError"
                         }
@@ -2726,6 +3802,90 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Tenant not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/t/{tenant_id}/ldap/login/{connection_id}": {
+            "post": {
+                "description": "Authenticates a user against an LDAP/Active-Directory Identity Provider and completes the login challenge.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "LDAP Federation"
+                ],
+                "summary": "LDAP Username/Password Login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "LDAP Connection ID",
+                        "name": "connection_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Login credentials and challenge",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ldapLoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirects back to the relying party with a login_verifier",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid credentials or user not found)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Login request not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4104,11 +5264,35 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ldapLoginRequest": {
+            "type": "object",
+            "required": [
+                "login_challenge",
+                "password",
+                "username"
+            ],
+            "properties": {
+                "login_challenge": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "model.AttributeMappingRule": {
             "type": "object",
             "properties": {
                 "fallback": {
                     "type": "string"
+                },
+                "name_format": {
+                    "description": "NameFormat overrides the SAML attribute NameFormat for the emitted\nattribute. Empty means \"unset\": the emission site derives it from the\noutput attribute name. Validated against the SAML 2.0 attrname-format set.",
+                    "type": "string",
+                    "example": "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
                 },
                 "source": {
                     "type": "string"
@@ -4126,6 +5310,243 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.AuthActivity": {
+            "type": "object",
+            "properties": {
+                "generated_at": {
+                    "type": "string"
+                },
+                "protocols": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/model.AuthActivityOutcome"
+                    }
+                },
+                "range": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/model.AuthActivityOutcome"
+                }
+            }
+        },
+        "model.AuthActivityOutcome": {
+            "type": "object",
+            "properties": {
+                "failure": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.AuthFailureReason": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.AuthFailureTotals": {
+            "type": "object",
+            "properties": {
+                "failure": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.AuthFailures": {
+            "type": "object",
+            "properties": {
+                "generated_at": {
+                    "type": "string"
+                },
+                "protocols": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/model.AuthProtocolFailures"
+                    }
+                },
+                "range": {
+                    "type": "string"
+                },
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.AuthFailureReason"
+                    }
+                },
+                "totals": {
+                    "$ref": "#/definitions/model.AuthFailureTotals"
+                }
+            }
+        },
+        "model.AuthProtocolFailures": {
+            "type": "object",
+            "properties": {
+                "failure": {
+                    "type": "integer"
+                },
+                "top_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BrandingBorders": {
+            "type": "object",
+            "properties": {
+                "radius": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.BrandingColors": {
+            "type": "object",
+            "properties": {
+                "background": {
+                    "type": "string"
+                },
+                "border": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "string"
+                },
+                "secondary": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "string"
+                },
+                "surface": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "textSecondary": {
+                    "type": "string"
+                },
+                "warning": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BrandingConfig": {
+            "type": "object",
+            "properties": {
+                "borders": {
+                    "$ref": "#/definitions/model.BrandingBorders"
+                },
+                "colors": {
+                    "$ref": "#/definitions/model.BrandingColors"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "fonts": {
+                    "$ref": "#/definitions/model.BrandingFonts"
+                },
+                "page_background": {
+                    "$ref": "#/definitions/model.BrandingPageBackground"
+                },
+                "themeId": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "widget": {
+                    "$ref": "#/definitions/model.BrandingWidget"
+                }
+            }
+        },
+        "model.BrandingFonts": {
+            "type": "object",
+            "properties": {
+                "family": {
+                    "type": "string"
+                },
+                "sizeBase": {
+                    "type": "integer"
+                },
+                "weightBold": {
+                    "type": "integer"
+                },
+                "weightNormal": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.BrandingPageBackground": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "description": "\"color\" | \"image\"",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "hex color or absolute https URL",
+                    "type": "string"
+                }
+            }
+        },
+        "model.BrandingWidget": {
+            "type": "object",
+            "properties": {
+                "faviconUrl": {
+                    "type": "string"
+                },
+                "loginSubtitle": {
+                    "type": "string"
+                },
+                "loginTitle": {
+                    "type": "string"
+                },
+                "logoUrl": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.HealthChecks": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string"
+                },
+                "migrations": {
+                    "type": "string"
+                },
+                "signing_keys": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.HealthSummary": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "$ref": "#/definitions/model.HealthChecks"
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }
@@ -4258,9 +5679,6 @@ const docTemplate = `{
                 "client_id": {
                     "type": "string"
                 },
-                "client_secret": {
-                    "type": "string"
-                },
                 "created_at": {
                     "type": "string"
                 },
@@ -4296,6 +5714,51 @@ const docTemplate = `{
                 },
                 "userinfo_endpoint": {
                     "type": "string"
+                }
+            }
+        },
+        "model.ProtocolTransition": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.RoutingInsights": {
+            "type": "object",
+            "properties": {
+                "generated_at": {
+                    "type": "string"
+                },
+                "range": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/model.RoutingTotals"
+                },
+                "transitions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ProtocolTransition"
+                    }
+                }
+            }
+        },
+        "model.RoutingTotals": {
+            "type": "object",
+            "properties": {
+                "routed": {
+                    "type": "integer"
+                },
+                "same_protocol": {
+                    "type": "integer"
                 }
             }
         },
@@ -4339,6 +5802,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "name_id_format": {
                     "type": "string"
                 },
                 "sign_assertion": {
@@ -4403,11 +5869,11 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "name_id_format": {
+                    "type": "string"
+                },
                 "sign_request": {
                     "type": "boolean"
-                },
-                "sp_private_key": {
-                    "type": "string"
                 },
                 "tenant_id": {
                     "type": "string"
@@ -4599,6 +6065,103 @@ const docTemplate = `{
                 "user_message": {
                     "type": "string",
                     "example": "Invalid input provided"
+                }
+            }
+        },
+        "payload.BrandingResponse": {
+            "type": "object",
+            "properties": {
+                "draft": {
+                    "$ref": "#/definitions/model.BrandingConfig"
+                },
+                "hasUnpublishedChanges": {
+                    "type": "boolean"
+                },
+                "published": {
+                    "$ref": "#/definitions/model.BrandingConfig"
+                },
+                "publishedAt": {
+                    "type": "string"
+                },
+                "tenantId": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "payload.CreateLDAPConnectionRequest": {
+            "type": "object",
+            "required": [
+                "base_dn",
+                "name",
+                "server_url",
+                "tenant_id"
+            ],
+            "properties": {
+                "attribute_mapping": {
+                    "type": "object"
+                },
+                "base_dn": {
+                    "type": "string",
+                    "example": "dc=corp,dc=example,dc=com"
+                },
+                "bind_dn": {
+                    "type": "string",
+                    "example": "cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com"
+                },
+                "bind_password": {
+                    "description": "write-only; never in response",
+                    "type": "string",
+                    "example": "s3cr3t"
+                },
+                "group_search_base_dn": {
+                    "type": "string",
+                    "example": "ou=Groups,dc=corp,dc=example,dc=com"
+                },
+                "group_search_filter": {
+                    "type": "string",
+                    "example": "(member={0})"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "conn_ldap_123"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Corporate AD"
+                },
+                "server_url": {
+                    "type": "string",
+                    "example": "ldaps://ldap.corp.example.com:636"
+                },
+                "start_tls": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "tenant_id": {
+                    "type": "string",
+                    "example": "tnt_alpha01"
+                },
+                "tls_insecure_skip_verify": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "user_search_attributes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "cn",
+                        "mail",
+                        "memberOf"
+                    ]
+                },
+                "user_search_filter": {
+                    "type": "string",
+                    "example": "(sAMAccountName={0})"
                 }
             }
         },
@@ -4922,6 +6485,41 @@ const docTemplate = `{
                 }
             }
         },
+        "payload.CreatePasswordLoginAssignmentRequest": {
+            "type": "object",
+            "required": [
+                "password_login_endpoint_id"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "password_login_endpoint_id": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "payload.CreatePasswordLoginEndpointRequest": {
+            "type": "object",
+            "required": [
+                "login_url",
+                "name"
+            ],
+            "properties": {
+                "is_active": {
+                    "type": "boolean"
+                },
+                "login_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "payload.CreateSAMLClientRequest": {
             "type": "object",
             "properties": {
@@ -4962,6 +6560,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "Acme Corp Finance App"
+                },
+                "name_id_format": {
+                    "type": "string",
+                    "example": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
                 },
                 "sign_assertion": {
                     "type": "boolean",
@@ -5038,6 +6640,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Corporate Okta SSO"
                 },
+                "name_id_format": {
+                    "type": "string",
+                    "example": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+                },
                 "sign_request": {
                     "type": "boolean",
                     "example": true
@@ -5086,6 +6692,70 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "example": "Must be a valid UUID."
+                }
+            }
+        },
+        "payload.LDAPConnectionResponse": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "attribute_mapping": {
+                    "type": "object"
+                },
+                "base_dn": {
+                    "type": "string",
+                    "example": "dc=corp,dc=example,dc=com"
+                },
+                "bind_dn": {
+                    "type": "string",
+                    "example": "cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-03-14T12:00:00Z"
+                },
+                "group_search_base_dn": {
+                    "type": "string"
+                },
+                "group_search_filter": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "conn_ldap_123"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Corporate AD"
+                },
+                "server_url": {
+                    "type": "string",
+                    "example": "ldaps://ldap.corp.example.com:636"
+                },
+                "start_tls": {
+                    "type": "boolean"
+                },
+                "tenant_id": {
+                    "type": "string",
+                    "example": "tnt_alpha01"
+                },
+                "tls_insecure_skip_verify": {
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_search_attributes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "user_search_filter": {
+                    "type": "string"
                 }
             }
         },
@@ -5194,6 +6864,52 @@ const docTemplate = `{
                 }
             }
         },
+        "payload.PasswordLoginAssignmentResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "password_login_endpoint_id": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "payload.PasswordLoginEndpointResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "login_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "payload.RejectRequestPayload": {
             "type": "object",
             "required": [
@@ -5207,6 +6923,21 @@ const docTemplate = `{
                 "error_description": {
                     "type": "string",
                     "example": "The resource owner or authorization server denied the request."
+                }
+            }
+        },
+        "payload.ResetBrandingRequest": {
+            "type": "object",
+            "required": [
+                "target"
+            ],
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "draft_and_published"
+                    ]
                 }
             }
         },
@@ -5232,6 +6963,14 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "alpha-production"
+                }
+            }
+        },
+        "payload.UpdateBrandingDraftRequest": {
+            "type": "object",
+            "properties": {
+                "theme": {
+                    "$ref": "#/definitions/model.BrandingConfig"
                 }
             }
         },
@@ -5324,6 +7063,38 @@ const docTemplate = `{
                 "require_dns_resolve": {
                     "type": "boolean",
                     "example": true
+                }
+            }
+        },
+        "payload.UpdatePasswordLoginAssignmentRequest": {
+            "type": "object",
+            "required": [
+                "password_login_endpoint_id"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "password_login_endpoint_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "payload.UpdatePasswordLoginEndpointRequest": {
+            "type": "object",
+            "required": [
+                "login_url",
+                "name"
+            ],
+            "properties": {
+                "is_active": {
+                    "type": "boolean"
+                },
+                "login_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         }

@@ -19,9 +19,29 @@ definitions:
     - tenant_ids
     - url
     type: object
+  handlers.ldapLoginRequest:
+    properties:
+      login_challenge:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - login_challenge
+    - password
+    - username
+    type: object
   model.AttributeMappingRule:
     properties:
       fallback:
+        type: string
+      name_format:
+        description: |-
+          NameFormat overrides the SAML attribute NameFormat for the emitted
+          attribute. Empty means "unset": the emission site derives it from the
+          output attribute name. Validated against the SAML 2.0 attrname-format set.
+        example: urn:oasis:names:tc:SAML:2.0:attrname-format:uri
         type: string
       source:
         type: string
@@ -34,6 +54,160 @@ definitions:
       type:
         type: string
       value:
+        type: string
+    type: object
+  model.AuthActivity:
+    properties:
+      generated_at:
+        type: string
+      protocols:
+        additionalProperties:
+          $ref: '#/definitions/model.AuthActivityOutcome'
+        type: object
+      range:
+        type: string
+      totals:
+        $ref: '#/definitions/model.AuthActivityOutcome'
+    type: object
+  model.AuthActivityOutcome:
+    properties:
+      failure:
+        type: integer
+      success:
+        type: integer
+    type: object
+  model.AuthFailureReason:
+    properties:
+      count:
+        type: integer
+      key:
+        type: string
+    type: object
+  model.AuthFailureTotals:
+    properties:
+      failure:
+        type: integer
+    type: object
+  model.AuthFailures:
+    properties:
+      generated_at:
+        type: string
+      protocols:
+        additionalProperties:
+          $ref: '#/definitions/model.AuthProtocolFailures'
+        type: object
+      range:
+        type: string
+      reasons:
+        items:
+          $ref: '#/definitions/model.AuthFailureReason'
+        type: array
+      totals:
+        $ref: '#/definitions/model.AuthFailureTotals'
+    type: object
+  model.AuthProtocolFailures:
+    properties:
+      failure:
+        type: integer
+      top_reason:
+        type: string
+    type: object
+  model.BrandingBorders:
+    properties:
+      radius:
+        type: integer
+      width:
+        type: integer
+    type: object
+  model.BrandingColors:
+    properties:
+      background:
+        type: string
+      border:
+        type: string
+      error:
+        type: string
+      primary:
+        type: string
+      secondary:
+        type: string
+      success:
+        type: string
+      surface:
+        type: string
+      text:
+        type: string
+      textSecondary:
+        type: string
+      warning:
+        type: string
+    type: object
+  model.BrandingConfig:
+    properties:
+      borders:
+        $ref: '#/definitions/model.BrandingBorders'
+      colors:
+        $ref: '#/definitions/model.BrandingColors'
+      displayName:
+        type: string
+      fonts:
+        $ref: '#/definitions/model.BrandingFonts'
+      page_background:
+        $ref: '#/definitions/model.BrandingPageBackground'
+      themeId:
+        type: string
+      version:
+        type: integer
+      widget:
+        $ref: '#/definitions/model.BrandingWidget'
+    type: object
+  model.BrandingFonts:
+    properties:
+      family:
+        type: string
+      sizeBase:
+        type: integer
+      weightBold:
+        type: integer
+      weightNormal:
+        type: integer
+    type: object
+  model.BrandingPageBackground:
+    properties:
+      type:
+        description: '"color" | "image"'
+        type: string
+      value:
+        description: hex color or absolute https URL
+        type: string
+    type: object
+  model.BrandingWidget:
+    properties:
+      faviconUrl:
+        type: string
+      loginSubtitle:
+        type: string
+      loginTitle:
+        type: string
+      logoUrl:
+        type: string
+    type: object
+  model.HealthChecks:
+    properties:
+      database:
+        type: string
+      migrations:
+        type: string
+      signing_keys:
+        type: string
+    type: object
+  model.HealthSummary:
+    properties:
+      checks:
+        $ref: '#/definitions/model.HealthChecks'
+      generated_at:
+        type: string
+      status:
         type: string
     type: object
   model.OAuth2Client:
@@ -121,8 +295,6 @@ definitions:
         type: string
       client_id:
         type: string
-      client_secret:
-        type: string
       created_at:
         type: string
       end_session_endpoint:
@@ -147,6 +319,35 @@ definitions:
         type: string
       userinfo_endpoint:
         type: string
+    type: object
+  model.ProtocolTransition:
+    properties:
+      count:
+        type: integer
+      from:
+        type: string
+      to:
+        type: string
+    type: object
+  model.RoutingInsights:
+    properties:
+      generated_at:
+        type: string
+      range:
+        type: string
+      totals:
+        $ref: '#/definitions/model.RoutingTotals'
+      transitions:
+        items:
+          $ref: '#/definitions/model.ProtocolTransition'
+        type: array
+    type: object
+  model.RoutingTotals:
+    properties:
+      routed:
+        type: integer
+      same_protocol:
+        type: integer
     type: object
   model.SAMLClient:
     properties:
@@ -175,6 +376,8 @@ definitions:
       metadata_url:
         type: string
       name:
+        type: string
+      name_id_format:
         type: string
       sign_assertion:
         type: boolean
@@ -217,10 +420,10 @@ definitions:
         type: string
       name:
         type: string
+      name_id_format:
+        type: string
       sign_request:
         type: boolean
-      sp_private_key:
-        type: string
       tenant_id:
         type: string
       updated_at:
@@ -350,6 +553,76 @@ definitions:
       user_message:
         example: Invalid input provided
         type: string
+    type: object
+  payload.BrandingResponse:
+    properties:
+      draft:
+        $ref: '#/definitions/model.BrandingConfig'
+      hasUnpublishedChanges:
+        type: boolean
+      published:
+        $ref: '#/definitions/model.BrandingConfig'
+      publishedAt:
+        type: string
+      tenantId:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  payload.CreateLDAPConnectionRequest:
+    properties:
+      attribute_mapping:
+        type: object
+      base_dn:
+        example: dc=corp,dc=example,dc=com
+        type: string
+      bind_dn:
+        example: cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com
+        type: string
+      bind_password:
+        description: write-only; never in response
+        example: s3cr3t
+        type: string
+      group_search_base_dn:
+        example: ou=Groups,dc=corp,dc=example,dc=com
+        type: string
+      group_search_filter:
+        example: (member={0})
+        type: string
+      id:
+        example: conn_ldap_123
+        type: string
+      name:
+        example: Corporate AD
+        type: string
+      server_url:
+        example: ldaps://ldap.corp.example.com:636
+        type: string
+      start_tls:
+        example: false
+        type: boolean
+      tenant_id:
+        example: tnt_alpha01
+        type: string
+      tls_insecure_skip_verify:
+        example: false
+        type: boolean
+      user_search_attributes:
+        example:
+        - cn
+        - mail
+        - memberOf
+        items:
+          type: string
+        type: array
+      user_search_filter:
+        example: (sAMAccountName={0})
+        type: string
+    required:
+    - base_dn
+    - name
+    - server_url
+    - tenant_id
     type: object
   payload.CreateOAuth2ClientRequest:
     properties:
@@ -583,6 +856,29 @@ definitions:
     - name
     - target
     type: object
+  payload.CreatePasswordLoginAssignmentRequest:
+    properties:
+      enabled:
+        type: boolean
+      password_login_endpoint_id:
+        type: string
+      tenant_id:
+        type: string
+    required:
+    - password_login_endpoint_id
+    type: object
+  payload.CreatePasswordLoginEndpointRequest:
+    properties:
+      is_active:
+        type: boolean
+      login_url:
+        type: string
+      name:
+        type: string
+    required:
+    - login_url
+    - name
+    type: object
   payload.CreateSAMLClientRequest:
     properties:
       acs_url:
@@ -612,6 +908,9 @@ definitions:
         type: string
       name:
         example: Acme Corp Finance App
+        type: string
+      name_id_format:
+        example: urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
         type: string
       sign_assertion:
         example: true
@@ -665,6 +964,9 @@ definitions:
       name:
         example: Corporate Okta SSO
         type: string
+      name_id_format:
+        example: urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+        type: string
       sign_request:
         example: true
         type: boolean
@@ -705,6 +1007,51 @@ definitions:
         type: string
       message:
         example: Must be a valid UUID.
+        type: string
+    type: object
+  payload.LDAPConnectionResponse:
+    properties:
+      active:
+        example: true
+        type: boolean
+      attribute_mapping:
+        type: object
+      base_dn:
+        example: dc=corp,dc=example,dc=com
+        type: string
+      bind_dn:
+        example: cn=svc-shyntr,ou=ServiceAccounts,dc=corp,dc=example,dc=com
+        type: string
+      created_at:
+        example: "2026-03-14T12:00:00Z"
+        type: string
+      group_search_base_dn:
+        type: string
+      group_search_filter:
+        type: string
+      id:
+        example: conn_ldap_123
+        type: string
+      name:
+        example: Corporate AD
+        type: string
+      server_url:
+        example: ldaps://ldap.corp.example.com:636
+        type: string
+      start_tls:
+        type: boolean
+      tenant_id:
+        example: tnt_alpha01
+        type: string
+      tls_insecure_skip_verify:
+        type: boolean
+      updated_at:
+        type: string
+      user_search_attributes:
+        items:
+          type: string
+        type: array
+      user_search_filter:
         type: string
     type: object
   payload.OutboundPolicyResponse:
@@ -782,6 +1129,36 @@ definitions:
         example: "2026-01-01T12:00:00Z"
         type: string
     type: object
+  payload.PasswordLoginAssignmentResponse:
+    properties:
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      password_login_endpoint_id:
+        type: string
+      tenant_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  payload.PasswordLoginEndpointResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      login_url:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
   payload.RejectRequestPayload:
     properties:
       error:
@@ -792,6 +1169,16 @@ definitions:
         type: string
     required:
     - error
+    type: object
+  payload.ResetBrandingRequest:
+    properties:
+      target:
+        enum:
+        - draft
+        - draft_and_published
+        type: string
+    required:
+    - target
     type: object
   payload.TenantResponse:
     properties:
@@ -810,6 +1197,11 @@ definitions:
       name:
         example: alpha-production
         type: string
+    type: object
+  payload.UpdateBrandingDraftRequest:
+    properties:
+      theme:
+        $ref: '#/definitions/model.BrandingConfig'
     type: object
   payload.UpdateOutboundPolicyRequest:
     properties:
@@ -875,6 +1267,27 @@ definitions:
         example: true
         type: boolean
     required:
+    - name
+    type: object
+  payload.UpdatePasswordLoginAssignmentRequest:
+    properties:
+      enabled:
+        type: boolean
+      password_login_endpoint_id:
+        type: string
+    required:
+    - password_login_endpoint_id
+    type: object
+  payload.UpdatePasswordLoginEndpointRequest:
+    properties:
+      is_active:
+        type: boolean
+      login_url:
+        type: string
+      name:
+        type: string
+    required:
+    - login_url
     - name
     type: object
 info:
@@ -1188,31 +1601,6 @@ paths:
       tags:
       - OAuth2 Clients
   /admin/management/clients/{id}:
-    get:
-      description: Retrieves details of a specific OAuth2/OIDC client. Secrets are
-        masked.
-      parameters:
-      - description: Client ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.OAuth2Client'
-        "404":
-          description: OIDC Client not found
-          schema:
-            $ref: '#/definitions/payload.AppError'
-      security:
-      - BearerAuth: []
-      summary: Get OIDC Client
-      tags:
-      - OAuth2 Clients
     put:
       consumes:
       - application/json
@@ -1284,6 +1672,115 @@ paths:
       summary: DeleteByClient OIDC Client
       tags:
       - OAuth2 Clients
+    get:
+      description: Retrieves details of a specific OAuth2/OIDC client. Secrets are
+        masked.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Client ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.OAuth2Client'
+        "404":
+          description: OIDC Client not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get OIDC Client
+      tags:
+      - OAuth2 Clients
+  /admin/management/dashboard/auth-activity:
+    get:
+      description: Retrieves real-time authentication success and failure counts by
+        protocol for a given time range across all tenants.
+      parameters:
+      - description: Time range (1h, 24h, 7d)
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.AuthActivity'
+      security:
+      - BearerAuth: []
+      summary: Get Authentication Activity
+      tags:
+      - Dashboard
+  /admin/management/dashboard/auth-failures:
+    get:
+      description: Retrieves failure intelligence and breakdown by reason and protocol
+        across all tenants.
+      parameters:
+      - description: Time range (1h, 24h, 7d)
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.AuthFailures'
+      security:
+      - BearerAuth: []
+      summary: Get Authentication Failures
+      tags:
+      - Dashboard
+  /admin/management/dashboard/health-summary:
+    get:
+      description: Retrieves a high-level health summary of critical system components
+        (database, keys, migrations).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.HealthSummary'
+      security:
+      - BearerAuth: []
+      summary: Get Dashboard Health Summary
+      tags:
+      - Dashboard
+  /admin/management/dashboard/routing-insights:
+    get:
+      description: Retrieves patterns of protocol transitions (e.g., OIDC -> SAML)
+        across all authentication flows.
+      parameters:
+      - description: Time range (1h, 24h, 7d)
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RoutingInsights'
+      security:
+      - BearerAuth: []
+      summary: Get Protocol Routing Insights
+      tags:
+      - Dashboard
   /admin/management/dashboard/stats:
     get:
       description: Retrieves global or tenant-specific usage statistics and active
@@ -1306,6 +1803,198 @@ paths:
       summary: Get Dashboard Statistics
       tags:
       - Dashboard
+  /admin/management/ldap-connections:
+    get:
+      description: Lists all federated LDAP Identity Providers.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.LDAPConnectionResponse'
+            type: array
+        "500":
+          description: Failed to retrieve LDAP connections
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List All LDAP Connections
+      tags:
+      - LDAP Connections
+    post:
+      consumes:
+      - application/json
+      description: Registers an external LDAP/Active-Directory Identity Provider for
+        federated authentication.
+      parameters:
+      - description: LDAP Connection Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateLDAPConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.LDAPConnectionResponse'
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to create LDAP connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Create LDAP Connection (IdP)
+      tags:
+      - LDAP Connections
+  /admin/management/ldap-connections/{tenant_id}/{id}:
+    delete:
+      description: Deletes a federated LDAP Identity Provider from a tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Failed to delete LDAP connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Delete LDAP Connection
+      tags:
+      - LDAP Connections
+    get:
+      description: Retrieves details of a specific LDAP Identity Provider. BindPassword
+        is never returned.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.LDAPConnectionResponse'
+        "404":
+          description: LDAP Connection not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get LDAP Connection
+      tags:
+      - LDAP Connections
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing LDAP Identity Provider. Pass empty string or
+        "*****" for bind_password to keep the existing value.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LDAP Connection Update Configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreateLDAPConnectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: updated'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "403":
+          description: Connection does not belong to this tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to update LDAP connection
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update LDAP Connection
+      tags:
+      - LDAP Connections
+  /admin/management/ldap-connections/{tenant_id}/{id}/test:
+    post:
+      description: Verifies connectivity and service-account bind credentials for
+        an LDAP connection.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: ok'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Connection test failed
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Test LDAP Connection
+      tags:
+      - LDAP Connections
   /admin/management/oidc-connections:
     get:
       description: Lists all federated OIDC Identity Providers.
@@ -1431,7 +2120,7 @@ paths:
       parameters:
       - description: Tenant ID
         in: path
-        name: tenant_id
+        name: id
         required: true
         type: string
       - description: Connection ID
@@ -1615,6 +2304,251 @@ paths:
       summary: Update outbound policy
       tags:
       - Outbound Policies
+  /admin/management/password-login/assignments:
+    get:
+      description: Lists all assignments. Optionally filter by tenant_id query parameter.
+      parameters:
+      - description: Filter by tenant ID
+        in: query
+        name: tenant_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.PasswordLoginAssignmentResponse'
+            type: array
+      summary: List password login assignments
+      tags:
+      - Password Login
+    post:
+      consumes:
+      - application/json
+      description: Assigns a password login endpoint to a tenant (or globally when
+        tenant_id is omitted/null).
+      parameters:
+      - description: Create request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreatePasswordLoginAssignmentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginAssignmentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create password login assignment
+      tags:
+      - Password Login
+  /admin/management/password-login/assignments/{id}:
+    delete:
+      parameters:
+      - description: Assignment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete password login assignment
+      tags:
+      - Password Login
+    get:
+      parameters:
+      - description: Assignment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginAssignmentResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get password login assignment
+      tags:
+      - Password Login
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Assignment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.UpdatePasswordLoginAssignmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginAssignmentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Update password login assignment
+      tags:
+      - Password Login
+  /admin/management/password-login/endpoints:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.PasswordLoginEndpointResponse'
+            type: array
+      summary: List password login endpoints
+      tags:
+      - Password Login
+    post:
+      consumes:
+      - application/json
+      description: Defines a new external password verifier endpoint that can be assigned
+        to tenants.
+      parameters:
+      - description: Create request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.CreatePasswordLoginEndpointRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginEndpointResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create password login endpoint
+      tags:
+      - Password Login
+  /admin/management/password-login/endpoints/{id}:
+    delete:
+      parameters:
+      - description: Endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete password login endpoint
+      tags:
+      - Password Login
+    get:
+      parameters:
+      - description: Endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginEndpointResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get password login endpoint
+      tags:
+      - Password Login
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.UpdatePasswordLoginEndpointRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.PasswordLoginEndpointResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Update password login endpoint
+      tags:
+      - Password Login
   /admin/management/saml-clients:
     get:
       description: Lists all SAML Service Providers globally across the hub.
@@ -1740,7 +2674,7 @@ paths:
       parameters:
       - description: Tenant ID
         in: path
-        name: tenant_id
+        name: id
         required: true
         type: string
       - description: Client ID
@@ -1762,37 +2696,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Get SAML Client
-      tags:
-      - SAML Clients
-  /admin/management/saml-clients/tenant/{tenant_id}:
-    get:
-      description: Lists all SAML Service Providers for a specific tenant.
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenant_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.SAMLClient'
-            type: array
-        "400":
-          description: tenant_id is required
-          schema:
-            $ref: '#/definitions/payload.AppError'
-        "500":
-          description: Failed to retrieve SAML clients for tenant
-          schema:
-            $ref: '#/definitions/payload.AppError'
-      security:
-      - BearerAuth: []
-      summary: List SAML Clients By Tenant
       tags:
       - SAML Clients
   /admin/management/saml-connections:
@@ -1919,7 +2822,7 @@ paths:
       parameters:
       - description: Tenant ID
         in: path
-        name: tenant_id
+        name: id
         required: true
         type: string
       - description: Connection ID
@@ -2089,6 +2992,314 @@ paths:
       summary: Update Tenant
       tags:
       - Tenants
+  /admin/management/tenants/{id}/branding:
+    get:
+      description: Returns the current draft and published branding config for a tenant.
+        Returns defaults when no branding has been configured.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.BrandingResponse'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Get Tenant Branding
+      tags:
+      - Branding
+  /admin/management/tenants/{id}/branding/discard:
+    post:
+      description: Resets the draft to the published state. If never published, resets
+        to defaults.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.BrandingResponse'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Discard Branding Draft
+      tags:
+      - Branding
+  /admin/management/tenants/{id}/branding/draft:
+    put:
+      consumes:
+      - application/json
+      description: Validates and saves a new branding draft for the tenant. Does not
+        affect the published state.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Branding config
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.UpdateBrandingDraftRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.BrandingResponse'
+        "400":
+          description: Validation failed
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Update Branding Draft
+      tags:
+      - Branding
+  /admin/management/tenants/{id}/branding/publish:
+    post:
+      description: Atomically copies the draft config into the published config.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.BrandingResponse'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Publish Branding Draft
+      tags:
+      - Branding
+  /admin/management/tenants/{id}/branding/reset:
+    post:
+      consumes:
+      - application/json
+      description: Resets draft (and optionally published) to system defaults.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Reset target
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/payload.ResetBrandingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payload.BrandingResponse'
+        "400":
+          description: Invalid target
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "404":
+          description: Tenant not found
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: Reset Branding
+      tags:
+      - Branding
+  /admin/management/tenants/{id}/clients:
+    get:
+      description: Lists all OAuth2/OIDC clients for a specific tenant. Secrets are
+        masked.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OAuth2Client'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve clients for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List OIDC Clients By Tenant
+      tags:
+      - OAuth2 Clients
+  /admin/management/tenants/{id}/ldap-connections:
+    get:
+      description: Lists all federated LDAP Identity Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/payload.LDAPConnectionResponse'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve LDAP connections for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List LDAP Connections By Tenant
+      tags:
+      - LDAP Connections
+  /admin/management/tenants/{id}/oidc-connections:
+    get:
+      description: Lists all federated OIDC Identity Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.OIDCConnection'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve OIDC connections for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List OIDC Connections By Tenant
+      tags:
+      - OIDC Connections
+  /admin/management/tenants/{id}/saml-clients:
+    get:
+      description: Lists all SAML Service Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLClient'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve SAML clients for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List SAML Clients By Tenant
+      tags:
+      - SAML Clients
+  /admin/management/tenants/{id}/saml-connections:
+    get:
+      description: Lists all federated SAML Identity Providers for a specific tenant.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SAMLConnection'
+            type: array
+        "400":
+          description: tenant_id is required
+          schema:
+            $ref: '#/definitions/payload.AppError'
+        "500":
+          description: Failed to retrieve SAML connections for tenant
+          schema:
+            $ref: '#/definitions/payload.AppError'
+      security:
+      - BearerAuth: []
+      summary: List SAML Connections By Tenant
+      tags:
+      - SAML Connections
   /admin/management/tenants/{id}/scopes:
     get:
       description: Retrieves all authorization scopes associated with a specific tenant.
@@ -2253,100 +3464,6 @@ paths:
       summary: Update Scope
       tags:
       - Scopes
-  /admin/management/tenants/{tenant_id}/clients:
-    get:
-      description: Lists all OAuth2/OIDC clients for a specific tenant. Secrets are
-        masked.
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenant_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.OAuth2Client'
-            type: array
-        "400":
-          description: tenant_id is required
-          schema:
-            $ref: '#/definitions/payload.AppError'
-        "500":
-          description: Failed to retrieve clients for tenant
-          schema:
-            $ref: '#/definitions/payload.AppError'
-      security:
-      - BearerAuth: []
-      summary: List OIDC Clients By Tenant
-      tags:
-      - OAuth2 Clients
-  /admin/management/tenants/{tenant_id}/oidc-connections:
-    get:
-      description: Lists all federated OIDC Identity Providers for a specific tenant.
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenant_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.OIDCConnection'
-            type: array
-        "400":
-          description: tenant_id is required
-          schema:
-            $ref: '#/definitions/payload.AppError'
-        "500":
-          description: Failed to retrieve OIDC connections for tenant
-          schema:
-            $ref: '#/definitions/payload.AppError'
-      security:
-      - BearerAuth: []
-      summary: List OIDC Connections By Tenant
-      tags:
-      - OIDC Connections
-  /admin/management/tenants/{tenant_id}/saml-connections:
-    get:
-      description: Lists all federated SAML Identity Providers for a specific tenant.
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenant_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.SAMLConnection'
-            type: array
-        "400":
-          description: tenant_id is required
-          schema:
-            $ref: '#/definitions/payload.AppError'
-        "500":
-          description: Failed to retrieve SAML connections for tenant
-          schema:
-            $ref: '#/definitions/payload.AppError'
-      security:
-      - BearerAuth: []
-      summary: List SAML Connections By Tenant
-      tags:
-      - SAML Connections
   /audit/{tenant_id}:
     get:
       description: Retrieves paginated audit logs for a specific tenant.
@@ -2675,6 +3792,63 @@ paths:
       summary: OpenID Connect Discovery Endpoint
       tags:
       - OAuth2/OIDC Core
+  /t/{tenant_id}/ldap/login/{connection_id}:
+    post:
+      consumes:
+      - application/json
+      description: Authenticates a user against an LDAP/Active-Directory Identity
+        Provider and completes the login challenge.
+      parameters:
+      - description: Tenant ID
+        in: path
+        name: tenant_id
+        required: true
+        type: string
+      - description: LDAP Connection ID
+        in: path
+        name: connection_id
+        required: true
+        type: string
+      - description: Login credentials and challenge
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ldapLoginRequest'
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirects back to the relying party with a login_verifier
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized (invalid credentials or user not found)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Login request not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: LDAP Username/Password Login
+      tags:
+      - LDAP Federation
   /t/{tenant_id}/oauth2/auth:
     get:
       description: Handles the initial step of the OAuth 2.1 authorization code flow.
