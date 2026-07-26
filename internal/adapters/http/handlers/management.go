@@ -389,6 +389,8 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		SubjectType:             req.SubjectType,
 		JSONWebKeys:             req.JWKS,
 		AttributeMapping:        req.AttributeMapping,
+		AttributePassthrough:    req.AttributePassthrough,
+		AttributeExclude:        req.AttributeExclude,
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
@@ -525,6 +527,8 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
 		AttributeMapping:        req.AttributeMapping,
+		AttributePassthrough:    req.AttributePassthrough,
+		AttributeExclude:        req.AttributeExclude,
 	}
 
 	// Secret handling (Keep existing if not changed)
@@ -669,6 +673,8 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		SPEncryptionCertificate: client.SPEncryptionCertificate,
 		MetadataURL:             client.MetadataURL,
 		AttributeMapping:        client.AttributeMapping,
+		AttributePassthrough:    client.AttributePassthrough,
+		AttributeExclude:        client.AttributeExclude,
 		NameIDFormat:            client.NameIDFormat,
 		ForceAuthn:              client.ForceAuthn,
 		SignResponse:            client.SignResponse,
@@ -719,6 +725,8 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.ACSURL = req.ACSURL
 	client.SPCertificate = req.SPCertificate
 	client.AttributeMapping = req.AttributeMapping
+	client.AttributePassthrough = req.AttributePassthrough
+	client.AttributeExclude = req.AttributeExclude
 	client.NameIDFormat = req.NameIDFormat
 	client.ForceAuthn = req.ForceAuthn
 	client.SignResponse = req.SignResponse
@@ -866,6 +874,8 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		MetadataURL:              conn.MetadataURL,
 		SPPrivateKey:             conn.SPPrivateKey,
 		AttributeMapping:         conn.AttributeMapping,
+		AttributePassthrough:     conn.AttributePassthrough,
+		AttributeExclude:         conn.AttributeExclude,
 		NameIDFormat:             conn.NameIDFormat,
 		ForceAuthn:               conn.ForceAuthn,
 		SignRequest:              conn.SignRequest,
@@ -996,6 +1006,8 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		MetadataURL:              req.MetadataURL,
 		SPPrivateKey:             req.SPPrivateKey,
 		AttributeMapping:         req.AttributeMapping,
+		AttributePassthrough:     req.AttributePassthrough,
+		AttributeExclude:         req.AttributeExclude,
 		NameIDFormat:             req.NameIDFormat,
 		ForceAuthn:               req.ForceAuthn,
 		SignRequest:              req.SignRequest,
@@ -1075,6 +1087,8 @@ func (h *ManagementHandler) CreateOIDCConnection(c *gin.Context) {
 		EndSessionEndpoint:    conn.EndSessionEndpoint,
 		Scopes:                conn.Scopes,
 		AttributeMapping:      conn.AttributeMapping,
+		AttributePassthrough:  conn.AttributePassthrough,
+		AttributeExclude:      conn.AttributeExclude,
 		Active:                true,
 	}
 
@@ -1203,6 +1217,8 @@ func (h *ManagementHandler) UpdateOIDCConnection(c *gin.Context) {
 		EndSessionEndpoint:    req.EndSessionEndpoint,
 		Scopes:                req.Scopes,
 		AttributeMapping:      req.AttributeMapping,
+		AttributePassthrough:  req.AttributePassthrough,
+		AttributeExclude:      req.AttributeExclude,
 	}
 
 	err = h.OIDCConnUse.UpdateConnection(c.Request.Context(), &updateData, c.ClientIP(), c.Request.UserAgent())
