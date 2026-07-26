@@ -17,6 +17,8 @@ type CreateOIDCConnectionRequest struct {
 	ClientSecret          string                                `json:"client_secret" example:"YOUR_SECURE_CLIENT_SECRET"`
 	Scopes                []string                              `json:"scopes" binding:"required" example:"openid,profile,email"`
 	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough  bool                                  `json:"attribute_passthrough"`
+	AttributeExclude      []string                              `json:"attribute_exclude"`
 	AuthorizationEndpoint string                                `json:"authorization_endpoint" example:"https://accounts.google.com/o/oauth2/v2/auth"`
 	EndSessionEndpoint    string                                `json:"end_session_endpoint" example:"https://oauth2.googleapis.com/revoke"`
 	TokenEndpoint         string                                `json:"token_endpoint" example:"https://oauth2.googleapis.com/token"`
@@ -33,6 +35,8 @@ type OIDCConnectionResponse struct {
 	ClientSecret          string                                `json:"client_secret" example:"*****"`
 	Scopes                []string                              `json:"scopes" example:"openid,profile,email"`
 	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough  bool                                  `json:"attribute_passthrough"`
+	AttributeExclude      []string                              `json:"attribute_exclude"`
 	AuthorizationEndpoint string                                `json:"authorization_endpoint"`
 	EndSessionEndpoint    string                                `json:"end_session_endpoint"`
 	TokenEndpoint         string                                `json:"token_endpoint"`
@@ -56,6 +60,8 @@ type CreateSAMLConnectionRequest struct {
 	IdpEncryptionCertificate string                                `json:"idp_encryption_certificate"`
 	SPPrivateKey             string                                `json:"sp_private_key" example:"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"`
 	AttributeMapping         map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough     bool                                  `json:"attribute_passthrough"`
+	AttributeExclude         []string                              `json:"attribute_exclude"`
 	NameIDFormat             string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	ForceAuthn               bool                                  `json:"force_authn" example:"false"`
 	SignRequest              bool                                  `json:"sign_request" example:"true"`
@@ -74,6 +80,8 @@ type SAMLConnectionResponse struct {
 	IdpEncryptionCertificate string                                `json:"idp_encryption_certificate"`
 	SPPrivateKey             string                                `json:"sp_private_key" example:"*****"`
 	AttributeMapping         map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough     bool                                  `json:"attribute_passthrough"`
+	AttributeExclude         []string                              `json:"attribute_exclude"`
 	NameIDFormat             string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	ForceAuthn               bool                                  `json:"force_authn" example:"false"`
 	SignRequest              bool                                  `json:"sign_request" example:"true"`
@@ -92,6 +100,8 @@ func (req *CreateOIDCConnectionRequest) ToDomain() *model.OIDCConnection {
 		ClientSecret:          req.ClientSecret,
 		Scopes:                req.Scopes,
 		AttributeMapping:      req.AttributeMapping,
+		AttributePassthrough:  req.AttributePassthrough,
+		AttributeExclude:      req.AttributeExclude,
 		AuthorizationEndpoint: normalizeURL(req.AuthorizationEndpoint),
 		EndSessionEndpoint:    normalizeURL(req.EndSessionEndpoint),
 		TokenEndpoint:         normalizeURL(req.TokenEndpoint),
@@ -110,6 +120,8 @@ func FromDomainOIDCConnection(c *model.OIDCConnection) *OIDCConnectionResponse {
 		ClientSecret:          "*****",
 		Scopes:                c.Scopes,
 		AttributeMapping:      c.AttributeMapping,
+		AttributePassthrough:  c.AttributePassthrough,
+		AttributeExclude:      c.AttributeExclude,
 		AuthorizationEndpoint: c.AuthorizationEndpoint,
 		EndSessionEndpoint:    c.EndSessionEndpoint,
 		TokenEndpoint:         c.TokenEndpoint,
@@ -143,6 +155,8 @@ func (req *CreateSAMLConnectionRequest) ToDomain() *model.SAMLConnection {
 		IdpEncryptionCertificate: req.IdpEncryptionCertificate,
 		SPPrivateKey:             req.SPPrivateKey,
 		AttributeMapping:         req.AttributeMapping,
+		AttributePassthrough:     req.AttributePassthrough,
+		AttributeExclude:         req.AttributeExclude,
 		NameIDFormat:             req.NameIDFormat,
 		ForceAuthn:               req.ForceAuthn,
 		SignRequest:              req.SignRequest,
@@ -166,6 +180,8 @@ type CreateLDAPConnectionRequest struct {
 	GroupSearchFilter     string                                `json:"group_search_filter" example:"(member={0})"`
 	GroupSearchBaseDN     string                                `json:"group_search_base_dn" example:"ou=Groups,dc=corp,dc=example,dc=com"`
 	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough  bool                                  `json:"attribute_passthrough"`
+	AttributeExclude      []string                              `json:"attribute_exclude"`
 	StartTLS              bool                                  `json:"start_tls" example:"false"`
 	TLSInsecureSkipVerify bool                                  `json:"tls_insecure_skip_verify" example:"false"`
 }
@@ -184,6 +200,8 @@ type LDAPConnectionResponse struct {
 	GroupSearchFilter     string                                `json:"group_search_filter"`
 	GroupSearchBaseDN     string                                `json:"group_search_base_dn"`
 	AttributeMapping      map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough  bool                                  `json:"attribute_passthrough"`
+	AttributeExclude      []string                              `json:"attribute_exclude"`
 	StartTLS              bool                                  `json:"start_tls"`
 	TLSInsecureSkipVerify bool                                  `json:"tls_insecure_skip_verify"`
 	Active                bool                                  `json:"active" example:"true"`
@@ -205,6 +223,8 @@ func (req *CreateLDAPConnectionRequest) ToDomain() *model.LDAPConnection {
 		GroupSearchFilter:     req.GroupSearchFilter,
 		GroupSearchBaseDN:     req.GroupSearchBaseDN,
 		AttributeMapping:      req.AttributeMapping,
+		AttributePassthrough:  req.AttributePassthrough,
+		AttributeExclude:      req.AttributeExclude,
 		StartTLS:              req.StartTLS,
 		TLSInsecureSkipVerify: req.TLSInsecureSkipVerify,
 	}
@@ -223,6 +243,8 @@ func FromDomainLDAPConnection(c *model.LDAPConnection) *LDAPConnectionResponse {
 		GroupSearchFilter:     c.GroupSearchFilter,
 		GroupSearchBaseDN:     c.GroupSearchBaseDN,
 		AttributeMapping:      c.AttributeMapping,
+		AttributePassthrough:  c.AttributePassthrough,
+		AttributeExclude:      c.AttributeExclude,
 		StartTLS:              c.StartTLS,
 		TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
 		Active:                c.Active,
@@ -245,6 +267,8 @@ func FromDomainSAMLConnection(c *model.SAMLConnection) *SAMLConnectionResponse {
 		IdpEncryptionCertificate: c.IdpEncryptionCertificate,
 		SPPrivateKey:             "*****",
 		AttributeMapping:         c.AttributeMapping,
+		AttributePassthrough:     c.AttributePassthrough,
+		AttributeExclude:         c.AttributeExclude,
 		NameIDFormat:             c.NameIDFormat,
 		ForceAuthn:               c.ForceAuthn,
 		SignRequest:              c.SignRequest,

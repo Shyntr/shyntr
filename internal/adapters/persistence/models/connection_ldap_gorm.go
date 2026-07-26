@@ -26,6 +26,8 @@ type LDAPConnectionGORM struct {
 	GroupSearchFilter     string                                `gorm:"type:varchar(512)"`
 	GroupSearchBaseDN     string                                `gorm:"type:varchar(512)"`
 	AttributeMapping      map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AttributePassthrough  bool                                  `gorm:"default:false"`
+	AttributeExclude      []string                              `gorm:"serializer:json"`
 	StartTLS              bool                                  `gorm:"default:false"`
 	TLSInsecureSkipVerify bool                                  `gorm:"default:false"`
 	Active                bool                                  `gorm:"default:true"`
@@ -59,6 +61,8 @@ func (m *LDAPConnectionGORM) ToDomain() *model.LDAPConnection {
 		GroupSearchFilter:     m.GroupSearchFilter,
 		GroupSearchBaseDN:     m.GroupSearchBaseDN,
 		AttributeMapping:      m.AttributeMapping,
+		AttributePassthrough:  m.AttributePassthrough,
+		AttributeExclude:      m.AttributeExclude,
 		StartTLS:              m.StartTLS,
 		TLSInsecureSkipVerify: m.TLSInsecureSkipVerify,
 		Active:                m.Active,
@@ -83,6 +87,8 @@ func FromDomainLDAPConnection(e *model.LDAPConnection) *LDAPConnectionGORM {
 		GroupSearchFilter:     e.GroupSearchFilter,
 		GroupSearchBaseDN:     e.GroupSearchBaseDN,
 		AttributeMapping:      e.AttributeMapping,
+		AttributePassthrough:  e.AttributePassthrough,
+		AttributeExclude:      e.AttributeExclude,
 		StartTLS:              e.StartTLS,
 		TLSInsecureSkipVerify: e.TLSInsecureSkipVerify,
 		Active:                e.Active,

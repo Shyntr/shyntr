@@ -20,6 +20,8 @@ type SAMLClientGORM struct {
 	SPEncryptionCertificate string                                `gorm:"type:text"`
 	MetadataURL             string                                `gorm:"type:text"`
 	AttributeMapping        map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AttributePassthrough    bool                                  `gorm:"default:false"`
+	AttributeExclude        []string                              `gorm:"serializer:json"`
 	NameIDFormat            string                                `gorm:"type:text"`
 	AllowedScopes           pq.StringArray                        `gorm:"type:text[]"`
 	ForceAuthn              bool                                  `gorm:"default:false"`
@@ -53,6 +55,8 @@ func (m *SAMLClientGORM) ToDomain() *model.SAMLClient {
 		SPEncryptionCertificate: m.SPEncryptionCertificate,
 		MetadataURL:             m.MetadataURL,
 		AttributeMapping:        m.AttributeMapping,
+		AttributePassthrough:    m.AttributePassthrough,
+		AttributeExclude:        m.AttributeExclude,
 		NameIDFormat:            m.NameIDFormat,
 		AllowedScopes:           m.AllowedScopes,
 		ForceAuthn:              m.ForceAuthn,
@@ -77,6 +81,8 @@ func FromDomainSAMLClient(e *model.SAMLClient) *SAMLClientGORM {
 		SPEncryptionCertificate: e.SPEncryptionCertificate,
 		MetadataURL:             e.MetadataURL,
 		AttributeMapping:        e.AttributeMapping,
+		AttributePassthrough:    e.AttributePassthrough,
+		AttributeExclude:        e.AttributeExclude,
 		NameIDFormat:            e.NameIDFormat,
 		AllowedScopes:           e.AllowedScopes,
 		ForceAuthn:              e.ForceAuthn,

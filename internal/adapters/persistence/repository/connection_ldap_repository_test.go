@@ -402,3 +402,39 @@ func TestLDAPConnectionRepository_ListActiveByTenant_BrokenDB(t *testing.T) {
 	_, err = repo.ListActiveByTenant(context.Background(), "any-tenant")
 	assert.Error(t, err, "a broken DB must return an error")
 }
+
+func TestLDAPConnectionRepository_PassthroughAndExcludeRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := setupLDAPRepoTestDB(t)
+	repo := repository.NewLDAPConnectionRepository(db, testLDAPAppSecret)
+	ctx := context.Background()
+
+	conn := &model.LDAPConnection{
+		TenantID:             "tnt_ldap_pt",
+		Name:                 "Corporate AD",
+		ServerURL:            "ldaps://ldap.corp.example.com:636",
+		BaseDN:               "dc=corp,dc=example,dc=com",
+		Active:               true,
+		AttributePassthrough: true,
+		AttributeExclude:     []string{"userPassword", "objectSid"},
+	}
+
+	// Create round-trip: both new storage-only fields persist and read back.
+	require.NoError(t, repo.Create(ctx, conn))
+	require.NotEmpty(t, conn.ID)
+
+	fetched, err := repo.GetByTenantAndID(ctx, "tnt_ldap_pt", conn.ID)
+	require.NoError(t, err)
+	assert.True(t, fetched.AttributePassthrough, "attribute_passthrough must round-trip on create")
+	assert.Equal(t, []string{"userPassword", "objectSid"}, fetched.AttributeExclude, "attribute_exclude must round-trip on create")
+
+	// Update round-trip: the LDAP repo Update uses an explicit column map, so this
+	// proves the two fields were added there, mirroring attribute_mapping.
+	fetched.AttributeExclude = []string{"memberOf"}
+	require.NoError(t, repo.Update(ctx, fetched))
+
+	refetched, err := repo.GetByTenantAndID(ctx, "tnt_ldap_pt", conn.ID)
+	require.NoError(t, err)
+	assert.True(t, refetched.AttributePassthrough, "attribute_passthrough must round-trip on update")
+	assert.Equal(t, []string{"memberOf"}, refetched.AttributeExclude, "attribute_exclude must round-trip on update")
+}

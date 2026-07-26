@@ -21,6 +21,8 @@ type LDAPConnection struct {
 	GroupSearchFilter     string                          `json:"group_search_filter"`
 	GroupSearchBaseDN     string                          `json:"group_search_base_dn"`
 	AttributeMapping      map[string]AttributeMappingRule `json:"attribute_mapping"`
+	AttributePassthrough  bool                            `json:"attribute_passthrough"`
+	AttributeExclude      []string                        `json:"attribute_exclude"`
 	StartTLS              bool                            `json:"start_tls"`
 	TLSInsecureSkipVerify bool                            `json:"tls_insecure_skip_verify"`
 	Active                bool                            `json:"active"`

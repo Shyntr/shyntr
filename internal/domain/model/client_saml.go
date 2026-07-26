@@ -16,6 +16,8 @@ type SAMLClient struct {
 	SPEncryptionCertificate string                          `json:"-"`
 	MetadataURL             string                          `json:"metadata_url"`
 	AttributeMapping        map[string]AttributeMappingRule `json:"attribute_mapping"`
+	AttributePassthrough    bool                            `json:"attribute_passthrough"`
+	AttributeExclude        []string                        `json:"attribute_exclude"`
 	NameIDFormat            string                          `json:"name_id_format,omitempty"`
 	AllowedScopes           []string                        `json:"allowed_scopes"`
 	ForceAuthn              bool                            `json:"force_authn"`

@@ -35,6 +35,8 @@ type OAuth2Client struct {
 	IDTokenLifespan             string                          `json:"id_token_lifespan,omitempty"`
 	RefreshTokenLifespan        string                          `json:"refresh_token_lifespan,omitempty"`
 	AttributeMapping            map[string]AttributeMappingRule `json:"attribute_mapping"`
+	AttributePassthrough        bool                            `json:"attribute_passthrough"`
+	AttributeExclude            []string                        `json:"attribute_exclude"`
 	CreatedAt                   time.Time                       `json:"created_at"`
 	UpdatedAt                   time.Time                       `json:"updated_at,omitempty"`
 }

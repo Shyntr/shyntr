@@ -19,6 +19,8 @@ type OIDCConnection struct {
 	EndSessionEndpoint    string                          `json:"end_session_endpoint"`
 	Scopes                []string                        `json:"scopes"`
 	AttributeMapping      map[string]AttributeMappingRule `json:"attribute_mapping"`
+	AttributePassthrough  bool                            `json:"attribute_passthrough"`
+	AttributeExclude      []string                        `json:"attribute_exclude"`
 	Active                bool                            `json:"active"`
 	CreatedAt             time.Time                       `json:"created_at"`
 	UpdatedAt             time.Time                       `json:"updated_at,omitempty"`

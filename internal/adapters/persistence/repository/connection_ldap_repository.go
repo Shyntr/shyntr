@@ -124,6 +124,12 @@ func (r *ldapConnectionRepository) Update(ctx context.Context, conn *model.LDAPC
 	if err != nil {
 		return fmt.Errorf("ldap: failed to marshal attribute_mapping: %w", err)
 	}
+	// AttributeExclude likewise uses the JSON serializer and must be pre-encoded
+	// on the raw-map update path, mirroring attribute_mapping above.
+	attrExcludeJSON, err := json.Marshal(conn.AttributeExclude)
+	if err != nil {
+		return fmt.Errorf("ldap: failed to marshal attribute_exclude: %w", err)
+	}
 	updates := map[string]interface{}{
 		"name":                     conn.Name,
 		"server_url":               conn.ServerURL,
@@ -135,6 +141,8 @@ func (r *ldapConnectionRepository) Update(ctx context.Context, conn *model.LDAPC
 		"group_search_filter":      conn.GroupSearchFilter,
 		"group_search_base_dn":     conn.GroupSearchBaseDN,
 		"attribute_mapping":        string(attrMappingJSON),
+		"attribute_passthrough":    conn.AttributePassthrough,
+		"attribute_exclude":        string(attrExcludeJSON),
 		"start_tls":                conn.StartTLS,
 		"tls_insecure_skip_verify": conn.TLSInsecureSkipVerify,
 		"active":                   conn.Active,

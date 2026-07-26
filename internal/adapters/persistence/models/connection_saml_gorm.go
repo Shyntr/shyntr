@@ -22,6 +22,8 @@ type SAMLConnectionGORM struct {
 	IdpEncryptionCertificate string                                `gorm:"type:text"`
 	SPPrivateKey             string                                `gorm:"type:text"`
 	AttributeMapping         map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AttributePassthrough     bool                                  `gorm:"default:false"`
+	AttributeExclude         []string                              `gorm:"serializer:json"`
 	NameIDFormat             string                                `gorm:"type:text"`
 	ForceAuthn               bool                                  `gorm:"default:false"`
 	SignRequest              bool                                  `gorm:"default:false"`
@@ -56,6 +58,8 @@ func (m *SAMLConnectionGORM) ToDomain() *model.SAMLConnection {
 		IdpEncryptionCertificate: m.IdpEncryptionCertificate,
 		SPPrivateKey:             m.SPPrivateKey,
 		AttributeMapping:         m.AttributeMapping,
+		AttributePassthrough:     m.AttributePassthrough,
+		AttributeExclude:         m.AttributeExclude,
 		NameIDFormat:             m.NameIDFormat,
 		ForceAuthn:               m.ForceAuthn,
 		SignRequest:              m.SignRequest,
@@ -81,6 +85,8 @@ func FromDomainSAMLConnection(e *model.SAMLConnection) *SAMLConnectionGORM {
 		IdpEncryptionCertificate: e.IdpEncryptionCertificate,
 		SPPrivateKey:             e.SPPrivateKey,
 		AttributeMapping:         e.AttributeMapping,
+		AttributePassthrough:     e.AttributePassthrough,
+		AttributeExclude:         e.AttributeExclude,
 		NameIDFormat:             e.NameIDFormat,
 		ForceAuthn:               e.ForceAuthn,
 		SignRequest:              e.SignRequest,

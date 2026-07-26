@@ -28,6 +28,8 @@ type CreateOAuth2ClientRequest struct {
 	IDTokenEncryptedResponseAlg string                                `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
 	IDTokenEncryptedResponseEnc string                                `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
 	AttributeMapping            map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough        bool                                  `json:"attribute_passthrough"`
+	AttributeExclude            []string                              `json:"attribute_exclude"`
 }
 
 type OAuth2ClientResponse struct {
@@ -57,6 +59,8 @@ type OAuth2ClientResponse struct {
 	IDTokenEncryptedResponseAlg string                                `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
 	IDTokenEncryptedResponseEnc string                                `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
 	AttributeMapping            map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	AttributePassthrough        bool                                  `json:"attribute_passthrough"`
+	AttributeExclude            []string                              `json:"attribute_exclude"`
 	CreatedAt                   string                                `json:"created_at" example:"2026-03-12T15:04:05Z"`
 	UpdatedAt                   string                                `json:"updated_at,omitempty" example:"2026-03-12T15:04:05Z"`
 }
@@ -85,6 +89,8 @@ func (req *CreateOAuth2ClientRequest) ToDomain() *model.OAuth2Client {
 		IDTokenEncryptedResponseAlg: req.IDTokenEncryptedResponseAlg,
 		IDTokenEncryptedResponseEnc: req.IDTokenEncryptedResponseEnc,
 		AttributeMapping:            req.AttributeMapping,
+		AttributePassthrough:        req.AttributePassthrough,
+		AttributeExclude:            req.AttributeExclude,
 	}
 }
 
@@ -116,6 +122,8 @@ func FromDomainOAuth2Client(c *model.OAuth2Client) *OAuth2ClientResponse {
 		RefreshTokenLifespan:        c.RefreshTokenLifespan,
 		IDTokenLifespan:             c.IDTokenLifespan,
 		AttributeMapping:            c.AttributeMapping,
+		AttributePassthrough:        c.AttributePassthrough,
+		AttributeExclude:            c.AttributeExclude,
 		CreatedAt:                   c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:                   c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

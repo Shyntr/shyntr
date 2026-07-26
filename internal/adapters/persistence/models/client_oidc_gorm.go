@@ -66,6 +66,8 @@ type OAuth2ClientGORM struct {
 	IDTokenLifespan             string                                `gorm:"type:varchar(50);default:''"`
 	RefreshTokenLifespan        string                                `gorm:"type:varchar(50);default:''"`
 	AttributeMapping            map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AttributePassthrough        bool                                  `gorm:"default:false"`
+	AttributeExclude            []string                              `gorm:"serializer:json"`
 	CreatedAt                   time.Time                             `gorm:"autoCreateTime"`
 	UpdatedAt                   time.Time                             `gorm:"autoUpdateTime"`
 }
@@ -108,6 +110,8 @@ func (m *OAuth2ClientGORM) ToDomain() *model.OAuth2Client {
 		IDTokenLifespan:             m.IDTokenLifespan,
 		RefreshTokenLifespan:        m.RefreshTokenLifespan,
 		AttributeMapping:            m.AttributeMapping,
+		AttributePassthrough:        m.AttributePassthrough,
+		AttributeExclude:            m.AttributeExclude,
 		CreatedAt:                   m.CreatedAt,
 		UpdatedAt:                   m.UpdatedAt,
 	}
@@ -147,5 +151,7 @@ func FromDomainOAuth2Client(e *model.OAuth2Client) *OAuth2ClientGORM {
 		IDTokenLifespan:             e.IDTokenLifespan,
 		RefreshTokenLifespan:        e.RefreshTokenLifespan,
 		AttributeMapping:            e.AttributeMapping,
+		AttributePassthrough:        e.AttributePassthrough,
+		AttributeExclude:            e.AttributeExclude,
 	}
 }

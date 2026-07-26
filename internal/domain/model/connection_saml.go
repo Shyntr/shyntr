@@ -18,6 +18,8 @@ type SAMLConnection struct {
 	MetadataURL              string                          `json:"metadata_url"`
 	SPPrivateKey             string                          `json:"-"`
 	AttributeMapping         map[string]AttributeMappingRule `json:"attribute_mapping"`
+	AttributePassthrough     bool                            `json:"attribute_passthrough"`
+	AttributeExclude         []string                        `json:"attribute_exclude"`
 	NameIDFormat             string                          `json:"name_id_format,omitempty"`
 	ForceAuthn               bool                            `json:"force_authn"`
 	SignRequest              bool                            `json:"sign_request"`

@@ -23,6 +23,8 @@ type OIDCConnectionGORM struct {
 	EndSessionEndpoint    string                                `gorm:"type:varchar(255)"`
 	Scopes                pq.StringArray                        `gorm:"type:text[]"`
 	AttributeMapping      map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	AttributePassthrough  bool                                  `gorm:"default:false"`
+	AttributeExclude      []string                              `gorm:"serializer:json"`
 	Active                bool                                  `gorm:"default:true"`
 	CreatedAt             time.Time                             `gorm:"autoCreateTime"`
 	UpdatedAt             time.Time                             `gorm:"autoUpdateTime"`
@@ -53,6 +55,8 @@ func (m *OIDCConnectionGORM) ToDomain() *model.OIDCConnection {
 		EndSessionEndpoint:    m.EndSessionEndpoint,
 		Scopes:                m.Scopes,
 		AttributeMapping:      m.AttributeMapping,
+		AttributePassthrough:  m.AttributePassthrough,
+		AttributeExclude:      m.AttributeExclude,
 		Active:                m.Active,
 		CreatedAt:             m.CreatedAt,
 		UpdatedAt:             m.UpdatedAt,
@@ -74,6 +78,8 @@ func FromDomainOIDCConnection(e *model.OIDCConnection) *OIDCConnectionGORM {
 		EndSessionEndpoint:    e.EndSessionEndpoint,
 		Scopes:                e.Scopes,
 		AttributeMapping:      e.AttributeMapping,
+		AttributePassthrough:  e.AttributePassthrough,
+		AttributeExclude:      e.AttributeExclude,
 		Active:                e.Active,
 	}
 }

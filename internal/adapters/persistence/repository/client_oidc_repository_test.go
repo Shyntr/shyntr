@@ -96,6 +96,41 @@ func TestOAuth2ClientRepository_AttributeMappingRoundTrip(t *testing.T) {
 	assert.Equal(t, updatedMapping, refetched.AttributeMapping, "attribute_mapping must round-trip on update")
 }
 
+func TestOAuth2ClientRepository_PassthroughAndExcludeRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := setupOIDCRepoTestDB(t)
+	repo := repository.NewOAuth2ClientRepository(db)
+	ctx := context.Background()
+
+	tenantID := "tnt_oidc_pt"
+	clientID := "client_oidc_pt_123"
+
+	domainClient := &model.OAuth2Client{
+		ID:                   clientID,
+		TenantID:             tenantID,
+		Public:               true,
+		AttributePassthrough: true,
+		AttributeExclude:     []string{"ssn", "internal_id"},
+	}
+
+	// Create round-trip: both new storage-only fields persist and read back.
+	require.NoError(t, repo.Create(ctx, domainClient))
+
+	fetched, err := repo.GetByTenantAndID(ctx, tenantID, clientID)
+	require.NoError(t, err)
+	assert.True(t, fetched.AttributePassthrough, "attribute_passthrough must round-trip on create")
+	assert.Equal(t, []string{"ssn", "internal_id"}, fetched.AttributeExclude, "attribute_exclude must round-trip on create")
+
+	// Update round-trip: a changed non-empty exclude persists; passthrough stays set.
+	fetched.AttributeExclude = []string{"password"}
+	require.NoError(t, repo.Update(ctx, fetched))
+
+	refetched, err := repo.GetByTenantAndID(ctx, tenantID, clientID)
+	require.NoError(t, err)
+	assert.True(t, refetched.AttributePassthrough, "attribute_passthrough must round-trip on update")
+	assert.Equal(t, []string{"password"}, refetched.AttributeExclude, "attribute_exclude must round-trip on update")
+}
+
 func TestOAuth2ClientRepository_ClientCounts(t *testing.T) {
 	t.Parallel()
 	db := setupOIDCRepoTestDB(t)
