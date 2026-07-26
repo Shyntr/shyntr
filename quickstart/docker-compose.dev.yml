@@ -48,8 +48,8 @@ services:
       - LOG_LEVEL=info
       - SKIP_TLS_VERIFY=true #Development only
       # Optional SAML hardening flags (defaults shown; uncomment to override):
-      #- SAML_ALLOW_SHA1_SIGNATURES=false   # set true only for legacy SHA-1 partners
-      #- SAML_DEBUG_LOG_MESSAGE_BODIES=false # UNSAFE: raw SAML bodies at debug; never in prod
+      - SAML_ALLOW_SHA1_SIGNATURES=true   # set true only for legacy SHA-1 partners
+      - SAML_DEBUG_LOG_MESSAGE_BODIES=true # UNSAFE: raw SAML bodies at debug; never in prod
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +76,7 @@ services:
       - REACT_MANAGEMENT_BACKEND_URL=http://host.docker.internal:7497
       - REACT_PUBLIC_BACKEND_URL=http://host.docker.internal:7496
       - SHYNTR_EE_BRANDING_ENABLED=true
+      - SHYNTR_EE_PASSWORD_LOGIN_ENABLED=true
     depends_on:
       shyntr-backend:
         condition: service_healthy
