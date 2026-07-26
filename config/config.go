@@ -27,6 +27,21 @@ type Config struct {
 	// Security Tuning
 	SkipTLSVerify bool `mapstructure:"SKIP_TLS_VERIFY"`
 
+	// SAML inbound signature policy. When false (the default), SHA-1 signature and
+	// digest algorithms are rejected on inbound SAML signatures (redirect and
+	// embedded/POST). FMN Spiral 4 mandates SHA-256; enabling SHA-1 is an explicit,
+	// deliberate act for legacy interop only.
+	SAMLAllowSHA1Signatures bool `mapstructure:"SAML_ALLOW_SHA1_SIGNATURES"`
+
+	// SAML raw message-body debug logging. When false (the default), no on-the-wire
+	// SAML message body is ever logged. When true, the raw SAML message as received
+	// or sent (inbound Response, inbound AuthnRequest, issued Response) is logged at
+	// Debug with an UNSAFE_DEBUG warning, for diagnosing a partner exchange. It logs
+	// the wire form only — signature and certificate are public; an EncryptedAssertion
+	// stays as ciphertext — and never decrypted plaintext, private keys, or secrets.
+	// Enabling it is an explicit, deliberate act for non-production diagnosis only.
+	SAMLDebugLogMessageBodies bool `mapstructure:"SAML_DEBUG_LOG_MESSAGE_BODIES"`
+
 	// Database Connection Pool
 	DBMaxIdleConns int `mapstructure:"DB_MAX_IDLE_CONNS"`
 	DBMaxOpenConns int `mapstructure:"DB_MAX_OPEN_CONNS"`
@@ -69,6 +84,8 @@ func LoadConfig() *Config {
 
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("SKIP_TLS_VERIFY", false)
+	viper.SetDefault("SAML_ALLOW_SHA1_SIGNATURES", false)
+	viper.SetDefault("SAML_DEBUG_LOG_MESSAGE_BODIES", false)
 
 	viper.SetDefault("DB_MAX_IDLE_CONNS", 20)
 	viper.SetDefault("DB_MAX_OPEN_CONNS", 80)
@@ -94,6 +111,8 @@ func LoadConfig() *Config {
 	mustBind("ID_TOKEN_LIFESPAN")
 	mustBind("LOG_LEVEL")
 	mustBind("SKIP_TLS_VERIFY")
+	mustBind("SAML_ALLOW_SHA1_SIGNATURES")
+	mustBind("SAML_DEBUG_LOG_MESSAGE_BODIES")
 	mustBind("DB_MAX_IDLE_CONNS")
 	mustBind("DB_MAX_OPEN_CONNS")
 

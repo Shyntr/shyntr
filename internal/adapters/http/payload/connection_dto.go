@@ -56,6 +56,7 @@ type CreateSAMLConnectionRequest struct {
 	IdpEncryptionCertificate string                                `json:"idp_encryption_certificate"`
 	SPPrivateKey             string                                `json:"sp_private_key" example:"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"`
 	AttributeMapping         map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	NameIDFormat             string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	ForceAuthn               bool                                  `json:"force_authn" example:"false"`
 	SignRequest              bool                                  `json:"sign_request" example:"true"`
 }
@@ -73,6 +74,7 @@ type SAMLConnectionResponse struct {
 	IdpEncryptionCertificate string                                `json:"idp_encryption_certificate"`
 	SPPrivateKey             string                                `json:"sp_private_key" example:"*****"`
 	AttributeMapping         map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	NameIDFormat             string                                `json:"name_id_format,omitempty" example:"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"`
 	ForceAuthn               bool                                  `json:"force_authn" example:"false"`
 	SignRequest              bool                                  `json:"sign_request" example:"true"`
 	Active                   bool                                  `json:"active" example:"true"`
@@ -141,6 +143,7 @@ func (req *CreateSAMLConnectionRequest) ToDomain() *model.SAMLConnection {
 		IdpEncryptionCertificate: req.IdpEncryptionCertificate,
 		SPPrivateKey:             req.SPPrivateKey,
 		AttributeMapping:         req.AttributeMapping,
+		NameIDFormat:             req.NameIDFormat,
 		ForceAuthn:               req.ForceAuthn,
 		SignRequest:              req.SignRequest,
 	}
@@ -242,6 +245,7 @@ func FromDomainSAMLConnection(c *model.SAMLConnection) *SAMLConnectionResponse {
 		IdpEncryptionCertificate: c.IdpEncryptionCertificate,
 		SPPrivateKey:             "*****",
 		AttributeMapping:         c.AttributeMapping,
+		NameIDFormat:             c.NameIDFormat,
 		ForceAuthn:               c.ForceAuthn,
 		SignRequest:              c.SignRequest,
 		Active:                   c.Active,

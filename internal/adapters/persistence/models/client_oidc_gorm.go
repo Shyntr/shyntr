@@ -39,34 +39,35 @@ func (j JSONB) Value() (driver.Value, error) {
 }
 
 type OAuth2ClientGORM struct {
-	ID                          string         `gorm:"primaryKey;type:varchar(255)"`
-	TenantID                    string         `gorm:"type:varchar(255);not null;index"`
-	Name                        string         `gorm:"type:varchar(255);not null;default:'Unnamed Client'"`
-	AppID                       string         `gorm:"index;type:varchar(255)"`
-	Secret                      string         `gorm:"type:varchar(255)"`
-	RedirectURIs                pq.StringArray `gorm:"type:text[]"`
-	GrantTypes                  pq.StringArray `gorm:"type:text[]"`
-	ResponseTypes               pq.StringArray `gorm:"type:text[]"`
-	ResponseModes               pq.StringArray `gorm:"type:text[]"`
-	Scopes                      pq.StringArray `gorm:"type:text[]"`
-	Audience                    pq.StringArray `gorm:"type:text[]"`
-	Public                      bool           `gorm:"default:false"`
-	TokenEndpointAuthMethod     string         `gorm:"type:varchar(50);default:'client_secret_basic'"`
-	EnforcePKCE                 bool           `gorm:"default:false"`
-	AllowedCORSOrigins          pq.StringArray `gorm:"type:text[]"`
-	PostLogoutRedirectURIs      pq.StringArray `gorm:"type:text[]"`
-	JSONWebKeys                 JSONB          `gorm:"column:json_web_keys;type:jsonb"`
-	JwksURI                     string         `gorm:"type:text"`
-	IDTokenEncryptedResponseAlg string         `gorm:"type:varchar(50)"`
-	IDTokenEncryptedResponseEnc string         `gorm:"type:varchar(50)"`
-	SkipConsent                 bool           `gorm:"default:false"`
-	SubjectType                 string         `gorm:"type:varchar(50);default:'public'"`
-	BackchannelLogoutURI        string         `gorm:"type:text"`
-	AccessTokenLifespan         string         `gorm:"type:varchar(50);default:''"`
-	IDTokenLifespan             string         `gorm:"type:varchar(50);default:''"`
-	RefreshTokenLifespan        string         `gorm:"type:varchar(50);default:''"`
-	CreatedAt                   time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt                   time.Time      `gorm:"autoUpdateTime"`
+	ID                          string                                `gorm:"primaryKey;type:varchar(255)"`
+	TenantID                    string                                `gorm:"type:varchar(255);not null;index"`
+	Name                        string                                `gorm:"type:varchar(255);not null;default:'Unnamed Client'"`
+	AppID                       string                                `gorm:"index;type:varchar(255)"`
+	Secret                      string                                `gorm:"type:varchar(255)"`
+	RedirectURIs                pq.StringArray                        `gorm:"type:text[]"`
+	GrantTypes                  pq.StringArray                        `gorm:"type:text[]"`
+	ResponseTypes               pq.StringArray                        `gorm:"type:text[]"`
+	ResponseModes               pq.StringArray                        `gorm:"type:text[]"`
+	Scopes                      pq.StringArray                        `gorm:"type:text[]"`
+	Audience                    pq.StringArray                        `gorm:"type:text[]"`
+	Public                      bool                                  `gorm:"default:false"`
+	TokenEndpointAuthMethod     string                                `gorm:"type:varchar(50);default:'client_secret_basic'"`
+	EnforcePKCE                 bool                                  `gorm:"default:false"`
+	AllowedCORSOrigins          pq.StringArray                        `gorm:"type:text[]"`
+	PostLogoutRedirectURIs      pq.StringArray                        `gorm:"type:text[]"`
+	JSONWebKeys                 JSONB                                 `gorm:"column:json_web_keys;type:jsonb"`
+	JwksURI                     string                                `gorm:"type:text"`
+	IDTokenEncryptedResponseAlg string                                `gorm:"type:varchar(50)"`
+	IDTokenEncryptedResponseEnc string                                `gorm:"type:varchar(50)"`
+	SkipConsent                 bool                                  `gorm:"default:false"`
+	SubjectType                 string                                `gorm:"type:varchar(50);default:'public'"`
+	BackchannelLogoutURI        string                                `gorm:"type:text"`
+	AccessTokenLifespan         string                                `gorm:"type:varchar(50);default:''"`
+	IDTokenLifespan             string                                `gorm:"type:varchar(50);default:''"`
+	RefreshTokenLifespan        string                                `gorm:"type:varchar(50);default:''"`
+	AttributeMapping            map[string]model.AttributeMappingRule `gorm:"serializer:json"`
+	CreatedAt                   time.Time                             `gorm:"autoCreateTime"`
+	UpdatedAt                   time.Time                             `gorm:"autoUpdateTime"`
 }
 
 func (OAuth2ClientGORM) TableName() string { return "o_auth2_clients" }
@@ -106,6 +107,7 @@ func (m *OAuth2ClientGORM) ToDomain() *model.OAuth2Client {
 		AccessTokenLifespan:         m.AccessTokenLifespan,
 		IDTokenLifespan:             m.IDTokenLifespan,
 		RefreshTokenLifespan:        m.RefreshTokenLifespan,
+		AttributeMapping:            m.AttributeMapping,
 		CreatedAt:                   m.CreatedAt,
 		UpdatedAt:                   m.UpdatedAt,
 	}
@@ -144,5 +146,6 @@ func FromDomainOAuth2Client(e *model.OAuth2Client) *OAuth2ClientGORM {
 		AccessTokenLifespan:         e.AccessTokenLifespan,
 		IDTokenLifespan:             e.IDTokenLifespan,
 		RefreshTokenLifespan:        e.RefreshTokenLifespan,
+		AttributeMapping:            e.AttributeMapping,
 	}
 }

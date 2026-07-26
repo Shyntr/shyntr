@@ -62,6 +62,15 @@ type oidcE2EEnv struct {
 
 func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	t.Helper()
+	return setupOIDCE2EEnvWithClock(t, nil)
+}
+
+// setupOIDCE2EEnvWithClock is the additive variant of setupOIDCE2EEnv. It injects
+// a clock into the SAML builder via usecase.NewSamlBuilderUseCaseWithClock so that
+// issuance timestamps are deterministic under test. A nil clock means wall-clock
+// time and reproduces setupOIDCE2EEnv's behaviour exactly.
+func setupOIDCE2EEnvWithClock(t *testing.T, samlClock func() time.Time) *oidcE2EEnv {
+	t.Helper()
 
 	gin.SetMode(gin.TestMode)
 	logger.InitLogger("info")
@@ -180,7 +189,7 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	provider := utils2.NewProvider(db, fositeCfg, keyMgr, clientRepo, jtiRepo)
 	jwksCache := utils2.NewJWKSCache()
 	stateProvider := security.NewFederationStateProvider(cfg)
-	samlBuilderUseCase := usecase.NewSamlBuilderUseCase(repository.NewSAMLClientRepository(db), samlConnRepo, samlReplayRepo, keyMgr, cfg, stateProvider)
+	samlBuilderUseCase := usecase.NewSamlBuilderUseCaseWithClock(repository.NewSAMLClientRepository(db), samlConnRepo, samlReplayRepo, keyMgr, cfg, stateProvider, samlClock)
 
 	oauthHandler := handlers.NewOAuth2Handler(provider, keyMgr, cfg, clientUseCase, authUseCase, sessionUseCase, connUseCase, tenantUseCase, scopeUseCase, jwksCache)
 	adminHandler := handlers.NewAdminHandler(tenantUseCase, clientUseCase, authUseCase, cfg)
@@ -206,6 +215,8 @@ func setupOIDCE2EEnv(t *testing.T) *oidcE2EEnv {
 	r.POST("/t/:tenant_id/saml/sp/acs", samlHandler.ACS)
 	r.GET("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
 	r.POST("/t/:tenant_id/saml/sp/slo", samlHandler.SPSLO)
+	r.GET("/t/:tenant_id/saml/idp/metadata", samlHandler.IDPMetadata)
+	r.GET("/t/:tenant_id/saml/sp/metadata", samlHandler.SPMetadata)
 	r.GET("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
 	r.POST("/t/:tenant_id/saml/idp/sso", samlHandler.IDPSSO)
 	r.GET("/t/:tenant_id/saml/idp/slo", samlHandler.IDPSLO)

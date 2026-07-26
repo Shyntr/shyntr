@@ -384,7 +384,7 @@ Shyntr is proudly open-source and licensed under the **Apache-2.0** license. Che
 ---
 
 <div>
-  <a href="https://buymeacoffee.com/nevzatcirak17" target="_blank">
+  <a href="https://buymeacoffee.com/nevzatcirak" target="_blank">
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40" align="left">
   </a>
   <a href="https://nevzatcirak.com" target="_blank">

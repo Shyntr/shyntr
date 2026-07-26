@@ -7,17 +7,16 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,6 +73,21 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 		tenantID = h.Config.DefaultTenantID
 	}
 
+	// An optional connection_id lets an operator publish SP metadata tailored to a
+	// specific SAML connection: its pinned NameIDFormat and an
+	// AttributeConsumingService derived from its attribute_mapping. Without it, the
+	// endpoint returns the tenant-generic SP metadata unchanged.
+	var conn *model.SAMLConnection
+	if connectionID := c.Query("connection_id"); connectionID != "" {
+		var connErr error
+		conn, connErr = h.SAMLUse.GetConnection(c.Request.Context(), tenantID, connectionID)
+		if connErr != nil {
+			logger.FromGin(c).Warn("SP metadata requested for unknown connection", zap.String("connection_id", connectionID))
+			payload.WriteSAMLError(c, http.StatusNotFound, "connection_not_found", "The configured SAML connection could not be found for this tenant.", connErr)
+			return
+		}
+	}
+
 	sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, nil)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize SP", zap.Error(err), zap.String("protocol", "saml"))
@@ -84,11 +98,16 @@ func (h *SAMLHandler) SPMetadata(c *gin.Context) {
 	metaDesc := sp.Metadata()
 
 	if len(metaDesc.SPSSODescriptors) > 0 {
-		metaDesc.SPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.PersistentNameIDFormat,   // urn:oasis:names:tc:SAML:2.0:nameid-format:persistent
-			crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
-			crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
-			crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+		configured := ""
+		if conn != nil {
+			configured = conn.NameIDFormat
+		}
+		metaDesc.SPSSODescriptors[0].NameIDFormats = samlMetadataNameIDFormats(configured)
+
+		if conn != nil {
+			if acs, ok := buildAttributeConsumingService(conn.Name, conn.AttributeMapping); ok {
+				metaDesc.SPSSODescriptors[0].AttributeConsumingServices = []crewjamsaml.AttributeConsumingService{acs}
+			}
 		}
 	}
 
@@ -137,7 +156,8 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 	c.SetSameSite(sameSiteMode)
 	c.SetCookie("shyntr_fed_csrf", csrfToken, 600, "/", "", h.Config.CookieSecure, true)
 
-	redirectURLOrHTML, requestID, err := h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	ssoCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	redirectURLOrHTML, requestID, err := h.samlBuilderUseCase.InitiateSSO(ssoCtx, tenantID, connectionID, loginChallenge, csrfToken)
 	providerCtx := map[string]interface{}{
 		"connection_id": connectionID,
 	}
@@ -145,7 +165,7 @@ func (h *SAMLHandler) Login(c *gin.Context) {
 		providerCtx["saml_request_id"] = requestID
 	}
 	_ = h.AuthUse.MarkLoginAsProviderStarted(c.Request.Context(), loginReq.ID, "saml", connectionID, providerCtx, c.ClientIP(), c.Request.UserAgent())
-	redirectURLOrHTML, requestID, err = h.samlBuilderUseCase.InitiateSSO(c.Request.Context(), tenantID, connectionID, loginChallenge, csrfToken)
+	redirectURLOrHTML, requestID, err = h.samlBuilderUseCase.InitiateSSO(ssoCtx, tenantID, connectionID, loginChallenge, csrfToken)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initiate SAML SSO", zap.Error(err), zap.String("protocol", "saml"))
 		payload.WriteSAMLError(c, http.StatusInternalServerError, "server_error", "Failed to initiate SAML SSO with the external identity provider.", err)
@@ -255,7 +275,8 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		return
 	}
 
-	assertion, _, err := h.samlBuilderUseCase.HandleACS(c.Request.Context(), tenantID, c.Request, loginReq.SAMLRequestID)
+	acsCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	assertion, _, err := h.samlBuilderUseCase.HandleACS(acsCtx, tenantID, c.Request, loginReq.SAMLRequestID)
 	if err != nil {
 		setSAMLDiagnosticContext(c, tenantID, "invalid_saml_response", "acs_response_validation")
 		logger.FromGin(c).Error("Failed to handle SAML ACS",
@@ -404,6 +425,20 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 		tenantID = h.Config.DefaultTenantID
 	}
 
+	// An optional client_id lets an operator publish IdP metadata tailored to a
+	// specific SP client: the single NameIDFormat that SP has been pinned to.
+	// Without it, the endpoint returns the tenant-generic IdP metadata unchanged.
+	var spClient *model.SAMLClient
+	if clientID := c.Query("client_id"); clientID != "" {
+		var clientErr error
+		spClient, clientErr = h.SAMLClientUse.GetClient(c.Request.Context(), tenantID, clientID)
+		if clientErr != nil {
+			logger.FromGin(c).Warn("IdP metadata requested for unknown SP client", zap.String("client_id", clientID))
+			payload.WriteSAMLError(c, http.StatusNotFound, "sp_not_found", "The service provider configuration could not be found for this tenant.", clientErr)
+			return
+		}
+	}
+
 	idp, err := h.samlBuilderUseCase.GetIdentityProvider(c.Request.Context(), tenantID)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to initialize IdP", zap.Error(err), zap.String("protocol", "saml"))
@@ -424,18 +459,91 @@ func (h *SAMLHandler) IDPMetadata(c *gin.Context) {
 	metaDesc := idp.Metadata()
 
 	if len(metaDesc.IDPSSODescriptors) > 0 {
-		metaDesc.IDPSSODescriptors[0].NameIDFormats = []crewjamsaml.NameIDFormat{
-			crewjamsaml.PersistentNameIDFormat,
-			crewjamsaml.EmailAddressNameIDFormat,
-			crewjamsaml.UnspecifiedNameIDFormat,
-			crewjamsaml.TransientNameIDFormat,
+		configured := ""
+		if spClient != nil {
+			configured = spClient.NameIDFormat
 		}
+		metaDesc.IDPSSODescriptors[0].NameIDFormats = samlMetadataNameIDFormats(configured)
 	}
 
 	c.Header("Content-Type", "application/xml")
 	if err := xml.NewEncoder(c.Writer).Encode(metaDesc); err != nil {
 		logger.FromGin(c).Error("Failed to write metadata XML", zap.Error(err), zap.String("protocol", "saml"))
 	}
+}
+
+// samlMetadataNameIDFormats returns the NameIDFormat list to advertise. When a
+// single valid format is configured, it advertises exactly that one; otherwise it
+// falls back to the default set.
+//
+// persistent is never advertised: it is not in the configurable set (config-time
+// validation rejects it) and it is absent from the default list, because the
+// issuance path fails closed on it. The IsValidNameIDFormat guard is defence in
+// depth: a value that somehow bypassed validation (an out-of-band write) can never
+// cause metadata to advertise a format the issuance path would refuse to produce;
+// such a value falls back to the safe default set instead.
+func samlMetadataNameIDFormats(configured string) []crewjamsaml.NameIDFormat {
+	if model.IsValidNameIDFormat(configured) {
+		return []crewjamsaml.NameIDFormat{crewjamsaml.NameIDFormat(configured)}
+	}
+	return []crewjamsaml.NameIDFormat{
+		crewjamsaml.EmailAddressNameIDFormat, // urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
+		crewjamsaml.UnspecifiedNameIDFormat,  // urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+		crewjamsaml.TransientNameIDFormat,    // urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+	}
+}
+
+// buildAttributeConsumingService builds the SP AttributeConsumingService that
+// declares one RequestedAttribute per attribute_mapping entry, so published
+// metadata matches what the SP actually consumes. It returns ok=false for an empty
+// mapping, in which case no AttributeConsumingService is emitted (current
+// behaviour).
+//
+// Each RequestedAttribute's Name is the mapping output name (the map key). Its
+// NameFormat is the rule's explicit NameFormat when it is a valid attrname-format,
+// otherwise the same heuristic the issuance path uses (model.AttributeNameFormatFor
+// from T2-4). This is deliberately not a URI-name special case: a URI-named claim
+// whose rule pins basic (e.g. the FMN-mandated role claim) is advertised as basic,
+// faithfully reflecting the operator's configuration. Keys are sorted so the
+// emitted metadata is deterministic.
+func buildAttributeConsumingService(serviceName string, mapping map[string]model.AttributeMappingRule) (crewjamsaml.AttributeConsumingService, bool) {
+	if len(mapping) == 0 {
+		return crewjamsaml.AttributeConsumingService{}, false
+	}
+
+	names := make([]string, 0, len(mapping))
+	for name := range mapping {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	requested := make([]crewjamsaml.RequestedAttribute, 0, len(names))
+	for _, name := range names {
+		rule := mapping[name]
+		nameFormat := model.AttributeNameFormatFor(name)
+		if model.IsValidAttributeNameFormat(rule.NameFormat) {
+			nameFormat = rule.NameFormat
+		}
+		requested = append(requested, crewjamsaml.RequestedAttribute{
+			Attribute: crewjamsaml.Attribute{
+				Name:       name,
+				NameFormat: nameFormat,
+			},
+		})
+	}
+
+	// SAML metadata requires at least one ServiceName in an
+	// AttributeConsumingService; fall back to a stable label when the connection
+	// has no name.
+	if strings.TrimSpace(serviceName) == "" {
+		serviceName = "Shyntr Service Provider"
+	}
+
+	return crewjamsaml.AttributeConsumingService{
+		Index:               1,
+		ServiceNames:        []crewjamsaml.LocalizedName{{Lang: "en", Value: serviceName}},
+		RequestedAttributes: requested,
+	}, true
 }
 
 // IDPSSO godoc
@@ -481,45 +589,28 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 		samlReqBase64 := origURL.Query().Get("SAMLRequest")
 		relayState := origURL.Query().Get("RelayState")
 
-		var requestID, acsURL, issuer string
+		var authReq *crewjamsaml.AuthnRequest
 		if samlReqBase64 != "" {
-			samlReqBase64 = strings.ReplaceAll(samlReqBase64, " ", "+")
-			decoded, err := base64.StdEncoding.DecodeString(samlReqBase64)
-			if err == nil {
-				flater := flate.NewReader(bytes.NewReader(decoded))
-				inflated, err := io.ReadAll(flater)
-				flater.Close()
-				if err == nil {
-					decoded = inflated
-				}
-
-				var tempReq struct {
-					ID                          string `xml:"ID,attr"`
-					AssertionConsumerServiceURL string `xml:"AssertionConsumerServiceURL,attr"`
-					Issuer                      struct {
-						Value string `xml:",chardata"`
-					} `xml:"Issuer"`
-				}
-				_ = xml.Unmarshal(decoded, &tempReq)
-				requestID = tempReq.ID
-				acsURL = tempReq.AssertionConsumerServiceURL
-				issuer = tempReq.Issuer.Value
+			parsed, parseErr := parseStoredAuthnRequest(samlReqBase64)
+			if parseErr != nil {
+				logger.FromGin(c).Error("Failed to parse stored SAML AuthnRequest", zap.Error(parseErr), zap.String("protocol", "saml"))
+				payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_saml_request", "The stored SAMLRequest could not be parsed.", nil)
+				return
 			}
+			authReq = parsed
+		} else {
+			// No AuthnRequest was stored (e.g. IdP-initiated); use a minimal one.
+			authReq = &crewjamsaml.AuthnRequest{}
 		}
 
-		if acsURL == "" {
-			acsURL = spClient.ACSURL
+		// Preserve fallbacks for values a request may legitimately omit. A parse
+		// failure was already turned into an error above, so an empty field here
+		// is a genuine absence, not a swallowed parse error.
+		if authReq.AssertionConsumerServiceURL == "" {
+			authReq.AssertionConsumerServiceURL = spClient.ACSURL
 		}
-		if issuer == "" {
-			issuer = spClient.EntityID
-		}
-
-		authReq := &crewjamsaml.AuthnRequest{
-			ID:                          requestID,
-			AssertionConsumerServiceURL: acsURL,
-			Issuer: &crewjamsaml.Issuer{
-				Value: issuer,
-			},
+		if authReq.Issuer == nil || authReq.Issuer.Value == "" {
+			authReq.Issuer = &crewjamsaml.Issuer{Value: spClient.EntityID}
 		}
 
 		var ctxData map[string]interface{}
@@ -552,23 +643,17 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 			secureClaims = normalizedClaims
 		}
 
-		finalAttrs := map[string]interface{}{}
-		if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
-			finalAttrs = secureClaims
-		} else {
-			var mapErr error
-			finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-			if mapErr != nil {
-				logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
-				finalAttrs = secureClaims
-			}
+		finalAttrs, mapOK := h.resolveOutboundAttributes(c, tenantID, authReq, spClient, secureClaims, relayState)
+		if !mapOK {
+			return
 		}
 		if hasNormalizedClaims {
 			finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
 			delete(finalAttrs, "sub")
 		}
 
-		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
+		genCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginReq.ID, c.GetString("trace_id"))
+		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(genCtx, tenantID, authReq, spClient, finalAttrs, relayState)
 		if err != nil {
 			logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
@@ -712,7 +797,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 	}
 
 	if spClient.SPCertificate != "" && c.Request.Method == http.MethodGet {
-		if err := verifyRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
+		if err := h.samlBuilderUseCase.VerifyInboundRedirectSignature(c.Request, spClient.SPCertificate); err != nil {
 			logger.FromGin(c).Error("SAML SLO Signature Verification Failed! Possible session riding attempt.",
 				zap.String("entity_id", spClient.EntityID), zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusUnauthorized, "invalid_signature", "The SAML logout request signature is invalid.", err)
@@ -728,7 +813,7 @@ func (h *SAMLHandler) IDPSLO(c *gin.Context) {
 
 		activeSession, err := h.OAuthSessionUse.GetBySubject(c.Request.Context(), subject, spClient.ID)
 		if err != nil {
-			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject", logoutReq.NameID.Value),
+			logger.FromGin(c).Warn("Active OAuth session not found. OAuth logout redirection will be skipped.", zap.String("subject_sha256", hashForLog(logoutReq.NameID.Value)),
 				zap.String("entity_id", spClient.EntityID))
 		} else {
 			issuer := fmt.Sprintf("%s/t/%s/oauth2", h.Config.BaseIssuerURL, tenantID)
@@ -809,17 +894,31 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 	}
 
 	relayState, _ := ctxData["relay_state_raw"].(string)
-	requestID, _ := ctxData["request_id"].(string)
-	acsURL, _ := ctxData["acs_url"].(string)
-	issuer, _ := ctxData["issuer"].(string)
 
-	authReq := &crewjamsaml.AuthnRequest{
-		ID:                          requestID,
-		AssertionConsumerServiceURL: acsURL,
-		Issuer: &crewjamsaml.Issuer{
-			Value: issuer,
-		},
+	var authReq *crewjamsaml.AuthnRequest
+	if samlRequest, ok := ctxData["saml_request"].(string); ok && samlRequest != "" {
+		parsed, parseErr := parseStoredAuthnRequest(samlRequest)
+		if parseErr != nil {
+			logger.FromGin(c).Error("Failed to parse stored SAML AuthnRequest", zap.Error(parseErr), zap.String("protocol", "saml"))
+			payload.AbortWithSAMLError(c, http.StatusBadRequest, "invalid_saml_request", "The stored SAMLRequest could not be parsed.", nil)
+			return
+		}
+		authReq = parsed
+	} else {
+		authReq = &crewjamsaml.AuthnRequest{}
 	}
+
+	// Preserve fallbacks for values a request may legitimately omit.
+	if authReq.AssertionConsumerServiceURL == "" {
+		if acsURL, ok := ctxData["acs_url"].(string); ok {
+			authReq.AssertionConsumerServiceURL = acsURL
+		}
+	}
+	if authReq.Issuer == nil || authReq.Issuer.Value == "" {
+		fallbackIssuer, _ := ctxData["issuer"].(string)
+		authReq.Issuer = &crewjamsaml.Issuer{Value: fallbackIssuer}
+	}
+	issuer := authReq.Issuer.Value
 
 	spClient, spClientErr := h.SAMLClientUse.GetClientByEntityID(c.Request.Context(), tenantID, issuer)
 	if spClientErr != nil {
@@ -859,23 +958,17 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 		secureClaims = normalizedClaims
 	}
 
-	finalAttrs := map[string]interface{}{}
-	if hasNormalizedClaims && len(spClient.AttributeMapping) == 0 {
-		finalAttrs = secureClaims
-	} else {
-		var mapErr error
-		finalAttrs, mapErr = h.Mapper.Map(secureClaims, spClient.AttributeMapping)
-		if mapErr != nil {
-			logger.FromGin(c).Warn("Outbound mapping failed", zap.Error(mapErr), zap.String("protocol", "saml"))
-			finalAttrs = secureClaims
-		}
+	finalAttrs, mapOK := h.resolveOutboundAttributes(c, tenantID, authReq, spClient, secureClaims, relayState)
+	if !mapOK {
+		return
 	}
 	if hasNormalizedClaims {
 		finalAttrs[utils.SAMLNameIDSubjectAttribute] = loginReq.Subject
 		delete(finalAttrs, "sub")
 	}
 
-	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
+	genCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(genCtx, tenantID, authReq, spClient, finalAttrs, relayState)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err), zap.String("protocol", "saml"))
 		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
@@ -955,8 +1048,15 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 		}
 		if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 			subject := logoutReq.NameID.Value
-			_ = h.OAuthSessionUse.Delete(c.Request.Context(), subject)
-			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject", subject))
+			// Surface, as a safe category, an error that was previously swallowed.
+			// Behaviour is unchanged: the flow still proceeds regardless (fail-open
+			// here is T2-12, deferred) — only the logging now names the cause.
+			if delErr := h.OAuthSessionUse.Delete(c.Request.Context(), subject); delErr != nil {
+				logger.FromGin(c).Warn("Local session deletion during SLO did not complete",
+					zap.String("category", "slo_session_delete_failed"),
+					zap.String("subject_sha256", hashForLog(subject)))
+			}
+			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject_sha256", hashForLog(subject)))
 		}
 		sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, conn)
 		if err != nil {
@@ -1166,66 +1266,48 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 	c.Redirect(http.StatusFound, redirectURL.String())
 }
 
-func verifyRedirectSignature(req *http.Request, certPEM string) error {
-	query := req.URL.Query()
-	sig := query.Get("Signature")
-	sigAlg := query.Get("SigAlg")
+// resolveOutboundAttributes applies the SP's outbound attribute policy and returns
+// the attributes to place in the assertion. When it returns ok=false it has
+// already written a fail-closed response and the caller must return immediately.
+//
+//   - empty mapping          -> passthrough: release exactly the scope-gated
+//     claims (A1). This holds on BOTH the normalized and non-normalized paths; an
+//     earlier guard covered only the normalized one, so a federated
+//     (non-normalized) login with an empty mapping had every attribute silently
+//     stripped.
+//   - non-empty, partial     -> pass: a mapping that resolves some of its sources
+//     is legitimate; which claims a user has varies per user.
+//   - non-empty, zero output -> fail closed (SAML Core 3.2.2.2): the identity
+//     provider could not apply the configured mapping, so emit a Responder error
+//     Response with no assertion rather than an attribute-less assertion the SP
+//     cannot use.
+//
+// Map is currently infallible, but a mapping error is handled with the same
+// fail-closed path rather than a fallback: were Map ever made fallible, an error
+// must never fall through to an emitted assertion.
+func (h *SAMLHandler) resolveOutboundAttributes(c *gin.Context, tenantID string, authReq *crewjamsaml.AuthnRequest,
+	spClient *model.SAMLClient, secureClaims map[string]interface{}, relayState string) (map[string]interface{}, bool) {
 
-	if sig == "" || sigAlg == "" {
-		return errors.New("missing Signature or SigAlg in request")
+	if len(spClient.AttributeMapping) == 0 {
+		return secureClaims, true
 	}
 
-	sigBytes, err := base64.StdEncoding.DecodeString(sig)
-	if err != nil {
-		return errors.New("invalid signature base64 format")
+	mapped, mapErr := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+	if mapErr != nil || len(mapped) == 0 {
+		logger.FromGin(c).Error("SAML outbound attribute mapping could not be applied; failing closed",
+			zap.Error(mapErr), zap.String("protocol", "saml"), zap.String("sp_entity_id", spClient.EntityID))
+		htmlErr, genErr := h.samlBuilderUseCase.GenerateSAMLErrorResponse(c.Request.Context(), tenantID, authReq, spClient,
+			crewjamsaml.StatusResponder, "The identity provider could not produce the required attributes.", relayState)
+		if genErr != nil {
+			logger.FromGin(c).Error("Failed to generate SAML error response", zap.Error(genErr), zap.String("protocol", "saml"))
+			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", genErr)
+			return nil, false
+		}
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, htmlErr)
+		return nil, false
 	}
-
-	block, _ := pem.Decode([]byte(certPEM))
-	if block == nil {
-		return errors.New("failed to parse SP certificate PEM")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return errors.New("invalid SP X509 certificate")
-	}
-
-	rsaPub, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return errors.New("SP certificate is not an RSA public key")
-	}
-
-	escape := func(s string) string {
-		return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
-	}
-
-	var parts []string
-	if samlReq := query.Get("SAMLRequest"); samlReq != "" {
-		parts = append(parts, "SAMLRequest="+escape(samlReq))
-	} else if samlRes := query.Get("SAMLResponse"); samlRes != "" {
-		parts = append(parts, "SAMLResponse="+escape(samlRes))
-	}
-	if rs := query.Get("RelayState"); rs != "" {
-		parts = append(parts, "RelayState="+escape(rs))
-	}
-	parts = append(parts, "SigAlg="+escape(sigAlg))
-	signString := strings.Join(parts, "&")
-
-	var hash crypto.Hash
-	if strings.HasSuffix(sigAlg, "rsa-sha256") {
-		hash = crypto.SHA256
-	} else if strings.HasSuffix(sigAlg, "rsa-sha1") {
-		hash = crypto.SHA1
-	} else if strings.HasSuffix(sigAlg, "rsa-sha512") {
-		hash = crypto.SHA512
-	} else {
-		return errors.New("unsupported signature algorithm: " + sigAlg)
-	}
-
-	hasher := hash.New()
-	hasher.Write([]byte(signString))
-	hashed := hasher.Sum(nil)
-
-	return rsa.VerifyPKCS1v15(rsaPub, hash, hashed, sigBytes)
+	return mapped, true
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1235,6 +1317,34 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// parseStoredAuthnRequest decodes a previously received SAMLRequest string (as it
+// arrived on the wire: base64-encoded, and DEFLATE-compressed for the
+// HTTP-Redirect binding) and unmarshals it into a full AuthnRequest, preserving
+// every field the service provider sent (NameIDPolicy, ForceAuthn, and so on). It
+// fails closed: a request that cannot be decoded or unmarshalled returns an error
+// instead of an empty request that would silently fall back to service-provider
+// defaults. Error values never carry the request body.
+func parseStoredAuthnRequest(encoded string) (*crewjamsaml.AuthnRequest, error) {
+	encoded = strings.ReplaceAll(encoded, " ", "+")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errors.New("SAMLRequest is not valid base64")
+	}
+	// HTTP-Redirect binding is DEFLATE-compressed; HTTP-POST is not. Inflate when
+	// possible, otherwise use the decoded bytes as-is.
+	flater := flate.NewReader(bytes.NewReader(decoded))
+	if inflated, inflateErr := io.ReadAll(flater); inflateErr == nil {
+		decoded = inflated
+	}
+	flater.Close()
+
+	var authReq crewjamsaml.AuthnRequest
+	if err := xml.Unmarshal(decoded, &authReq); err != nil {
+		return nil, errors.New("SAMLRequest could not be unmarshalled")
+	}
+	return &authReq, nil
 }
 
 func setSAMLDiagnosticContext(c *gin.Context, tenantID, errorCode, failureStage string) {

@@ -6,57 +6,59 @@ import (
 )
 
 type CreateOAuth2ClientRequest struct {
-	ID                          string              `json:"client_id" example:"my-web-app"`
-	TenantID                    string              `json:"tenant_id" binding:"required" example:"default"`
-	Name                        string              `json:"name" binding:"required" example:"My Frontend Application"`
-	Secret                      string              `json:"client_secret" example:"super-secure-secret-key"`
-	RedirectURIs                []string            `json:"redirect_uris" binding:"required" example:"https://app.example.com/callback"`
-	GrantTypes                  []string            `json:"grant_types" binding:"required" example:"authorization_code,refresh_token"`
-	ResponseTypes               []string            `json:"response_types" example:"code"`
-	ResponseModes               []string            `json:"response_modes" example:"query,form_post"`
-	Scopes                      []string            `json:"scopes" example:"openid,profile,email,offline_access"`
-	Audience                    []string            `json:"audience" example:"api-service"`
-	Public                      bool                `json:"public" example:"false"`
-	TokenEndpointAuthMethod     string              `json:"token_endpoint_auth_method" example:"client_secret_basic"`
-	EnforcePKCE                 bool                `json:"enforce_pkce" example:"true"`
-	AllowedCORSOrigins          []string            `json:"allowed_cors_origins" example:"https://app.example.com"`
-	PostLogoutRedirectURIs      []string            `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
-	BackchannelLogoutURI        string              `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
-	SubjectType                 string              `json:"subject_type" example:"public"`
-	JWKS                        *jose.JSONWebKeySet `json:"jwks,omitempty" swaggertype:"object"`
-	JwksURI                     string              `json:"jwks_uri,omitempty" example:"https://app.example.com/.well-known/jwks.json"`
-	IDTokenEncryptedResponseAlg string              `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
-	IDTokenEncryptedResponseEnc string              `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
+	ID                          string                                `json:"client_id" example:"my-web-app"`
+	TenantID                    string                                `json:"tenant_id" binding:"required" example:"default"`
+	Name                        string                                `json:"name" binding:"required" example:"My Frontend Application"`
+	Secret                      string                                `json:"client_secret" example:"super-secure-secret-key"`
+	RedirectURIs                []string                              `json:"redirect_uris" binding:"required" example:"https://app.example.com/callback"`
+	GrantTypes                  []string                              `json:"grant_types" binding:"required" example:"authorization_code,refresh_token"`
+	ResponseTypes               []string                              `json:"response_types" example:"code"`
+	ResponseModes               []string                              `json:"response_modes" example:"query,form_post"`
+	Scopes                      []string                              `json:"scopes" example:"openid,profile,email,offline_access"`
+	Audience                    []string                              `json:"audience" example:"api-service"`
+	Public                      bool                                  `json:"public" example:"false"`
+	TokenEndpointAuthMethod     string                                `json:"token_endpoint_auth_method" example:"client_secret_basic"`
+	EnforcePKCE                 bool                                  `json:"enforce_pkce" example:"true"`
+	AllowedCORSOrigins          []string                              `json:"allowed_cors_origins" example:"https://app.example.com"`
+	PostLogoutRedirectURIs      []string                              `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
+	BackchannelLogoutURI        string                                `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
+	SubjectType                 string                                `json:"subject_type" example:"public"`
+	JWKS                        *jose.JSONWebKeySet                   `json:"jwks,omitempty" swaggertype:"object"`
+	JwksURI                     string                                `json:"jwks_uri,omitempty" example:"https://app.example.com/.well-known/jwks.json"`
+	IDTokenEncryptedResponseAlg string                                `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
+	IDTokenEncryptedResponseEnc string                                `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
+	AttributeMapping            map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
 }
 
 type OAuth2ClientResponse struct {
-	ID                          string              `json:"client_id" example:"my-web-app"`
-	TenantID                    string              `json:"tenant_id" example:"default"`
-	Name                        string              `json:"name" example:"My Frontend Application"`
-	AppID                       string              `json:"app_id" example:"app-xyz123"`
-	Secret                      string              `json:"client_secret,omitempty" example:"super-secure-secret-key"`
-	RedirectURIs                []string            `json:"redirect_uris" example:"https://app.example.com/callback"`
-	GrantTypes                  []string            `json:"grant_types" example:"authorization_code,refresh_token"`
-	ResponseTypes               []string            `json:"response_types" example:"code"`
-	ResponseModes               []string            `json:"response_modes" example:"query,form_post"`
-	Scopes                      []string            `json:"scopes" example:"openid,profile,email,offline_access"`
-	Audience                    []string            `json:"audience" example:"api-service"`
-	Public                      bool                `json:"public" example:"false"`
-	TokenEndpointAuthMethod     string              `json:"token_endpoint_auth_method" example:"client_secret_basic"`
-	EnforcePKCE                 bool                `json:"enforce_pkce" example:"true"`
-	AllowedCORSOrigins          []string            `json:"allowed_cors_origins" example:"https://app.example.com"`
-	PostLogoutRedirectURIs      []string            `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
-	BackchannelLogoutURI        string              `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
-	AccessTokenLifespan         string              `json:"access_token_lifespan,omitempty" example:"1h"`
-	RefreshTokenLifespan        string              `json:"refresh_token_lifespan,omitempty" example:"720h"`
-	IDTokenLifespan             string              `json:"id_token_lifespan,omitempty" example:"1h"`
-	SubjectType                 string              `json:"subject_type" example:"public"`
-	JWKS                        *jose.JSONWebKeySet `json:"jwks,omitempty" swaggertype:"object"`
-	JwksURI                     string              `json:"jwks_uri,omitempty" example:"https://app.example.com/.well-known/jwks.json"`
-	IDTokenEncryptedResponseAlg string              `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
-	IDTokenEncryptedResponseEnc string              `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
-	CreatedAt                   string              `json:"created_at" example:"2026-03-12T15:04:05Z"`
-	UpdatedAt                   string              `json:"updated_at,omitempty" example:"2026-03-12T15:04:05Z"`
+	ID                          string                                `json:"client_id" example:"my-web-app"`
+	TenantID                    string                                `json:"tenant_id" example:"default"`
+	Name                        string                                `json:"name" example:"My Frontend Application"`
+	AppID                       string                                `json:"app_id" example:"app-xyz123"`
+	Secret                      string                                `json:"client_secret,omitempty" example:"super-secure-secret-key"`
+	RedirectURIs                []string                              `json:"redirect_uris" example:"https://app.example.com/callback"`
+	GrantTypes                  []string                              `json:"grant_types" example:"authorization_code,refresh_token"`
+	ResponseTypes               []string                              `json:"response_types" example:"code"`
+	ResponseModes               []string                              `json:"response_modes" example:"query,form_post"`
+	Scopes                      []string                              `json:"scopes" example:"openid,profile,email,offline_access"`
+	Audience                    []string                              `json:"audience" example:"api-service"`
+	Public                      bool                                  `json:"public" example:"false"`
+	TokenEndpointAuthMethod     string                                `json:"token_endpoint_auth_method" example:"client_secret_basic"`
+	EnforcePKCE                 bool                                  `json:"enforce_pkce" example:"true"`
+	AllowedCORSOrigins          []string                              `json:"allowed_cors_origins" example:"https://app.example.com"`
+	PostLogoutRedirectURIs      []string                              `json:"post_logout_redirect_uris" example:"https://app.example.com/logout"`
+	BackchannelLogoutURI        string                                `json:"backchannel_logout_uri" example:"https://api.example.com/backchannel-logout"`
+	AccessTokenLifespan         string                                `json:"access_token_lifespan,omitempty" example:"1h"`
+	RefreshTokenLifespan        string                                `json:"refresh_token_lifespan,omitempty" example:"720h"`
+	IDTokenLifespan             string                                `json:"id_token_lifespan,omitempty" example:"1h"`
+	SubjectType                 string                                `json:"subject_type" example:"public"`
+	JWKS                        *jose.JSONWebKeySet                   `json:"jwks,omitempty" swaggertype:"object"`
+	JwksURI                     string                                `json:"jwks_uri,omitempty" example:"https://app.example.com/.well-known/jwks.json"`
+	IDTokenEncryptedResponseAlg string                                `json:"id_token_encrypted_response_alg,omitempty" example:"RSA-OAEP-256"`
+	IDTokenEncryptedResponseEnc string                                `json:"id_token_encrypted_response_enc,omitempty" example:"A256GCM"`
+	AttributeMapping            map[string]model.AttributeMappingRule `json:"attribute_mapping" swaggertype:"object"`
+	CreatedAt                   string                                `json:"created_at" example:"2026-03-12T15:04:05Z"`
+	UpdatedAt                   string                                `json:"updated_at,omitempty" example:"2026-03-12T15:04:05Z"`
 }
 
 func (req *CreateOAuth2ClientRequest) ToDomain() *model.OAuth2Client {
@@ -82,6 +84,7 @@ func (req *CreateOAuth2ClientRequest) ToDomain() *model.OAuth2Client {
 		JwksURI:                     req.JwksURI,
 		IDTokenEncryptedResponseAlg: req.IDTokenEncryptedResponseAlg,
 		IDTokenEncryptedResponseEnc: req.IDTokenEncryptedResponseEnc,
+		AttributeMapping:            req.AttributeMapping,
 	}
 }
 
@@ -112,6 +115,7 @@ func FromDomainOAuth2Client(c *model.OAuth2Client) *OAuth2ClientResponse {
 		AccessTokenLifespan:         c.AccessTokenLifespan,
 		RefreshTokenLifespan:        c.RefreshTokenLifespan,
 		IDTokenLifespan:             c.IDTokenLifespan,
+		AttributeMapping:            c.AttributeMapping,
 		CreatedAt:                   c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:                   c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

@@ -16,6 +16,7 @@ type SAMLClient struct {
 	SPEncryptionCertificate string                          `json:"-"`
 	MetadataURL             string                          `json:"metadata_url"`
 	AttributeMapping        map[string]AttributeMappingRule `json:"attribute_mapping"`
+	NameIDFormat            string                          `json:"name_id_format,omitempty"`
 	AllowedScopes           []string                        `json:"allowed_scopes"`
 	ForceAuthn              bool                            `json:"force_authn"`
 	SignResponse            bool                            `json:"sign_response"`
@@ -35,6 +36,14 @@ func (c *SAMLClient) Validate() error {
 	}
 	if c.ACSURL == "" {
 		return errors.New("acs_url is required")
+	}
+	for _, rule := range c.AttributeMapping {
+		if rule.NameFormat != "" && !IsValidAttributeNameFormat(rule.NameFormat) {
+			return errors.New("attribute mapping name_format must be a SAML 2.0 attrname-format (uri, basic, or unspecified)")
+		}
+	}
+	if c.NameIDFormat != "" && !IsValidNameIDFormat(c.NameIDFormat) {
+		return errors.New("name_id_format must be a supported SAML 2.0 nameid-format (unspecified, emailAddress, or transient)")
 	}
 	return nil
 }

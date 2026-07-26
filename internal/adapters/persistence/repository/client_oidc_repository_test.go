@@ -56,6 +56,46 @@ func TestOAuth2ClientRepository_CreateAndGetByTenant(t *testing.T) {
 	assert.Equal(t, "oauth2 client not found", err.Error())
 }
 
+func TestOAuth2ClientRepository_AttributeMappingRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := setupOIDCRepoTestDB(t)
+	repo := repository.NewOAuth2ClientRepository(db)
+	ctx := context.Background()
+
+	tenantID := "tnt_oidc_attr"
+	clientID := "client_oidc_attr_123"
+
+	mapping := map[string]model.AttributeMappingRule{
+		"email": {Source: "email", Target: "email", Type: "string"},
+		"roles": {Source: "groups", Target: "roles", Type: "array", TargetScopes: []string{"roles"}},
+	}
+
+	domainClient := &model.OAuth2Client{
+		ID:               clientID,
+		TenantID:         tenantID,
+		Public:           true,
+		AttributeMapping: mapping,
+	}
+
+	// Create round-trip
+	require.NoError(t, repo.Create(ctx, domainClient))
+
+	fetched, err := repo.GetByTenantAndID(ctx, tenantID, clientID)
+	require.NoError(t, err)
+	assert.Equal(t, mapping, fetched.AttributeMapping, "attribute_mapping must round-trip on create")
+
+	// Update round-trip
+	updatedMapping := map[string]model.AttributeMappingRule{
+		"department": {Source: "dept", Target: "department", Type: "string"},
+	}
+	fetched.AttributeMapping = updatedMapping
+	require.NoError(t, repo.Update(ctx, fetched))
+
+	refetched, err := repo.GetByTenantAndID(ctx, tenantID, clientID)
+	require.NoError(t, err)
+	assert.Equal(t, updatedMapping, refetched.AttributeMapping, "attribute_mapping must round-trip on update")
+}
+
 func TestOAuth2ClientRepository_ClientCounts(t *testing.T) {
 	t.Parallel()
 	db := setupOIDCRepoTestDB(t)

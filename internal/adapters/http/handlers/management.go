@@ -388,6 +388,7 @@ func (h *ManagementHandler) CreateClient(c *gin.Context) {
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
 		JSONWebKeys:             req.JWKS,
+		AttributeMapping:        req.AttributeMapping,
 	}
 	_, _, err := h.OAuth2ClientUse.CreateClient(c.Request.Context(), client, req.Secret, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
@@ -523,6 +524,7 @@ func (h *ManagementHandler) UpdateClient(c *gin.Context) {
 		PostLogoutRedirectURIs:  req.PostLogoutRedirectURIs,
 		BackchannelLogoutURI:    req.BackchannelLogoutURI,
 		SubjectType:             req.SubjectType,
+		AttributeMapping:        req.AttributeMapping,
 	}
 
 	// Secret handling (Keep existing if not changed)
@@ -667,6 +669,7 @@ func (h *ManagementHandler) CreateSAMLClient(c *gin.Context) {
 		SPEncryptionCertificate: client.SPEncryptionCertificate,
 		MetadataURL:             client.MetadataURL,
 		AttributeMapping:        client.AttributeMapping,
+		NameIDFormat:            client.NameIDFormat,
 		ForceAuthn:              client.ForceAuthn,
 		SignResponse:            client.SignResponse,
 		SignAssertion:           client.SignAssertion,
@@ -716,6 +719,7 @@ func (h *ManagementHandler) UpdateSAMLClient(c *gin.Context) {
 	client.ACSURL = req.ACSURL
 	client.SPCertificate = req.SPCertificate
 	client.AttributeMapping = req.AttributeMapping
+	client.NameIDFormat = req.NameIDFormat
 	client.ForceAuthn = req.ForceAuthn
 	client.SignResponse = req.SignResponse
 	client.SignAssertion = req.SignAssertion
@@ -862,6 +866,7 @@ func (h *ManagementHandler) CreateSAMLConnection(c *gin.Context) {
 		MetadataURL:              conn.MetadataURL,
 		SPPrivateKey:             conn.SPPrivateKey,
 		AttributeMapping:         conn.AttributeMapping,
+		NameIDFormat:             conn.NameIDFormat,
 		ForceAuthn:               conn.ForceAuthn,
 		SignRequest:              conn.SignRequest,
 		Active:                   true,
@@ -991,6 +996,7 @@ func (h *ManagementHandler) UpdateSAMLConnection(c *gin.Context) {
 		MetadataURL:              req.MetadataURL,
 		SPPrivateKey:             req.SPPrivateKey,
 		AttributeMapping:         req.AttributeMapping,
+		NameIDFormat:             req.NameIDFormat,
 		ForceAuthn:               req.ForceAuthn,
 		SignRequest:              req.SignRequest,
 		Active:                   true,

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- OASIS XML catalog mapping the remote xs:import schemaLocation URIs in the
+     vendored (byte-identical, canonical) SAML schemas to their local siblings,
+     so xmllint resolves the import chain offline. No schema file is edited;
+     provenance stays byte-exact. Both uri and system/rewriteURI forms are
+     provided for resolver robustness. -->
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="system">
+  <uri name="http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd" uri="xmldsig-core-schema.xsd"/>
+  <uri name="http://www.w3.org/TR/2002/REC-xmlenc-core-20021210/xenc-schema.xsd" uri="xenc-schema.xsd"/>
+  <system systemId="http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd" uri="xmldsig-core-schema.xsd"/>
+  <system systemId="http://www.w3.org/TR/2002/REC-xmlenc-core-20021210/xenc-schema.xsd" uri="xenc-schema.xsd"/>
+  <rewriteURI uriStartString="http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/" rewritePrefix="./"/>
+  <rewriteURI uriStartString="http://www.w3.org/TR/2002/REC-xmlenc-core-20021210/" rewritePrefix="./"/>
+</catalog>
+
+
