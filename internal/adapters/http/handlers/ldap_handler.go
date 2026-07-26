@@ -115,7 +115,7 @@ func (h *LDAPHandler) Login(c *gin.Context) {
 	}
 	rawAttrs["dn"] = entry.DN
 
-	finalAttributes, err := h.mapper.Map(rawAttrs, conn.AttributeMapping)
+	finalAttributes, err := h.mapper.MapWithPassthrough(rawAttrs, conn.AttributeMapping, conn.AttributePassthrough, conn.AttributeExclude)
 	if err != nil {
 		logger.FromGin(c).Warn("LDAP attribute mapping failed, using raw attributes",
 			zap.Error(err), zap.String("protocol", "ldap"))

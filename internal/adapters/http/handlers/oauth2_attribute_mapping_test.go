@@ -192,3 +192,76 @@ func TestOIDCE2E_ClientAttributeMapping_ScopeGated(t *testing.T) {
 		assert.Equal(t, "alice", claims["sub"])
 	})
 }
+
+func createOIDCClientWithPolicy(t *testing.T, env *oidcE2EEnv, clientID string, scopes []string,
+	mapping map[string]model.AttributeMappingRule, passthrough bool, exclude []string) {
+	t.Helper()
+	require.NoError(t, env.db.Create(&models.OAuth2ClientGORM{
+		ID:                      clientID,
+		TenantID:                "tenant-a",
+		Name:                    clientID,
+		Public:                  true,
+		EnforcePKCE:             true,
+		TokenEndpointAuthMethod: "none",
+		RedirectURIs:            []string{"http://client.localhost/callback"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		ResponseModes:           []string{"query"},
+		Scopes:                  scopes,
+		AttributeMapping:        mapping,
+		AttributePassthrough:    passthrough,
+		AttributeExclude:        exclude,
+	}).Error)
+}
+
+// TestOIDCE2E_ClientPassthroughAndExclude proves passthrough + exclude at the OIDC
+// CLIENT layer, and — critically — that passthrough does NOT bypass the scope-gate.
+func TestOIDCE2E_ClientPassthroughAndExclude(t *testing.T) {
+	loginPayload := []byte(`{"subject":"alice","remember":true,"remember_for":3600,"context":{"roles":["admin","dev"],"tenant_id":"tenant-a"}}`)
+	mapping := map[string]model.AttributeMappingRule{
+		"nevzat": {Source: "roles", Type: "string_array"},
+	}
+
+	// (e) SCOPE-GATE: passthrough TRUE, but the target "nevzat" is opened by NO
+	// granted scope -> it must NOT appear. Passthrough must not bypass the gate.
+	t.Run("e_passthrough_does_not_bypass_scope_gate", func(t *testing.T) {
+		env := setupOIDCE2EEnv(t)
+		createScope(t, env, "rolesrc", []string{"roles"}) // opens source only
+		createOIDCClientWithPolicy(t, env, "oidc-pt-gated",
+			[]string{"openid", "profile", "rolesrc"}, mapping, true, nil)
+
+		claims := mintIDTokenWithScopes(t, env, "oidc-pt-gated", loginPayload,
+			[]string{"openid", "profile", "rolesrc"}, []string{"openid", "profile", "rolesrc"})
+
+		assert.NotContains(t, claims, "nevzat", "passthrough must NOT bypass the scope-gate")
+	})
+
+	// (b) MOVE at the client site: passthrough TRUE, target opened by scope -> the
+	// mapped target appears AND the source is removed from the token.
+	t.Run("b_client_move_removes_source", func(t *testing.T) {
+		env := setupOIDCE2EEnv(t)
+		createScope(t, env, "rolemap", []string{"roles", "nevzat"}) // opens source + target
+		createOIDCClientWithPolicy(t, env, "oidc-pt-move",
+			[]string{"openid", "profile", "rolemap"}, mapping, true, nil)
+
+		claims := mintIDTokenWithScopes(t, env, "oidc-pt-move", loginPayload,
+			[]string{"openid", "profile", "rolemap"}, []string{"openid", "profile", "rolemap"})
+
+		assert.ElementsMatch(t, []interface{}{"admin", "dev"}, claims["nevzat"], "moved target must be present")
+		assert.NotContains(t, claims, "roles", "source must be REMOVED at the client (move)")
+	})
+
+	// exclude at the client site (passthrough FALSE): a scope-released base claim
+	// listed in exclude is removed from the token.
+	t.Run("client_exclude_removes_base_claim", func(t *testing.T) {
+		env := setupOIDCE2EEnv(t)
+		createScope(t, env, "rolesrc", []string{"roles"})
+		createOIDCClientWithPolicy(t, env, "oidc-excl",
+			[]string{"openid", "profile", "rolesrc"}, map[string]model.AttributeMappingRule{}, false, []string{"roles"})
+
+		claims := mintIDTokenWithScopes(t, env, "oidc-excl", loginPayload,
+			[]string{"openid", "profile", "rolesrc"}, []string{"openid", "profile", "rolesrc"})
+
+		assert.NotContains(t, claims, "roles", "exclude must remove the claim from the token")
+	})
+}

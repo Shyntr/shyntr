@@ -197,7 +197,7 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	finalAttributes, err := h.Mapper.Map(userInfo, conn.AttributeMapping)
+	finalAttributes, err := h.Mapper.MapWithPassthrough(userInfo, conn.AttributeMapping, conn.AttributePassthrough, conn.AttributeExclude)
 	if err != nil {
 		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "oidc"),
 			zap.String("category", "attribute_mapping_failed"),

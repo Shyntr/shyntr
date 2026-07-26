@@ -51,44 +51,62 @@ func NewOAuth2Handler(p *utils2.Provider, km utils2.KeyManager, cfg *config.Conf
 		Mapper: mapper.New()}
 }
 
-// applyClientAttributeMapping applies the OIDC client's attribute_mapping to the
-// scope-filtered claims produced by MapClaims and returns only those mapped
-// targets that a granted scope opens. It mirrors the SAML client mapping
-// (saml.go: h.Mapper.Map) but adds an explicit scope gate:
+// applyClientAttributeMapping applies the OIDC client's attribute-release policy
+// (attribute_mapping + passthrough + exclude) to the scope-filtered claims produced
+// by MapClaims. Unlike the connection/SAML-client sites — which REPLACE their claim
+// set — the OIDC token is assembled by MERGING onto a base that already contains the
+// scope-gated claims (see the Authorize and UserInfo call sites). So instead of a
+// single replacement map this returns a delta:
 //
-//   - Decision 1 (chained source): the mapping reads MapClaims' output as its
-//     input, so a rule source such as "roles" resolves against the scope-filtered
-//     "roles" claim.
-//   - Decision 2 (scope-gated target): a mapped target is emitted only when its
-//     name is in the granted scopes' allowed claim keys, mirroring MapClaims'
-//     deny-by-default posture. Client mapping must never bypass scope control.
+//   - add: claims to set on the token — the mapped targets, each still scope-gated
+//     via AllowedClaimKeys (Decision 2, deny-by-default). Passthrough NEVER bypasses
+//     this gate: the base is already gated and only gated targets are ever added, so
+//     a target no granted scope opens can never reach the token.
+//   - remove: claims to delete from the token — the mapped sources when passthrough
+//     is true (a mapping is a MOVE), plus every exclude entry (a denylist, in both
+//     modes). A rule whose source is empty, equals its own target (transform in
+//     place), or is itself another rule's target is NOT removed.
 //
-// An empty mapping yields nil (no-op): token claims are unchanged. NameFormat is
-// intentionally not applied here; it is SAML-only and Mapper.Map does not touch it.
+// Empty mapping AND empty exclude yields (nil, nil): a true no-op leaving the base
+// untouched — this preserves today's whitelist behaviour when no policy is set.
+// NameFormat is intentionally not applied here; it is SAML-only.
 func (h *OAuth2Handler) applyClientAttributeMapping(c *gin.Context, scopedClaims map[string]interface{},
-	mapping map[string]model.AttributeMappingRule, grantedScopes []*model.Scope) map[string]interface{} {
+	mapping map[string]model.AttributeMappingRule, passthrough bool, exclude []string,
+	grantedScopes []*model.Scope) (map[string]interface{}, []string) {
 
-	if len(mapping) == 0 {
-		return nil
+	if len(mapping) == 0 && len(exclude) == 0 {
+		return nil, nil
 	}
 
 	mapped, err := h.Mapper.Map(scopedClaims, mapping)
 	if err != nil {
 		logger.FromGin(c).Error("OIDC client attribute mapping could not be applied", zap.Error(err))
-		return nil
-	}
-	if len(mapped) == 0 {
-		return nil
+		mapped = nil
 	}
 
 	allowed := utils2.AllowedClaimKeys(grantedScopes)
-	result := make(map[string]interface{}, len(mapped))
+	add := make(map[string]interface{}, len(mapped))
 	for target, value := range mapped {
 		if allowed[target] {
-			result[target] = value
+			add[target] = value
 		}
 	}
-	return result
+
+	var remove []string
+	if passthrough {
+		targets := make(map[string]bool, len(mapping))
+		for targetField := range mapping {
+			targets[targetField] = true
+		}
+		for targetField, rule := range mapping {
+			if rule.Source != "" && rule.Source != targetField && !targets[rule.Source] {
+				remove = append(remove, rule.Source)
+			}
+		}
+	}
+	remove = append(remove, exclude...)
+
+	return add, remove
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -432,11 +450,19 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 			session.JWTClaims.Extra[k] = v
 		}
 
-		// Apply the OIDC client's attribute_mapping to the scope-filtered claims
-		// (chained source) and merge only scope-gated targets (decision 2).
-		for k, v := range h.applyClientAttributeMapping(c, mappedClaims, client.AttributeMapping, scopeEntities) {
+		// Apply the OIDC client's attribute-release policy to the scope-filtered
+		// claims: add scope-gated targets, then remove moved sources (passthrough)
+		// and excluded claims. Removal deletes from the token's claim maps directly
+		// since the base was already merged above.
+		add, remove := h.applyClientAttributeMapping(c, mappedClaims, client.AttributeMapping,
+			client.AttributePassthrough, client.AttributeExclude, scopeEntities)
+		for k, v := range add {
 			session.Claims.Add(k, v)
 			session.JWTClaims.Extra[k] = v
+		}
+		for _, k := range remove {
+			delete(session.Claims.Extra, k)
+			delete(session.JWTClaims.Extra, k)
 		}
 	}
 
@@ -813,8 +839,13 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 	// fosite session client (iam.ExtendedClient) does not carry attribute_mapping,
 	// so the persisted client is loaded to read it.
 	if oidcClient, clientErr := h.OAuth2ClientUse.GetClient(ctx, tenantID, accessRequest.GetClient().GetID()); clientErr == nil {
-		for k, v := range h.applyClientAttributeMapping(c, safeClaims, oidcClient.AttributeMapping, scopeEntities) {
+		add, remove := h.applyClientAttributeMapping(c, safeClaims, oidcClient.AttributeMapping,
+			oidcClient.AttributePassthrough, oidcClient.AttributeExclude, scopeEntities)
+		for k, v := range add {
 			safeClaims[k] = v
+		}
+		for _, k := range remove {
+			delete(safeClaims, k)
 		}
 	} else {
 		logger.FromGin(c).Warn("Could not load client for UserInfo attribute mapping", zap.Error(clientErr))

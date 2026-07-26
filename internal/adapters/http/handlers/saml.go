@@ -329,7 +329,7 @@ func (h *SAMLHandler) ACS(c *gin.Context) {
 		}
 	}
 
-	finalAttributes, err := h.Mapper.Map(rawAttributes, conn.AttributeMapping)
+	finalAttributes, err := h.Mapper.MapWithPassthrough(rawAttributes, conn.AttributeMapping, conn.AttributePassthrough, conn.AttributeExclude)
 	if err != nil {
 		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "saml"))
 		finalAttributes = rawAttributes
@@ -1292,7 +1292,7 @@ func (h *SAMLHandler) resolveOutboundAttributes(c *gin.Context, tenantID string,
 		return secureClaims, true
 	}
 
-	mapped, mapErr := h.Mapper.Map(secureClaims, spClient.AttributeMapping)
+	mapped, mapErr := h.Mapper.MapWithPassthrough(secureClaims, spClient.AttributeMapping, spClient.AttributePassthrough, spClient.AttributeExclude)
 	if mapErr != nil || len(mapped) == 0 {
 		logger.FromGin(c).Error("SAML outbound attribute mapping could not be applied; failing closed",
 			zap.Error(mapErr), zap.String("protocol", "saml"), zap.String("sp_entity_id", spClient.EntityID))

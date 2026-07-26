@@ -42,6 +42,58 @@ func (m *Mapper) Map(input map[string]interface{}, mapping map[string]model.Attr
 	return output, nil
 }
 
+// MapWithPassthrough applies an attribute-mapping policy: the rename/cast rules of
+// Map, plus a passthrough mode and an exclude denylist.
+//
+//   - passthrough == false: only the mapped targets are returned (the current
+//     whitelist behaviour). An empty mapping therefore yields an empty result,
+//     identical to Map today.
+//   - passthrough == true: every input claim is returned, MINUS each rule's source
+//     (a mapping is a MOVE), PLUS the mapped targets. A rule whose source is empty
+//     (a constant Value rule), whose source equals its own target (a transform in
+//     place, not a move), or whose source is itself another rule's target is NOT
+//     removed. An empty mapping therefore yields the input unchanged (minus excludes).
+//   - exclude: every listed claim name is removed from the result in BOTH modes.
+//
+// The returned map is always a fresh copy; the input is never mutated.
+func (m *Mapper) MapWithPassthrough(input map[string]interface{},
+	mapping map[string]model.AttributeMappingRule, passthrough bool, exclude []string) (map[string]interface{}, error) {
+
+	mapped, err := m.Map(input, mapping)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if passthrough {
+		result = make(map[string]interface{}, len(input)+len(mapped))
+		for k, v := range input {
+			result[k] = v
+		}
+		// A source that is itself another rule's target must survive the move.
+		targets := make(map[string]bool, len(mapping))
+		for targetField := range mapping {
+			targets[targetField] = true
+		}
+		for targetField, rule := range mapping {
+			if rule.Source != "" && rule.Source != targetField && !targets[rule.Source] {
+				delete(result, rule.Source)
+			}
+		}
+		for k, v := range mapped {
+			result[k] = v
+		}
+	} else {
+		result = mapped
+	}
+
+	for _, name := range exclude {
+		delete(result, name)
+	}
+
+	return result, nil
+}
+
 func (m *Mapper) getValue(data map[string]interface{}, path string) (interface{}, bool) {
 	if path == "" {
 		return nil, false
