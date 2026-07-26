@@ -12,6 +12,7 @@ import (
 	"github.com/Shyntr/shyntr/config"
 	"github.com/Shyntr/shyntr/internal/adapters/http/payload"
 	"github.com/Shyntr/shyntr/internal/adapters/iam"
+	"github.com/Shyntr/shyntr/internal/application/mapper"
 	"github.com/Shyntr/shyntr/internal/application/usecase"
 	utils2 "github.com/Shyntr/shyntr/internal/application/utils"
 	"github.com/Shyntr/shyntr/internal/domain/model"
@@ -39,13 +40,55 @@ type OAuth2Handler struct {
 	TenantUse        usecase.TenantUseCase
 	ScopeUse         usecase.ScopeUseCase
 	JWKSCache        *utils2.JWKSCache
+	Mapper           *mapper.Mapper
 }
 
 func NewOAuth2Handler(p *utils2.Provider, km utils2.KeyManager, cfg *config.Config, OAuth2ClientUse usecase.OAuth2ClientUseCase,
 	AuthReq usecase.AuthUseCase, OAuth2SessionUse usecase.OAuth2SessionUseCase, OIDCConnUse usecase.OIDCConnectionUseCase,
 	TenantUse usecase.TenantUseCase, ScopeUse usecase.ScopeUseCase, jwksCache *utils2.JWKSCache) *OAuth2Handler {
 	return &OAuth2Handler{Provider: p, KeyMgr: km, Config: cfg, OAuth2ClientUse: OAuth2ClientUse, AuthReq: AuthReq,
-		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse, ScopeUse: ScopeUse, JWKSCache: jwksCache}
+		OAuth2SessionUse: OAuth2SessionUse, TenantUse: TenantUse, OIDCConnUse: OIDCConnUse, ScopeUse: ScopeUse, JWKSCache: jwksCache,
+		Mapper: mapper.New()}
+}
+
+// applyClientAttributeMapping applies the OIDC client's attribute_mapping to the
+// scope-filtered claims produced by MapClaims and returns only those mapped
+// targets that a granted scope opens. It mirrors the SAML client mapping
+// (saml.go: h.Mapper.Map) but adds an explicit scope gate:
+//
+//   - Decision 1 (chained source): the mapping reads MapClaims' output as its
+//     input, so a rule source such as "roles" resolves against the scope-filtered
+//     "roles" claim.
+//   - Decision 2 (scope-gated target): a mapped target is emitted only when its
+//     name is in the granted scopes' allowed claim keys, mirroring MapClaims'
+//     deny-by-default posture. Client mapping must never bypass scope control.
+//
+// An empty mapping yields nil (no-op): token claims are unchanged. NameFormat is
+// intentionally not applied here; it is SAML-only and Mapper.Map does not touch it.
+func (h *OAuth2Handler) applyClientAttributeMapping(c *gin.Context, scopedClaims map[string]interface{},
+	mapping map[string]model.AttributeMappingRule, grantedScopes []*model.Scope) map[string]interface{} {
+
+	if len(mapping) == 0 {
+		return nil
+	}
+
+	mapped, err := h.Mapper.Map(scopedClaims, mapping)
+	if err != nil {
+		logger.FromGin(c).Error("OIDC client attribute mapping could not be applied", zap.Error(err))
+		return nil
+	}
+	if len(mapped) == 0 {
+		return nil
+	}
+
+	allowed := utils2.AllowedClaimKeys(grantedScopes)
+	result := make(map[string]interface{}, len(mapped))
+	for target, value := range mapped {
+		if allowed[target] {
+			result[target] = value
+		}
+	}
+	return result
 }
 
 func getEffectiveLifespan(clientVal, globalVal string, fallback time.Duration) time.Duration {
@@ -385,6 +428,13 @@ func (h *OAuth2Handler) Authorize(c *gin.Context) {
 
 		mappedClaims := utils2.MapClaims(userID, userContext, scopeEntities)
 		for k, v := range mappedClaims {
+			session.Claims.Add(k, v)
+			session.JWTClaims.Extra[k] = v
+		}
+
+		// Apply the OIDC client's attribute_mapping to the scope-filtered claims
+		// (chained source) and merge only scope-gated targets (decision 2).
+		for k, v := range h.applyClientAttributeMapping(c, mappedClaims, client.AttributeMapping, scopeEntities) {
 			session.Claims.Add(k, v)
 			session.JWTClaims.Extra[k] = v
 		}
@@ -756,6 +806,18 @@ func (h *OAuth2Handler) UserInfo(c *gin.Context) {
 			}
 			safeClaims[k] = v
 		}
+	}
+
+	// Apply the OIDC client's attribute_mapping to the scope-filtered UserInfo
+	// claims (chained source), merging only scope-gated targets (decision 2). The
+	// fosite session client (iam.ExtendedClient) does not carry attribute_mapping,
+	// so the persisted client is loaded to read it.
+	if oidcClient, clientErr := h.OAuth2ClientUse.GetClient(ctx, tenantID, accessRequest.GetClient().GetID()); clientErr == nil {
+		for k, v := range h.applyClientAttributeMapping(c, safeClaims, oidcClient.AttributeMapping, scopeEntities) {
+			safeClaims[k] = v
+		}
+	} else {
+		logger.FromGin(c).Warn("Could not load client for UserInfo attribute mapping", zap.Error(clientErr))
 	}
 
 	client, isExtended := accessRequest.GetClient().(*iam.ExtendedClient)

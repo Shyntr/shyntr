@@ -12,19 +12,18 @@ var scopeToClaims = map[string][]string{
 	"roles":   {"roles"},
 }
 
-// MapClaims filters the raw context map based on requested scopes and tenant context.
-func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes []*model.Scope) map[string]interface{} {
-	finalClaims := make(map[string]interface{})
-	finalClaims["sub"] = subject
-
+// AllowedClaimKeys returns the set of claim names the granted scopes permit to be
+// released. It is the single source of truth for scope gating: MapClaims uses it
+// to filter the raw context, and OIDC client attribute-mapping targets are gated
+// against the same set (deny-by-default) so a mapped target that no granted scope
+// opens can never reach a token.
+func AllowedClaimKeys(grantedScopes []*model.Scope) map[string]bool {
 	allowedKeys := make(map[string]bool)
 
 	allowedKeys["tenant_id"] = true
 	allowedKeys["idp"] = true
 	allowedKeys["amr"] = true
 	allowedKeys["acr"] = true
-	//allowedKeys["groups"] = true
-	//allowedKeys["roles"] = true
 
 	for _, scope := range grantedScopes {
 		for _, claim := range scope.Claims {
@@ -38,6 +37,16 @@ func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes 
 			allowedKeys[claim] = true
 		}
 	}
+
+	return allowedKeys
+}
+
+// MapClaims filters the raw context map based on requested scopes and tenant context.
+func MapClaims(subject string, contextMap map[string]interface{}, grantedScopes []*model.Scope) map[string]interface{} {
+	finalClaims := make(map[string]interface{})
+	finalClaims["sub"] = subject
+
+	allowedKeys := AllowedClaimKeys(grantedScopes)
 
 	for key, value := range contextMap {
 		if key == "login_claims" {
