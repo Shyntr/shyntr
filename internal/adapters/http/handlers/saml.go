@@ -652,7 +652,8 @@ func (h *SAMLHandler) IDPSSO(c *gin.Context) {
 			delete(finalAttrs, "sub")
 		}
 
-		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
+		genCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginReq.ID, c.GetString("trace_id"))
+		htmlForm, err := h.samlBuilderUseCase.GenerateSAMLResponse(genCtx, tenantID, authReq, spClient, finalAttrs, relayState)
 		if err != nil {
 			logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err))
 			payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
@@ -966,7 +967,8 @@ func (h *SAMLHandler) ResumeSAML(c *gin.Context) {
 		delete(finalAttrs, "sub")
 	}
 
-	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(c.Request.Context(), tenantID, authReq, spClient, finalAttrs, relayState)
+	genCtx := usecase.WithSAMLCorrelation(c.Request.Context(), loginChallenge, c.GetString("trace_id"))
+	htmlResponse, err := h.samlBuilderUseCase.GenerateSAMLResponse(genCtx, tenantID, authReq, spClient, finalAttrs, relayState)
 	if err != nil {
 		logger.FromGin(c).Error("Failed to generate SAML Response", zap.Error(err), zap.String("protocol", "saml"))
 		payload.AbortWithSAMLError(c, http.StatusInternalServerError, "server_error", "The SAML response could not be generated.", err)
@@ -1046,7 +1048,14 @@ func (h *SAMLHandler) SPSLO(c *gin.Context) {
 		}
 		if logoutReq.NameID != nil && logoutReq.NameID.Value != "" {
 			subject := logoutReq.NameID.Value
-			_ = h.OAuthSessionUse.Delete(c.Request.Context(), subject)
+			// Surface, as a safe category, an error that was previously swallowed.
+			// Behaviour is unchanged: the flow still proceeds regardless (fail-open
+			// here is T2-12, deferred) — only the logging now names the cause.
+			if delErr := h.OAuthSessionUse.Delete(c.Request.Context(), subject); delErr != nil {
+				logger.FromGin(c).Warn("Local session deletion during SLO did not complete",
+					zap.String("category", "slo_session_delete_failed"),
+					zap.String("subject_sha256", hashForLog(subject)))
+			}
 			logger.FromGin(c).Info("IdP-Initiated SLO successful, local sessions destroyed", zap.String("subject_sha256", hashForLog(subject)))
 		}
 		sp, err := h.samlBuilderUseCase.BuildServiceProvider(c.Request.Context(), tenantID, conn)

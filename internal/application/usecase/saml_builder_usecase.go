@@ -34,6 +34,7 @@ import (
 	crewjamsaml "github.com/crewjam/saml"
 	"github.com/google/uuid"
 	goxmldsig "github.com/russellhaering/goxmldsig"
+	"go.uber.org/zap"
 )
 
 type SamlBuilderUseCase interface {
@@ -264,6 +265,16 @@ func (s *samlBuilderUseCase) InitiateSSO(ctx context.Context, tenantID, connecti
 		return "", "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
+	samlFlowLogger(ctx).Info("SAML outbound AuthnRequest prepared",
+		zap.String("event", "saml.sso.initiate"),
+		zap.String("message_type", "AuthnRequest"),
+		zap.String("idp_entity_id", conn.IdpEntityID),
+		zap.String("binding", string(binding)),
+		zap.String("tenant_id", tenantID),
+		zap.String("authn_request_id_prefix", logShortID(req.ID, 16)),
+		zap.String("outcome", "issued"),
+	)
+
 	if binding == crewjamsaml.HTTPRedirectBinding {
 		redirectURL, err := req.Redirect(relayState, sp)
 		if err != nil {
@@ -372,12 +383,36 @@ func (s *samlBuilderUseCase) HandleACS(ctx context.Context, tenantID string, req
 		// (attacker-controlled values, raw response XML). Surface only a stable,
 		// document-independent category — never %w the raw error, so it cannot
 		// propagate to a log or the client through the error chain.
+		samlFlowLogger(ctx).Warn("SAML inbound Response rejected",
+			zap.String("event", "saml.acs.rejected"),
+			zap.String("message_type", "Response"),
+			zap.String("idp_entity_id", issuer),
+			zap.String("category", classifyACSValidationError(err)),
+			zap.String("outcome", "rejected"),
+		)
 		return nil, "", fmt.Errorf("saml acs validation failed [%s]", classifyACSValidationError(err))
 	}
 
 	if err := s.replayRepo.CheckAndSaveMessageID(ctx, assertion.ID, tenantID, 1*time.Hour); err != nil {
+		samlFlowLogger(ctx).Warn("SAML assertion replay detected",
+			zap.String("event", "saml.acs.replay"),
+			zap.String("idp_entity_id", issuer),
+			zap.String("replay_result", "hit"),
+			zap.String("assertion_id_sha256", logHashID(assertion.ID)),
+			zap.String("outcome", "rejected"),
+		)
 		return nil, "", fmt.Errorf("security alert (replay detected): %w", err)
 	}
+
+	samlFlowLogger(ctx).Info("SAML inbound Response verified",
+		zap.String("event", "saml.acs.verified"),
+		zap.String("message_type", "Response"),
+		zap.String("idp_entity_id", issuer),
+		zap.String("signature_status", "valid"),
+		zap.String("replay_result", "miss"),
+		zap.String("assertion_id_sha256", logHashID(assertion.ID)),
+		zap.String("outcome", "accepted"),
+	)
 
 	relayState := req.FormValue("RelayState")
 	return assertion, relayState, nil
@@ -533,6 +568,16 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 	}
 
 	if err := s.replayRepo.CheckAndSaveMessageID(ctx, authReq.ID, tenantID, 15*time.Minute); err != nil {
+		// No login_challenge exists yet at AuthnRequest ingestion (it is minted
+		// after parsing), so this line correlates only by trace_id/tenant.
+		samlFlowLogger(ctx).Warn("SAML AuthnRequest replay detected",
+			zap.String("event", "saml.sso.replay"),
+			zap.String("message_type", "AuthnRequest"),
+			zap.String("tenant_id", tenantID),
+			zap.String("replay_result", "hit"),
+			zap.String("authn_request_id_sha256", logHashID(authReq.ID)),
+			zap.String("outcome", "rejected"),
+		)
 		return nil, fmt.Errorf("security alert (replay detected): %w", err)
 	}
 
@@ -882,6 +927,35 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 	if err != nil {
 		return "", err
 	}
+
+	// Attribute NAMES only (never values), for operator visibility into what the
+	// issued assertion carried.
+	var attrNames []string
+	if assertion != nil && len(assertion.AttributeStatements) > 0 {
+		for _, a := range assertion.AttributeStatements[0].Attributes {
+			attrNames = append(attrNames, a.Name)
+		}
+	}
+	outcome := "status_response"
+	if assertion != nil {
+		outcome = "issued"
+	}
+	sigStatus := "unsigned"
+	sigAlg := ""
+	if sp.SignResponse {
+		sigStatus = "signed"
+		sigAlg = "rsa-sha256"
+	}
+	samlFlowLogger(ctx).Info("SAML Response issued",
+		zap.String("event", "saml.response.issued"),
+		zap.String("message_type", "Response"),
+		zap.String("sp_entity_id", sp.EntityID),
+		zap.String("nameid_format", nameIDFormat),
+		zap.String("signature_status", sigStatus),
+		zap.String("signature_alg", sigAlg),
+		zap.Strings("attribute_names", attrNames),
+		zap.String("outcome", outcome),
+	)
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil

@@ -90,7 +90,8 @@ func (h *OIDCHandler) Login(c *gin.Context) {
 
 	redirectURL, providerCtx, err := h.clientUseCase.InitiateAuth(c.Request.Context(), tenantID, connectionID, state, csrfToken)
 	if err != nil {
-		logger.FromGin(c).Error("Failed to initiate OIDC", zap.Error(err), zap.String("protocol", "oidc"))
+		logger.FromGin(c).Error("Failed to initiate OIDC", zap.Error(err), zap.String("protocol", "oidc"),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)))
 		payload.WriteOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to initiate login with the external OIDC provider.", err)
 		return
 	}
@@ -184,7 +185,8 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	userInfo, err := h.clientUseCase.ExchangeAndUserInfo(c.Request.Context(), tenantID, code, connectionID, codeVerifier, expectedNonce)
 	if err != nil {
-		logger.FromGin(c).Error("OIDC Exchange Failed", zap.Error(err), zap.String("protocol", "oidc"))
+		logger.FromGin(c).Error("OIDC Exchange Failed", zap.Error(err), zap.String("protocol", "oidc"),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)))
 		payload.AbortWithOIDCError(c, http.StatusForbidden, "invalid_grant", "The authorization code could not be exchanged with the external OIDC provider.", err)
 		return
 	}
@@ -197,7 +199,9 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 
 	finalAttributes, err := h.Mapper.Map(userInfo, conn.AttributeMapping)
 	if err != nil {
-		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "oidc"))
+		logger.FromGin(c).Warn("Attribute mapping failed, falling back to raw", zap.Error(err), zap.String("protocol", "oidc"),
+			zap.String("category", "attribute_mapping_failed"),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)))
 		finalAttributes = userInfo
 	}
 
@@ -231,7 +235,8 @@ func (h *OIDCHandler) Callback(c *gin.Context) {
 	existingCtx["login_claims"] = finalAttributes
 	loginReq, err = h.AuthUse.CompleteProviderLogin(c.Request.Context(), loginChallenge, subject, conn.Name, "oidc", existingCtx, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"))
+		logger.FromGin(c).Error("Failed to update login request", zap.Error(err), zap.String("protocol", "oidc"),
+			zap.String("login_challenge_prefix", shortForLog(loginChallenge, 12)))
 		payload.AbortWithOIDCError(c, http.StatusInternalServerError, "server_error", "Failed to complete the external OIDC login and resume the original authentication flow.", err)
 		return
 	}
