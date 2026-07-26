@@ -78,6 +78,25 @@ func samlFlowLogger(ctx context.Context) *zap.Logger {
 	return log
 }
 
+// logWireMessageBody logs a raw on-the-wire SAML message body at Debug, gated by
+// SAML_DEBUG_LOG_MESSAGE_BODIES (default false; nil-Config safe). The caller MUST
+// pass the wire form — the bytes as received or sent, BEFORE any decryption — so
+// the body may carry the (public) signature and certificate and an
+// EncryptedAssertion as ciphertext, but never decrypted plaintext, a private key,
+// or a secret. Every emitted line is marked UNSAFE_DEBUG and correlated like the
+// structured flow logs.
+func (s *samlBuilderUseCase) logWireMessageBody(ctx context.Context, messageType string, wireBody []byte) {
+	if s.Config == nil || !s.Config.SAMLDebugLogMessageBodies {
+		return
+	}
+	samlFlowLogger(ctx).Debug("SAML raw message body (debug)",
+		zap.String("event", "saml.debug.message_body"),
+		zap.String("message_type", messageType),
+		zap.String("UNSAFE_DEBUG", "raw message body logged; disable in production"),
+		zap.String("message_body", string(wireBody)),
+	)
+}
+
 // logShortID returns a bounded prefix of an identifier for correlation logging.
 // It mirrors the handler-side shortForLog: a prefix, never the full value.
 func logShortID(value string, max int) string {

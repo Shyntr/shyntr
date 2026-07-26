@@ -302,6 +302,10 @@ func (s *samlBuilderUseCase) HandleACS(ctx context.Context, tenantID string, req
 		return nil, "", fmt.Errorf("invalid base64: %w", err)
 	}
 
+	// On-the-wire inbound Response, logged BEFORE any signature verification or
+	// EncryptedAssertion decryption. An EncryptedAssertion remains ciphertext here.
+	s.logWireMessageBody(ctx, "Response", decodedResponse)
+
 	var tempResponse struct {
 		Issuer struct {
 			Value string `xml:",chardata"`
@@ -561,6 +565,10 @@ func (s *samlBuilderUseCase) ParseAuthnRequest(ctx context.Context, tenantID str
 	} else {
 		xmlBytes = decoded
 	}
+
+	// On-the-wire inbound AuthnRequest (decoded/inflated), logged before use.
+	// AuthnRequests are not encrypted; this carries no secret material.
+	s.logWireMessageBody(ctx, "AuthnRequest", xmlBytes)
 
 	var authReq crewjamsaml.AuthnRequest
 	if err := xml.Unmarshal(xmlBytes, &authReq); err != nil {
@@ -956,6 +964,10 @@ func (s *samlBuilderUseCase) GenerateSAMLResponse(ctx context.Context, tenantID 
 		zap.Strings("attribute_names", attrNames),
 		zap.String("outcome", outcome),
 	)
+
+	// On-the-wire issued Response, exactly as sent (signed; any EncryptedAssertion
+	// is already ciphertext). Never contains the IdP private key.
+	s.logWireMessageBody(ctx, "Response", finalXMLBytes)
 
 	b64Resp := base64.StdEncoding.EncodeToString(finalXMLBytes)
 	return buildHTMLForm(authReq.AssertionConsumerServiceURL, b64Resp, relayState), nil
